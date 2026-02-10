@@ -1,0 +1,44 @@
+[project]
+name = "meinrag"
+version = "0.1.0"
+description = "RAG backend with FastAPI and LangChain"
+requires-python = ">=3.12"
+dependencies = [
+    # Web framework
+    "fastapi[standard]>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "python-multipart>=0.0.9",
+
+    # Configuration
+    "pydantic-settings>=2.5.0",
+
+    # LangChain core
+    "langchain>=0.3.0",
+    "langchain-core>=0.3.0",
+    "langchain-community>=0.3.0",
+    "langchain-text-splitters>=0.3.0",
+
+    # LLM providers
+    "langchain-openai>=0.3.0",
+
+    # Vector stores
+    "langchain-chroma>=1.0.0",
+    "faiss-cpu>=1.9.0",
+    "rank-bm25>=0.2.2",
+
+    # Document loaders
+    "pypdf>=4.0.0",
+    "python-docx>=1.1.0",
+    "openpyxl>=3.1.0",
+    "python-pptx>=1.0.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=5.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "httpx>=0.27.0",
+    "fpdf2>=2.8.5",
+]
