@@ -64,18 +64,15 @@ class FAISSStoreManager(VectorStoreManager):
         return self._store.as_retriever(**kwargs)
 
     def similarity_search_with_filter(
-        self, query: str, k: int, doc_ids: list[str] | None = None, collection: str | None = None
+        self, query: str, k: int, doc_ids: list[str] | None = None,
     ) -> list[Document]:
         if self._store is None:
             return []
-        # Over-fetch then post-filter by collection AND/OR doc_ids
+        # Over-fetch then post-filter by doc_ids
         candidates = self._store.similarity_search(query, k=k * 5)
-        filtered = candidates
-        if collection:
-            filtered = [d for d in filtered if d.metadata.get("collection") == collection]
         if doc_ids:
-            filtered = [d for d in filtered if d.metadata.get("doc_id") in doc_ids]
-        return filtered[:k]
+            candidates = [d for d in candidates if d.metadata.get("doc_id") in doc_ids]
+        return candidates[:k]
 
     def get_all_documents(self) -> list[Document]:
         if self._store is None:
@@ -85,3 +82,18 @@ class FAISSStoreManager(VectorStoreManager):
     def persist(self) -> None:
         if self._store is not None:
             self._store.save_local(str(self._persist_dir), index_name="index")
+
+    def update_document_metadata(self, doc_id: str, metadata_updates: dict) -> None:
+        """Update metadata on all chunks — FAISS requires rebuild."""
+        if self._store is None:
+            return
+        all_docs = []
+        for doc_store_id in list(self._store.docstore._dict.keys()):
+            doc = self._store.docstore._dict[doc_store_id]
+            if doc.metadata.get("doc_id") == doc_id:
+                doc.metadata.update(metadata_updates)
+            all_docs.append(doc)
+
+        if all_docs:
+            self._store = FAISS.from_documents(all_docs, self._embeddings)
+            self.persist()

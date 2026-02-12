@@ -37,17 +37,11 @@ class ChromaStoreManager(VectorStoreManager):
         return self._store.as_retriever(**kwargs)
 
     def similarity_search_with_filter(
-        self, query: str, k: int, doc_ids: list[str] | None = None, collection: str | None = None
+        self, query: str, k: int, doc_ids: list[str] | None = None,
     ) -> list[Document]:
         where = None
-        if doc_ids and collection:
-            # Both filters: combine with $and
-            where = {"$and": [{"doc_id": {"$in": doc_ids}}, {"collection": collection}]}
-        elif doc_ids:
+        if doc_ids:
             where = {"doc_id": {"$in": doc_ids}}
-        elif collection:
-            where = {"collection": collection}
-
         return self._store.similarity_search(query, k=k, filter=where)
 
     def get_all_documents(self) -> list[Document]:
@@ -59,3 +53,19 @@ class ChromaStoreManager(VectorStoreManager):
 
     def persist(self) -> None:
         pass  # Chroma auto-persists with persist_directory
+
+    def update_document_metadata(self, doc_id: str, metadata_updates: dict) -> None:
+        """Update metadata on all chunks belonging to a document via ChromaDB's update()."""
+        results = self._store.get(where={"doc_id": doc_id}, include=["metadatas"])
+        if not results or not results["ids"]:
+            return
+        # Build updated metadata list
+        updated_metadatas = []
+        for meta in results["metadatas"]:
+            new_meta = {**meta, **metadata_updates}
+            updated_metadatas.append(new_meta)
+        # ChromaDB collection.update() for metadata-only changes
+        self._store._collection.update(
+            ids=results["ids"],
+            metadatas=updated_metadatas,
+        )

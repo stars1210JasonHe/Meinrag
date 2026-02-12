@@ -1,8 +1,10 @@
-from fastapi import Request
+from collections.abc import AsyncGenerator
+
+from fastapi import Depends, Header, Request
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.models.document import DocumentRegistry
-from app.rag.memory import SessionMemoryManager
+from app.db.repositories import DocumentRepository, UserRepository, ChatSessionRepository
 from app.vectorstore.base import VectorStoreManager
 from langchain_core.language_models import BaseChatModel
 from langchain_core.embeddings import Embeddings
@@ -24,9 +26,44 @@ def get_embeddings(request: Request) -> Embeddings:
     return request.app.state.embeddings
 
 
-def get_registry(request: Request) -> DocumentRegistry:
-    return request.app.state.registry
+async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
+    """Yield a request-scoped database session with auto commit/rollback."""
+    session_factory = request.app.state.db_session_factory
+    async with session_factory() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
 
-def get_memory_manager(request: Request) -> SessionMemoryManager:
-    return request.app.state.memory_manager
+async def get_registry(db: AsyncSession = Depends(get_db)) -> DocumentRepository:
+    return DocumentRepository(db)
+
+
+async def get_memory_manager(
+    settings: Settings = Depends(get_settings),
+    db: AsyncSession = Depends(get_db),
+) -> ChatSessionRepository:
+    return ChatSessionRepository(
+        db,
+        max_messages=settings.memory_max_messages,
+        session_ttl=settings.memory_session_ttl,
+    )
+
+
+async def get_user_registry(db: AsyncSession = Depends(get_db)) -> UserRepository:
+    return UserRepository(db)
+
+
+async def get_current_user(
+    settings: Settings = Depends(get_settings),
+    user_registry: UserRepository = Depends(get_user_registry),
+    x_user_id: str | None = Header(default=None),
+) -> str:
+    """Resolve current user from X-User-Id header, fallback to default.
+    Auto-creates user if they don't exist yet."""
+    user_id = x_user_id if x_user_id else settings.default_user
+    await user_registry.ensure_exists(user_id, user_id.capitalize())
+    return user_id

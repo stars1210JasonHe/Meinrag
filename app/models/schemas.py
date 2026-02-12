@@ -12,8 +12,9 @@ class UploadResponse(BaseModel):
     doc_id: str
     filename: str
     chunk_count: int
-    collection: str | None = None
-    suggested_collection: str | None = None
+    collections: list[str] = Field(default_factory=list)
+    suggested_collections: list[str] | None = None
+    user_id: str | None = None
     message: str
 
 
@@ -22,7 +23,8 @@ class DocumentInfo(BaseModel):
     filename: str
     file_type: str
     chunk_count: int
-    collection: str | None = None
+    collections: list[str] = Field(default_factory=list)
+    user_id: str | None = None
     uploaded_at: str
 
 
@@ -33,6 +35,16 @@ class DocumentListResponse(BaseModel):
 
 class DeleteResponse(BaseModel):
     doc_id: str
+    message: str
+
+
+class DocumentUpdateRequest(BaseModel):
+    collections: list[str] = Field(..., min_length=1)
+
+
+class DocumentUpdateResponse(BaseModel):
+    doc_id: str
+    collections: list[str]
     message: str
 
 
@@ -48,6 +60,7 @@ class SourceChunk(BaseModel):
     content: str
     source_file: str
     chunk_index: int | None = None
+    doc_id: str | None = None
 
 
 class QueryResponse(BaseModel):
@@ -55,3 +68,19 @@ class QueryResponse(BaseModel):
     sources: list[SourceChunk]
     question: str
     session_id: str | None = None
+
+
+class UserInfo(BaseModel):
+    user_id: str
+    display_name: str
+    created_at: str
+
+
+class UserCreateRequest(BaseModel):
+    user_id: str = Field(..., min_length=1, max_length=50, pattern=r"^[a-zA-Z0-9_-]+$")
+    display_name: str = Field(..., min_length=1, max_length=100)
+
+
+class CollectionsResponse(BaseModel):
+    taxonomy_categories: list[str]
+    existing_collections: list[str]

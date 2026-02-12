@@ -36,7 +36,7 @@ Test suite created: `test_chatbot.py`
 User wants to organize documents by **collection/category** (like folders):
 - Upload: `POST /documents/upload?collection=law` (manual)
 - Upload: `POST /documents/upload?auto_suggest=true` (AI suggests collection)
-- List: `GET /documents?collection=law`
+- List: `GET /documents?collection=law` : ar
 - Query: `POST /query` with `{"collection": "law"}`
 - Query without collection: searches ALL documents
 

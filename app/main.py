@@ -7,9 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
+from app.db.models import Base
+from app.db.session import create_engine_and_session
+from app.db.repositories import UserRepository
 from app.llm.provider import create_chat_model, create_embeddings
-from app.models.document import DocumentRegistry
-from app.rag.memory import SessionMemoryManager
 from app.vectorstore.factory import create_vector_store_manager
 
 logger = logging.getLogger("meinrag")
@@ -33,54 +34,69 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     setup_logging(settings.log_level)
 
-    # Ensure directories exist
+    # Ensure directories exist (for uploaded files and vectorstore)
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
     settings.vectorstore_dir.mkdir(parents=True, exist_ok=True)
-    settings.metadata_file.parent.mkdir(parents=True, exist_ok=True)
 
-    # Initialize components
+    # Database setup
+    engine, session_factory = create_engine_and_session(
+        settings.database_url,
+        echo=(settings.log_level == "debug"),
+    )
+
+    # Auto-create tables for fresh installs
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    # Ensure default user exists
+    async with session_factory() as session:
+        user_repo = UserRepository(session)
+        if not await user_repo.exists(settings.default_user):
+            await user_repo.add(settings.default_user, settings.default_user.capitalize())
+        await session.commit()
+
+    # Initialize non-DB components
     embeddings = create_embeddings(settings)
     vector_store = create_vector_store_manager(settings)
     vector_store.initialize(embeddings)
     llm = create_chat_model(settings)
-    registry = DocumentRegistry(settings.metadata_file)
-
-    # Chat memory
-    memory_manager = SessionMemoryManager(
-        max_messages=settings.memory_max_messages,
-        session_ttl=settings.memory_session_ttl,
-    )
 
     # Store in app.state for dependency injection
     app.state.settings = settings
+    app.state.db_engine = engine
+    app.state.db_session_factory = session_factory
     app.state.vector_store = vector_store
     app.state.llm = llm
     app.state.embeddings = embeddings
-    app.state.registry = registry
-    app.state.memory_manager = memory_manager
 
     logger.info(
         f"MEINRAG started | LLM={settings.llm_provider.value} "
         f"| VectorStore={settings.vector_store.value} "
-        f"| Documents={registry.count()}"
+        f"| DB=PostgreSQL "
+        f"| Isolation={settings.user_isolation}"
     )
     yield
     # Cleanup
     vector_store.persist()
+    await engine.dispose()
     logger.info("MEINRAG shutdown")
 
 
 def create_app() -> FastAPI:
+    settings = get_settings()
+
     app = FastAPI(
         title="MEINRAG",
         description="RAG backend API — upload documents and ask questions",
-        version="0.1.0",
+        version="0.3.0",
         lifespan=lifespan,
     )
 
+    # Parse CORS origins from env (comma-separated)
+    origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -94,8 +110,9 @@ def create_app() -> FastAPI:
             content={"detail": "Internal server error. Check server logs."},
         )
 
-    from app.routers import documents, query, health
+    from app.routers import documents, query, health, users
     app.include_router(health.router, tags=["Health"])
+    app.include_router(users.router, prefix="/users", tags=["Users"])
     app.include_router(documents.router, prefix="/documents", tags=["Documents"])
     app.include_router(query.router, tags=["Query"])
 

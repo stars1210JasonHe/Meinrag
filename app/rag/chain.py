@@ -26,13 +26,12 @@ def format_docs(docs: list[Document]) -> str:
 def _build_filtered_retriever(
     vector_store: VectorStoreManager,
     doc_ids: list[str] | None,
-    collection: str | None,
     top_k: int,
 ) -> RunnableLambda:
-    """Retriever that filters results by document IDs and/or collection."""
+    """Retriever that filters results by document IDs."""
 
     def _search(query: str) -> list[Document]:
-        return vector_store.similarity_search_with_filter(query, k=top_k, doc_ids=doc_ids, collection=collection)
+        return vector_store.similarity_search_with_filter(query, k=top_k, doc_ids=doc_ids)
 
     return RunnableLambda(_search)
 
@@ -42,15 +41,12 @@ def _build_hybrid_retriever(
     top_k: int,
     bm25_weight: float,
     doc_ids: list[str] | None = None,
-    collection: str | None = None,
 ) -> RunnableLambda:
     """EnsembleRetriever combining vector similarity + BM25 via RRF."""
     from langchain.retrievers import EnsembleRetriever
     from langchain_community.retrievers import BM25Retriever
 
     all_docs = vector_store.get_all_documents()
-    if collection:
-        all_docs = [d for d in all_docs if d.metadata.get("collection") == collection]
     if doc_ids:
         all_docs = [d for d in all_docs if d.metadata.get("doc_id") in doc_ids]
 
@@ -59,8 +55,8 @@ def _build_hybrid_retriever(
 
     bm25_retriever = BM25Retriever.from_documents(all_docs, k=top_k)
 
-    if doc_ids or collection:
-        vector_retriever = _build_filtered_retriever(vector_store, doc_ids, collection, top_k)
+    if doc_ids:
+        vector_retriever = _build_filtered_retriever(vector_store, doc_ids, top_k)
     else:
         vector_retriever = vector_store.as_retriever(
             search_type="similarity", search_kwargs={"k": top_k}
@@ -105,14 +101,13 @@ def build_rag_chain(
     llm: BaseChatModel,
     top_k: int = 4,
     doc_ids: list[str] | None = None,
-    collection: str | None = None,
     chat_history: list[BaseMessage] | None = None,
     settings: Settings | None = None,
 ):
     """Build a LangChain RAG chain using LCEL.
 
-    Supports optional document filtering, collection filtering, hybrid search,
-    re-ranking, and chat-aware prompting. All features are backwards-compatible.
+    Supports optional document filtering, hybrid search, re-ranking,
+    and chat-aware prompting. All features are backwards-compatible.
     """
     # Determine effective fetch count (over-fetch if re-ranking)
     rerank_enabled = settings.rerank_enabled if settings else False
@@ -125,10 +120,10 @@ def build_rag_chain(
     # Step 1: Build base retriever
     if hybrid_enabled:
         retriever = _build_hybrid_retriever(
-            vector_store, fetch_k, bm25_weight, doc_ids, collection
+            vector_store, fetch_k, bm25_weight, doc_ids
         )
-    elif doc_ids or collection:
-        retriever = _build_filtered_retriever(vector_store, doc_ids, collection, fetch_k)
+    elif doc_ids:
+        retriever = _build_filtered_retriever(vector_store, doc_ids, fetch_k)
     else:
         retriever = vector_store.as_retriever(
             search_type="similarity", search_kwargs={"k": fetch_k}

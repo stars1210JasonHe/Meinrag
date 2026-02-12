@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import Literal
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -37,8 +38,6 @@ class Settings(BaseSettings):
     # Paths
     upload_dir: Path = Path("data/uploads")
     vectorstore_dir: Path = Path("data/vectorstore")
-    metadata_file: Path = Path("data/metadata.json")
-
     # Chunking
     chunk_size: int = 1000
     chunk_overlap: int = 200
@@ -57,6 +56,19 @@ class Settings(BaseSettings):
     # Chat memory
     memory_max_messages: int = 20
     memory_session_ttl: int = 3600
+
+    # Database
+    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/meinrag"
+
+    # User system
+    default_user: str = "admin"
+    user_isolation: Literal["all", "documents", "none"] = "all"
+
+    # CORS
+    cors_origins: str = "http://localhost:5173"
+
+    # Upload limits
+    max_upload_size_mb: int = 50
 
     # Server
     host: str = "0.0.0.0"

@@ -33,6 +33,8 @@ MEINRAG is a full-stack application that allows you to upload documents, organiz
 
 ### Backend
 - **Framework**: FastAPI
+- **Database**: PostgreSQL 16 (via Docker) + SQLAlchemy 2.0 async
+- **Migrations**: Alembic
 - **LLM Integration**: LangChain with OpenAI/OpenRouter
 - **Vector Stores**: ChromaDB, FAISS
 - **Embeddings**: OpenAI text-embedding-3-small
@@ -51,6 +53,7 @@ MEINRAG is a full-stack application that allows you to upload documents, organiz
 ### Prerequisites
 - Python 3.12+
 - Node.js 18+
+- Docker Desktop (for PostgreSQL)
 - OpenAI API key
 
 ### Installation
@@ -77,9 +80,20 @@ cp .env.example .env
 Edit `.env` and add your API key:
 ```env
 OPENAI_API_KEY=your-api-key-here
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/meinrag
 ```
 
-4. **Set up the frontend**
+4. **Start PostgreSQL**
+```bash
+docker compose up -d
+```
+
+5. **Run database migrations**
+```bash
+uv run alembic upgrade head
+```
+
+6. **Set up the frontend**
 ```bash
 cd frontend
 npm install
@@ -136,23 +150,31 @@ Frontend runs at: http://localhost:5173
 ```
 MEINRAG/
 ├── app/                          # Backend application
-│   ├── config.py                 # Configuration settings
-│   ├── dependencies.py           # Dependency injection
-│   ├── main.py                   # FastAPI application
+│   ├── config.py                 # Configuration (Pydantic Settings)
+│   ├── dependencies.py           # FastAPI dependency injection
+│   ├── main.py                   # FastAPI app + lifespan
+│   ├── db/                       # Database layer
+│   │   ├── models.py             # SQLAlchemy ORM models (5 tables)
+│   │   ├── session.py            # Engine + async session factory
+│   │   └── repositories.py       # DocumentRepository, UserRepository, ChatSessionRepository
 │   ├── llm/                      # LLM provider integration
-│   ├── models/                   # Data models and schemas
-│   ├── rag/                      # RAG pipeline (chain, prompts, memory)
+│   ├── models/                   # Pydantic schemas
+│   ├── rag/                      # RAG pipeline (chain, prompts)
 │   ├── routers/                  # API endpoints
 │   ├── services/                 # Business logic (document processing, AI suggestions)
 │   └── vectorstore/              # Vector store implementations
+├── alembic/                      # Database migrations
 ├── frontend/                     # React frontend
 │   ├── src/
 │   │   ├── App.jsx               # Main React component
 │   │   ├── App.css               # Application styles
 │   │   └── main.jsx              # Entry point
 │   └── package.json
-├── data/                         # Document storage
-├── chroma_db/                    # ChromaDB persistence
+├── scripts/                      # Utility scripts
+│   └── migrate_json_to_pg.py     # One-time JSON -> PostgreSQL migration
+├── data/                         # Uploaded files + vector store
+├── docker-compose.yml            # PostgreSQL 16 container
+├── alembic.ini                   # Alembic config
 ├── .env                          # Environment variables
 ├── pyproject.toml                # Python dependencies
 └── README.md
@@ -172,13 +194,16 @@ LLM_PROVIDER=openai              # or openrouter
 OPENAI_API_KEY=your-key
 OPENAI_MODEL=gpt-4o-mini
 
+# Database
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/meinrag
+
 # Vector Store
 VECTOR_STORE=chroma              # or faiss
 
 # Features
 HYBRID_SEARCH_ENABLED=false      # Enable BM25+Vector fusion
 RERANK_ENABLED=false             # Enable LLM re-ranking
-MEMORY_TTL_SECONDS=3600          # Chat session timeout
+MEMORY_SESSION_TTL=3600          # Chat session timeout (seconds)
 ```
 
 ### Advanced Features
@@ -199,9 +224,18 @@ RERANK_TOP_N=3
 
 ## API Endpoints
 
+### Users
+- `GET /users` - List all users
+- `POST /users` - Create a user
+- `GET /users/current` - Get current user (from `X-User-Id` header)
+
 ### Documents
-- `POST /documents/upload` - Upload document (optional: `?collection=name&auto_suggest=true`)
+- `POST /documents/upload` - Upload document (optional: `?collections=name1,name2&auto_suggest=true`)
 - `GET /documents` - List all documents (optional: `?collection=name`)
+- `GET /documents/collections` - List all collections + taxonomy categories
+- `GET /documents/{doc_id}/download` - Download original file
+- `PATCH /documents/{doc_id}` - Update document collections
+- `POST /documents/{doc_id}/reclassify` - AI reclassify document
 - `DELETE /documents/{doc_id}` - Delete document
 
 ### Query
@@ -209,7 +243,7 @@ RERANK_TOP_N=3
   ```json
   {
     "question": "What is this about?",
-    "collection": "legal",
+    "collection": "legal-compliance",
     "session_id": "user123",
     "top_k": 4
   }
@@ -225,12 +259,17 @@ RERANK_TOP_N=3
 ### Run Tests
 
 ```bash
-# Test collections feature
-uv run python test_collections.py
+# Run all offline tests (no API key or PostgreSQL needed)
+uv run pytest tests/ --ignore=tests/test_frontend_e2e.py --ignore=tests/test_api_workflow.py -v
 
-# Test chatbot features
-uv run python test_chatbot.py
+# Run online API workflow tests (requires OPENAI_API_KEY)
+uv run pytest tests/test_api_workflow.py -v
+
+# Run frontend E2E tests (requires backend + frontend servers running)
+uv run pytest tests/test_frontend_e2e.py -v -s
 ```
+
+Tests use in-memory SQLite automatically — no PostgreSQL needed to run the test suite.
 
 ### Code Structure
 
@@ -243,32 +282,34 @@ uv run python test_chatbot.py
 
 ## Documentation
 
-- **[HOW_TO_RUN.md](HOW_TO_RUN.md)** - Complete setup and testing guide
+- **[HOW_TO_RUN.md](docs/HOW_TO_RUN.md)** - Complete setup and testing guide
 - **[CLAUDE.md](CLAUDE.md)** - Architecture and development patterns
-- **[COLLECTIONS_SUMMARY.md](COLLECTIONS_SUMMARY.md)** - Collections feature documentation
-- **[QUICK_START_COLLECTIONS.md](QUICK_START_COLLECTIONS.md)** - API usage examples
-- **[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)** - Technical implementation details
-- **[ROADMAP.md](ROADMAP.md)** - Development phases and features
+- **[COLLECTIONS_SUMMARY.md](docs/COLLECTIONS_SUMMARY.md)** - Collections feature documentation
+- **[QUICK_START_COLLECTIONS.md](docs/QUICK_START_COLLECTIONS.md)** - API usage examples
+- **[IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)** - Technical implementation details
+- **[ROADMAP.md](docs/ROADMAP.md)** - Development phases and features
 
 ---
 
 ## Features Roadmap
 
-### Completed ✅
+### Completed
 - [x] Basic RAG pipeline with FastAPI
 - [x] Document upload and processing
 - [x] Vector similarity search
-- [x] Collections organization
+- [x] Collections organization with taxonomy
 - [x] AI auto-categorization
 - [x] Hybrid search (BM25 + Vector)
 - [x] LLM re-ranking
-- [x] Chat memory
+- [x] Persistent chat memory (PostgreSQL)
+- [x] Multi-user support with isolation
+- [x] PostgreSQL database (SQLAlchemy async)
 - [x] React frontend
-- [x] Multi-language support (EN/中文)
+- [x] Multi-language support (EN)
 
-### Planned 🔮
-- [ ] User authentication
-- [ ] Multi-user support
+### Planned
+- [ ] Page numbers in source citations
+- [ ] User authentication (login/password)
 - [ ] Document versioning
 - [ ] Advanced analytics
 - [ ] Export conversation history

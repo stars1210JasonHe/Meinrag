@@ -34,9 +34,9 @@ class VectorStoreManager(ABC):
 
     @abstractmethod
     def similarity_search_with_filter(
-        self, query: str, k: int, doc_ids: list[str] | None = None, collection: str | None = None
+        self, query: str, k: int, doc_ids: list[str] | None = None,
     ) -> list[Document]:
-        """Return top-k documents filtered by doc_ids and/or collection."""
+        """Return top-k documents filtered by doc_ids."""
         ...
 
     @abstractmethod
@@ -47,4 +47,9 @@ class VectorStoreManager(ABC):
     @abstractmethod
     def persist(self) -> None:
         """Persist the store to disk (no-op if auto-persisted)."""
+        ...
+
+    @abstractmethod
+    def update_document_metadata(self, doc_id: str, metadata_updates: dict) -> None:
+        """Update metadata fields on all chunks belonging to a document."""
         ...
