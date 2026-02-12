@@ -625,6 +625,19 @@ body {
   color: #999;
 }
 
+/* Thinking Indicator */
+.thinking-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  flex: 1;
+  min-height: 120px;
+  color: #999;
+  font-size: 1rem;
+}
+
 /* Sources */
 .sources {
   margin-top: 1.25rem;
@@ -668,10 +681,17 @@ body {
   color: #333;
 }
 
+.source-page {
+  font-size: 0.75rem;
+  color: #667eea;
+  font-weight: 500;
+  margin-left: auto;
+}
+
 .source-chunk-idx {
   font-size: 0.75rem;
   color: #999;
-  margin-left: auto;
+  margin-left: 0.5rem;
 }
 
 .source-download {

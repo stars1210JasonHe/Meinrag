@@ -61,6 +61,7 @@ class SourceChunk(BaseModel):
     source_file: str
     chunk_index: int | None = None
     doc_id: str | None = None
+    page: int | None = None
 
 
 class QueryResponse(BaseModel):

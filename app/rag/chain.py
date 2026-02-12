@@ -19,7 +19,9 @@ def format_docs(docs: list[Document]) -> str:
     formatted = []
     for i, doc in enumerate(docs, 1):
         source = doc.metadata.get("source_file", "unknown")
-        formatted.append(f"[Source {i}: {source}]\n{doc.page_content}")
+        page = doc.metadata.get("page")
+        page_str = f" (p.{page + 1})" if page is not None else ""
+        formatted.append(f"[Source {i}: {source}{page_str}]\n{doc.page_content}")
     return "\n\n---\n\n".join(formatted)
 
 

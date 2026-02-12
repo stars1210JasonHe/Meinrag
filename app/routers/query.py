@@ -107,6 +107,7 @@ async def query_documents(
                 source_file=doc.metadata.get("source_file", "unknown"),
                 chunk_index=doc.metadata.get("chunk_index"),
                 doc_id=doc.metadata.get("doc_id"),
+                page=doc.metadata.get("page"),
             )
             for doc in retrieved_docs
         ]

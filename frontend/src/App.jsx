@@ -584,6 +584,9 @@ function App() {
                                   ? <ChevronDown size={14} />
                                   : <ChevronRight size={14} />}
                                 <span className="source-file">{source.source_file}</span>
+                                {source.page != null && (
+                                  <span className="source-page">p.{source.page + 1}</span>
+                                )}
                                 {source.chunk_index !== null && (
                                   <span className="source-chunk-idx">chunk {source.chunk_index}</span>
                                 )}
@@ -619,12 +622,9 @@ function App() {
             ))}
 
             {loading && (
-              <div className="message message-assistant">
-                <div className="message-content">
-                  <div className="message-text loading">
-                    <Loader2 size={16} className="spin" /> Thinking...
-                  </div>
-                </div>
+              <div className="thinking-indicator">
+                <Loader2 size={24} className="spin" />
+                <span>Thinking...</span>
               </div>
             )}
 
