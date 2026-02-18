@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     memory_max_messages: int = 20
     memory_session_ttl: int = 3600
 
+    # Web search fallback
+    web_search_enabled: bool = True
+    web_search_max_results: int = 3
+
     # Database
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/meinrag"
 

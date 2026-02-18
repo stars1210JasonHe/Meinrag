@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,12 +10,16 @@ from app.dependencies import (
 )
 from app.db.repositories import DocumentRepository, ChatSessionRepository
 from app.models.schemas import QueryRequest, QueryResponse, SourceChunk
+from langchain_core.output_parsers import StrOutputParser
 from app.rag.chain import build_rag_chain
+from app.rag.prompts import WEB_SEARCH_PROMPT
 from app.vectorstore.base import VectorStoreManager
 from langchain_core.language_models import BaseChatModel
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+_RETRYABLE_KEYWORDS = ("500", "503", "rate", "overloaded", "internal server error")
 
 
 def _smart_truncate(text: str, max_len: int = 500) -> str:
@@ -34,6 +39,94 @@ def _smart_truncate(text: str, max_len: int = 500) -> str:
     return text[:max_len] + "..."
 
 
+def _sanitize(value: str, max_len: int) -> str:
+    """Strip and cap length for untrusted web content."""
+    return value.strip()[:max_len]
+
+
+async def _invoke_with_retry(chain, inputs, max_attempts: int = 3):
+    """Invoke a LangChain chain with exponential backoff on transient errors."""
+    last_err = None
+    for attempt in range(max_attempts):
+        try:
+            if isinstance(inputs, str):
+                return await chain.ainvoke(inputs)
+            return await chain.ainvoke(inputs)
+        except Exception as err:
+            last_err = err
+            if any(k in str(err).lower() for k in _RETRYABLE_KEYWORDS):
+                logger.warning(f"LLM transient error (attempt {attempt + 1}/{max_attempts}): {err}")
+                await asyncio.sleep(2 ** attempt)
+            else:
+                raise
+    raise last_err
+
+
+async def _web_search_fallback(
+    request: QueryRequest,
+    llm: BaseChatModel,
+    memory_manager: ChatSessionRepository,
+    settings: Settings,
+) -> QueryResponse:
+    """Fall back to web search when no relevant documents are found."""
+    from duckduckgo_search import DDGS
+
+    loop = asyncio.get_event_loop()
+    try:
+        web_results = await loop.run_in_executor(
+            None,
+            lambda: DDGS().text(
+                request.question, max_results=settings.web_search_max_results
+            ),
+        )
+    except Exception as e:
+        logger.warning(f"Web search failed: {e}")
+        web_results = []
+
+    if not web_results:
+        return QueryResponse(
+            answer="I couldn't find relevant information in your documents or on the web.",
+            sources=[],
+            question=request.question,
+            session_id=request.session_id,
+            web_search_used=False,
+        )
+
+    # Sanitize web content before injecting into LLM context
+    web_context = "\n\n---\n\n".join(
+        f"[{_sanitize(r['title'], 200)}]\n"
+        f"{_sanitize(r['body'], 800)}\n"
+        f"URL: {_sanitize(r['href'], 300)}"
+        for r in web_results
+    )
+
+    web_chain = WEB_SEARCH_PROMPT | llm | StrOutputParser()
+    answer = await _invoke_with_retry(web_chain, {
+        "context": web_context,
+        "question": request.question,
+    })
+
+    if request.session_id:
+        await memory_manager.add_exchange(request.session_id, request.question, answer)
+
+    sources = [
+        SourceChunk(
+            content=_sanitize(r["body"], 500),
+            source_file=_sanitize(r["title"], 200),
+            source_type="web",
+        )
+        for r in web_results
+    ]
+
+    return QueryResponse(
+        answer=answer,
+        sources=sources,
+        question=request.question,
+        session_id=request.session_id,
+        web_search_used=True,
+    )
+
+
 @router.post("/query", response_model=QueryResponse)
 async def query_documents(
     request: QueryRequest,
@@ -46,6 +139,7 @@ async def query_documents(
 ):
     # Resolve collection to doc_ids via registry
     doc_ids = request.doc_ids
+    user_scoped = request.collection is not None or request.doc_ids is not None
 
     # User isolation: restrict to user's documents
     if settings.user_isolation in ("all", "documents"):
@@ -95,7 +189,14 @@ async def query_documents(
                 request.question, k=request.top_k
             )
 
-        answer = await chain.ainvoke(request.question)
+        # Web search fallback when no relevant documents found
+        # Only fall back for unscoped queries (not when user chose a specific collection/docs)
+        if not retrieved_docs and settings.web_search_enabled and not user_scoped:
+            return await _web_search_fallback(
+                request, llm, memory_manager, settings,
+            )
+
+        answer = await _invoke_with_retry(chain, request.question)
 
         # Store exchange in session memory
         if request.session_id:
@@ -120,4 +221,10 @@ async def query_documents(
         )
     except Exception as e:
         logger.exception("Query failed")
+        err_msg = str(e).lower()
+        if any(k in err_msg for k in ("api_error", "internal server error", "overloaded", "rate")):
+            raise HTTPException(
+                status_code=502,
+                detail="The AI provider returned an error. Please try again in a moment.",
+            )
         raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")

@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -62,6 +64,7 @@ class SourceChunk(BaseModel):
     chunk_index: int | None = None
     doc_id: str | None = None
     page: int | None = None
+    source_type: Literal["document", "web"] = "document"
 
 
 class QueryResponse(BaseModel):
@@ -69,6 +72,7 @@ class QueryResponse(BaseModel):
     sources: list[SourceChunk]
     question: str
     session_id: str | None = None
+    web_search_used: bool = False
 
 
 class UserInfo(BaseModel):

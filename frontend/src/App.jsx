@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
-import { Upload, Send, FolderOpen, FileText, Trash2, Loader2, Sparkles, Download, Edit3, RefreshCw, ChevronDown, ChevronRight, User, Plus } from 'lucide-react'
+import { Upload, Send, FolderOpen, FileText, Trash2, Loader2, Sparkles, Download, Edit3, RefreshCw, ChevronDown, ChevronRight, User, Plus, MessageSquarePlus, Globe } from 'lucide-react'
 import axios from 'axios'
 import './App.css'
 
@@ -11,7 +11,7 @@ function App() {
   const [documents, setDocuments] = useState([])
   const [collections, setCollections] = useState({ taxonomy_categories: [], existing_collections: [] })
   const [selectedCollection, setSelectedCollection] = useState(null)
-  const [sessionId] = useState('session-' + Date.now())
+  const [sessionId, setSessionId] = useState('session-' + Date.now())
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [connectionError, setConnectionError] = useState(false)
@@ -100,12 +100,20 @@ function App() {
     }
   }
 
+  const startNewChat = () => {
+    setSessionId('session-' + Date.now())
+    setMessages([])
+    setExpandedSources({})
+    setInput('')
+  }
+
   const switchUser = (userId) => {
     setCurrentUser(userId)
     localStorage.setItem('meinrag_user', userId)
     setShowUserMenu(false)
     setSelectedCollection(null)
     setMessages([])
+    setSessionId('session-' + Date.now())
   }
 
   const createUser = async () => {
@@ -277,7 +285,8 @@ function App() {
       setMessages(prev => [...prev, {
         type: 'assistant',
         content: result.answer,
-        sources: result.sources
+        sources: result.sources,
+        web_search_used: result.web_search_used || false
       }])
     } catch (error) {
       setMessages(prev => [...prev, {
@@ -319,6 +328,10 @@ function App() {
           {selectedCollection && (
             <span className="badge">{selectedCollection}</span>
           )}
+
+          <button className="new-chat-btn" onClick={startNewChat} title="Start new conversation">
+            <MessageSquarePlus size={16} /> New Chat
+          </button>
 
           {/* User Selector */}
           <div className="user-selector" ref={userMenuRef}>
@@ -570,24 +583,32 @@ function App() {
                 {msg.type === 'assistant' && (
                   <div className="message-content">
                     <div className="message-text">
+                      {msg.web_search_used && (
+                        <span className="web-search-badge"><Globe size={12} /> Web Search</span>
+                      )}
                       {msg.content}
                       {msg.sources && msg.sources.length > 0 && (
                         <div className="sources">
-                          <div className="sources-title">Sources</div>
+                          <div className="sources-title">
+                            {msg.web_search_used ? 'Web Sources' : 'Sources'}
+                          </div>
                           {msg.sources.map((source, i) => (
-                            <div key={i} className="source-item">
+                            <div key={i} className={`source-item ${source.source_type === 'web' ? 'source-web' : ''}`}>
                               <div
                                 className="source-header"
                                 onClick={() => toggleSource(idx, i)}
                               >
-                                {expandedSources[`${idx}-${i}`]
-                                  ? <ChevronDown size={14} />
-                                  : <ChevronRight size={14} />}
+                                {source.source_type === 'web'
+                                  ? <Globe size={14} className="source-web-icon" />
+                                  : expandedSources[`${idx}-${i}`]
+                                    ? <ChevronDown size={14} />
+                                    : <ChevronRight size={14} />
+                                }
                                 <span className="source-file">{source.source_file}</span>
                                 {source.page != null && (
                                   <span className="source-page">p.{source.page + 1}</span>
                                 )}
-                                {source.chunk_index !== null && (
+                                {source.chunk_index != null && (
                                   <span className="source-chunk-idx">chunk {source.chunk_index}</span>
                                 )}
                                 {source.doc_id && (

@@ -52,6 +52,25 @@ body {
   font-size: 0.85rem;
 }
 
+/* New Chat Button */
+.new-chat-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  padding: 0.4rem 0.75rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: background 0.2s;
+}
+
+.new-chat-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
 /* User Selector */
 .user-selector {
   position: relative;
@@ -460,6 +479,11 @@ body {
   background: #999;
 }
 
+/* Center welcome screen vertically when no messages */
+.messages:has(.welcome) {
+  justify-content: center;
+}
+
 /* Welcome Screen */
 .welcome {
   padding: 2.5rem 3rem;
@@ -467,6 +491,7 @@ body {
   margin: 0;
   width: 100%;
   box-sizing: border-box;
+  flex-shrink: 0;
 }
 
 .welcome-header {
@@ -721,6 +746,33 @@ body {
   white-space: pre-wrap;
   max-height: 200px;
   overflow-y: auto;
+}
+
+/* Web search badge */
+.web-search-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: #e8f5e9;
+  color: #2e7d32;
+  padding: 0.2rem 0.6rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+}
+
+/* Web source styling */
+.source-web {
+  border-color: #c8e6c9;
+}
+
+.source-web .source-header:hover {
+  background: #e8f5e9;
+}
+
+.source-web-icon {
+  color: #2e7d32;
 }
 
 /* Connection Error Banner */

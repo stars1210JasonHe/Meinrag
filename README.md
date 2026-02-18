@@ -14,18 +14,20 @@ MEINRAG is a full-stack application that allows you to upload documents, organiz
 
 ### Core Capabilities
 - **Multi-language Support**: Ask questions in English or Chinese (中文)
-- **Smart Collections**: Organize documents by topic or category
+- **Smart Collections**: Organize documents by topic or category with a hierarchical taxonomy
 - **AI Auto-Categorization**: Let AI suggest collection names based on document content
 - **Contextual Conversations**: Ask follow-up questions with chat memory
-- **Source Citations**: Every answer includes references to source documents
+- **Source Citations**: Every answer includes source file, page number, and expandable chunk text
 - **Multiple Document Formats**: PDF, DOCX, TXT, MD, HTML, XLSX, PPTX
+- **Web Search Fallback**: Automatically searches the web when no relevant documents are found
 
 ### Advanced Features
 - **Hybrid Search**: Combines semantic vector search with BM25 keyword matching
 - **LLM Re-ranking**: Improves result quality using language model scoring
 - **Document Filtering**: Query specific documents or collections
-- **Session Management**: Maintains conversation context per user
+- **Session Management**: Multiple chat sessions per user with New Chat button
 - **Flexible Vector Stores**: Support for ChromaDB and FAISS
+- **Multi-User System**: Simple user profiles with configurable document isolation
 
 ---
 
@@ -204,6 +206,14 @@ VECTOR_STORE=chroma              # or faiss
 HYBRID_SEARCH_ENABLED=false      # Enable BM25+Vector fusion
 RERANK_ENABLED=false             # Enable LLM re-ranking
 MEMORY_SESSION_TTL=3600          # Chat session timeout (seconds)
+
+# Web Search Fallback
+WEB_SEARCH_ENABLED=true          # Fall back to DuckDuckGo when no docs match
+WEB_SEARCH_MAX_RESULTS=3         # Number of web results to fetch
+
+# User System
+DEFAULT_USER=admin               # Default user ID
+USER_ISOLATION=all               # all | documents | none
 ```
 
 ### Advanced Features
@@ -293,27 +303,46 @@ Tests use in-memory SQLite automatically — no PostgreSQL needed to run the tes
 
 ## Features Roadmap
 
-### Completed
+### v0.1 - Foundation
 - [x] Basic RAG pipeline with FastAPI
-- [x] Document upload and processing
-- [x] Vector similarity search
-- [x] Collections organization with taxonomy
+- [x] Document upload and processing (PDF, DOCX, TXT, MD, HTML, XLSX, PPTX)
+- [x] Vector similarity search (ChromaDB + FAISS)
+- [x] Collections organization with hierarchical taxonomy
 - [x] AI auto-categorization
-- [x] Hybrid search (BM25 + Vector)
-- [x] LLM re-ranking
-- [x] Persistent chat memory (PostgreSQL)
-- [x] Multi-user support with isolation
-- [x] PostgreSQL database (SQLAlchemy async)
-- [x] React frontend
-- [x] Multi-language support (EN)
 
-### Planned
-- [ ] Page numbers in source citations
+### v0.2 - Advanced Retrieval
+- [x] Hybrid search (BM25 + Vector fusion)
+- [x] LLM re-ranking (listwise)
+- [x] Document filtering by collection and doc IDs
+
+### v0.3 - PostgreSQL & Multi-User
+- [x] PostgreSQL database (SQLAlchemy 2.0 async, Alembic migrations)
+- [x] Persistent chat memory (survives server restarts)
+- [x] Multi-user support with configurable isolation
+- [x] React frontend with sidebar, collections, source citations
+- [x] Multi-collection documents with inline editing and AI reclassify
+
+### v0.4 - Chat & Web Search (current)
+- [x] New Chat button (multiple sessions per user)
+- [x] Web search fallback (DuckDuckGo, auto-triggers when no docs match)
+- [x] Page numbers in source citations
+- [x] Expandable source chunks with file download
+- [x] Blank state fix (centered welcome screen)
+
+### v0.5 - Frontend Redesign (next)
+- [ ] Frontend UI/UX redesign and polish
+- [ ] Markdown rendering for AI responses
+- [ ] Dark mode / theme support
+- [ ] Mobile responsive improvements
+- [ ] Drag-and-drop file upload
+
+### Future
 - [ ] User authentication (login/password)
 - [ ] Document versioning
-- [ ] Advanced analytics
-- [ ] Export conversation history
-- [ ] Mobile responsive design improvements
+- [ ] Conversation export (PDF/Markdown)
+- [ ] Advanced analytics dashboard
+- [ ] Streaming responses (SSE)
+- [ ] Multi-language UI (i18n)
 
 ---
 
