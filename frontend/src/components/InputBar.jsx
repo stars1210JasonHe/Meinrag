@@ -63,10 +63,10 @@ export default function InputBar({ loading, selectedFilter, onSendMessage, onCle
           className="btn-web-search"
           title="Search the web instead of documents"
         >
-          <Globe size={16} />
+          <Globe size={22} />
         </button>
         <button onClick={handleSend} disabled={loading || !input.trim()} className="btn-send">
-          <Send size={18} />
+          <Send size={22} />
         </button>
       </div>
     </div>

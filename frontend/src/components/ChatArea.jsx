@@ -5,7 +5,7 @@ import InputBar from './InputBar'
 
 export default function ChatArea({
   messages, loading, selectedFilter,
-  onSendMessage, onDownloadDoc, onAskAboutChunk, onClearFilter,
+  onSendMessage, onDownloadDoc, onAskAboutChunk, onAskAI, onClearFilter,
 }) {
   const messagesEndRef = useRef(null)
   const hasConversation = messages.some(m => m.type === 'user' || m.type === 'assistant')
@@ -32,6 +32,7 @@ export default function ChatArea({
             onDownloadDoc={onDownloadDoc}
             onAskAboutChunk={onAskAboutChunk}
             onQuote={handleQuote}
+            onAskAI={onAskAI}
           />
         ))}
 

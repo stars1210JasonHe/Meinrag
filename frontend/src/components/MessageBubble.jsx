@@ -1,7 +1,10 @@
-import { Globe } from 'lucide-react'
+import { useState } from 'react'
+import { Globe, Sparkles, ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
 import SourceCitation from './SourceCitation'
 
-export default function MessageBubble({ msg, msgIdx, onDownloadDoc, onAskAboutChunk, onQuote }) {
+export default function MessageBubble({ msg, msgIdx, onDownloadDoc, onAskAboutChunk, onQuote, onAskAI }) {
+  const [aiExpanded, setAiExpanded] = useState(true)
+
   if (msg.type === 'system') {
     return (
       <div className="message message-system">
@@ -21,6 +24,8 @@ export default function MessageBubble({ msg, msgIdx, onDownloadDoc, onAskAboutCh
   }
 
   // assistant
+  const showAskAIButton = msg.question && !msg.ai_answer && !msg.ai_loading
+
   return (
     <div className="message message-assistant">
       <div className="message-content">
@@ -45,6 +50,33 @@ export default function MessageBubble({ msg, msgIdx, onDownloadDoc, onAskAboutCh
                   onQuote={onQuote}
                 />
               ))}
+            </div>
+          )}
+
+          {showAskAIButton && (
+            <button className="ask-ai-btn" onClick={() => onAskAI(msgIdx)}>
+              <Sparkles size={14} />
+              Ask AI
+            </button>
+          )}
+
+          {msg.ai_loading && (
+            <div className="ai-answer-loading">
+              <Loader2 size={16} className="spin" />
+              <span>Getting AI answer...</span>
+            </div>
+          )}
+
+          {msg.ai_answer && (
+            <div className="ai-answer-section">
+              <div className="ai-answer-header" onClick={() => setAiExpanded(!aiExpanded)}>
+                {aiExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                <Sparkles size={14} />
+                <span>AI Knowledge</span>
+              </div>
+              {aiExpanded && (
+                <div className="ai-answer-content">{msg.ai_answer}</div>
+              )}
             </div>
           )}
         </div>

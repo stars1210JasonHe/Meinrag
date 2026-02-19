@@ -20,3 +20,9 @@ export async function sendChunkContextQuery(question, { sourceType, docId, chunk
   const resp = await api.post('/query/chunk-context', body, { headers: apiHeaders(userId) })
   return resp.data
 }
+
+export async function sendAskAI(question, { userId }) {
+  const body = { question }
+  const resp = await api.post('/query/ask-ai', body, { headers: apiHeaders(userId) })
+  return resp.data
+}

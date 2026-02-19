@@ -9,10 +9,10 @@ from app.dependencies import (
     get_registry, get_current_user,
 )
 from app.db.repositories import DocumentRepository, ChatSessionRepository
-from app.models.schemas import QueryRequest, QueryResponse, SourceChunk, ChunkContextRequest
+from app.models.schemas import QueryRequest, QueryResponse, SourceChunk, ChunkContextRequest, AskAIRequest, AskAIResponse
 from langchain_core.output_parsers import StrOutputParser
 from app.rag.chain import build_rag_chain
-from app.rag.prompts import WEB_SEARCH_PROMPT, CHUNK_CONTEXT_PROMPT, QUERY_REWRITE_PROMPT
+from app.rag.prompts import WEB_SEARCH_PROMPT, CHUNK_CONTEXT_PROMPT, QUERY_REWRITE_PROMPT, ASK_AI_PROMPT
 from app.vectorstore.base import VectorStoreManager
 from langchain_core.language_models import BaseChatModel
 
@@ -351,3 +351,25 @@ async def query_chunk_context(
         question=request.question,
         session_id=request.session_id,
     )
+
+
+@router.post("/query/ask-ai", response_model=AskAIResponse)
+async def ask_ai(
+    request: AskAIRequest,
+    llm: BaseChatModel = Depends(get_llm),
+):
+    """Answer a question using only the LLM's general knowledge (no documents)."""
+    chain = ASK_AI_PROMPT | llm | StrOutputParser()
+    try:
+        answer = await _invoke_with_retry(chain, {"question": request.question})
+    except Exception as e:
+        logger.exception("Ask AI failed")
+        err_msg = str(e).lower()
+        if any(k in err_msg for k in ("api_error", "internal server error", "overloaded", "rate")):
+            raise HTTPException(
+                status_code=502,
+                detail="The AI provider returned an error. Please try again in a moment.",
+            )
+        raise HTTPException(status_code=500, detail=f"Ask AI failed: {str(e)}")
+
+    return AskAIResponse(answer=answer, question=request.question)

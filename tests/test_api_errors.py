@@ -188,3 +188,22 @@ class TestSessionEndpoints:
         """GET /sessions/nonexistent/messages returns 404."""
         resp = client.get("/sessions/nonexistent_session_id/messages")
         assert resp.status_code == 404
+
+
+class TestAskAIEndpoint:
+    """Ask AI general knowledge endpoint tests."""
+
+    def test_ask_ai_empty_body(self, client):
+        """POST /query/ask-ai with no body returns 422."""
+        resp = client.post("/query/ask-ai")
+        assert resp.status_code == 422
+
+    def test_ask_ai_empty_question(self, client):
+        """Empty question returns 422."""
+        resp = client.post("/query/ask-ai", json={"question": ""})
+        assert resp.status_code == 422
+
+    def test_ask_ai_question_too_long(self, client):
+        """Question > 2000 chars returns 422."""
+        resp = client.post("/query/ask-ai", json={"question": "x" * 2001})
+        assert resp.status_code == 422

@@ -96,6 +96,16 @@ class SessionInfo(BaseModel):
     last_access: str
 
 
+class AskAIRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=2000)
+    session_id: str | None = Field(default=None)
+
+
+class AskAIResponse(BaseModel):
+    answer: str
+    question: str
+
+
 class ChunkContextRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=2000)
     source_type: Literal["document", "web"] = "document"

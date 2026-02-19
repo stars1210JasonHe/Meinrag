@@ -8,7 +8,7 @@ import ChatArea from './components/ChatArea'
 import { fetchDocuments, fetchCollections, uploadDocument, deleteDocument, downloadDocument, patchDocumentCollections, reclassifyDocument } from './api/documents'
 import { fetchUsers, createUser } from './api/users'
 import { listSessions, getSessionMessages, deleteSession } from './api/sessions'
-import { sendQuery, sendChunkContextQuery } from './api/query'
+import { sendQuery, sendChunkContextQuery, sendAskAI } from './api/query'
 import { API_BASE } from './api/client'
 
 function App() {
@@ -130,6 +130,9 @@ function App() {
         content: result.answer,
         sources: result.sources,
         web_search_used: result.web_search_used || false,
+        question,
+        ai_answer: null,
+        ai_loading: false,
       }])
       listSessions(currentUser).then(setSessions).catch(() => {})
     } catch (error) {
@@ -169,6 +172,28 @@ function App() {
       }])
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleAskAI = async (msgIdx) => {
+    const msg = messages[msgIdx]
+    if (!msg || msg.type !== 'assistant' || msg.ai_answer || msg.ai_loading) return
+    const question = msg.question
+    if (!question) return
+
+    setMessages(prev => prev.map((m, i) =>
+      i === msgIdx ? { ...m, ai_loading: true } : m
+    ))
+
+    try {
+      const result = await sendAskAI(question, { userId: currentUser })
+      setMessages(prev => prev.map((m, i) =>
+        i === msgIdx ? { ...m, ai_answer: result.answer, ai_loading: false } : m
+      ))
+    } catch (error) {
+      setMessages(prev => prev.map((m, i) =>
+        i === msgIdx ? { ...m, ai_answer: `Error: ${error.response?.data?.detail || error.message}`, ai_loading: false } : m
+      ))
     }
   }
 
@@ -290,6 +315,7 @@ function App() {
           onSendMessage={handleSendMessage}
           onDownloadDoc={handleDownloadDoc}
           onAskAboutChunk={handleAskAboutChunk}
+          onAskAI={handleAskAI}
           onClearFilter={() => setSelectedFilter({ type: 'all', value: null })}
         />
       </div>

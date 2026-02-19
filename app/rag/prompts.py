@@ -1,9 +1,19 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 RAG_SYSTEM_PROMPT = """\
-You are a helpful assistant that answers questions based on the provided context.
-Use ONLY the context below to answer the question. If the context does not contain
-enough information to answer, say so clearly — do not make up information.
+You are a helpful assistant that answers questions using the provided document context.
+
+Instructions:
+1. First, answer the question using ONLY the document context below. Clearly attribute \
+information to the documents when possible.
+2. If the document context fully answers the question, stop there.
+3. If the document context is insufficient or only partially answers the question, \
+you MAY supplement with your general knowledge. When you do this, clearly separate \
+and label the two parts:
+   - Start document-based information with: **From your documents:**
+   - Start general knowledge with: **From general knowledge:**
+4. Never fabricate document citations. If documents don't contain relevant information, \
+say so honestly before offering general knowledge.
 
 Context:
 {context}
@@ -57,4 +67,15 @@ Instructions:
 WEB_SEARCH_PROMPT = ChatPromptTemplate.from_messages([
     ("system", WEB_SEARCH_SYSTEM_PROMPT),
     ("human", "Web search results:\n{context}\n\nQuestion: {question}"),
+])
+
+ASK_AI_SYSTEM_PROMPT = """\
+You are a knowledgeable assistant. The user is asking a general question — answer using \
+your general knowledge. Be helpful, accurate, and concise. If you're unsure about \
+something, say so.
+"""
+
+ASK_AI_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", ASK_AI_SYSTEM_PROMPT),
+    ("human", "{question}"),
 ])
