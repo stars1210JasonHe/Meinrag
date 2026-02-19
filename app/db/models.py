@@ -100,6 +100,10 @@ class ChatSessionModel(Base):
         default=lambda: datetime.now(timezone.utc),
     )
 
+    __table_args__ = (
+        Index("ix_chat_sessions_user_id", "user_id"),
+    )
+
     user: Mapped["UserModel | None"] = relationship(back_populates="sessions")
     messages: Mapped[list["ChatMessageModel"]] = relationship(
         back_populates="session",

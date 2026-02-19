@@ -59,7 +59,9 @@ class Settings(BaseSettings):
 
     # Web search fallback
     web_search_enabled: bool = True
-    web_search_max_results: int = 3
+    web_search_max_results: int = 9
+    web_search_provider: str = "duckduckgo"
+    web_search_score_threshold: float = 0.5  # auto-fallback if all scores below this
 
     # Database
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/meinrag"

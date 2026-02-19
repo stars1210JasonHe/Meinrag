@@ -74,6 +74,33 @@ class FAISSStoreManager(VectorStoreManager):
             candidates = [d for d in candidates if d.metadata.get("doc_id") in doc_ids]
         return candidates[:k]
 
+    def similarity_search_with_scores(
+        self, query: str, k: int, doc_ids: list[str] | None = None,
+    ) -> list[tuple[Document, float]]:
+        if self._store is None:
+            return []
+        # Over-fetch then post-filter by doc_ids
+        fetch_k = k * 5 if doc_ids else k
+        results = self._store.similarity_search_with_score(query, k=fetch_k)
+        if doc_ids:
+            results = [(d, s) for d, s in results if d.metadata.get("doc_id") in doc_ids]
+        # FAISS returns L2 distance; convert to similarity: max(0, 1 - distance)
+        return [(doc, max(0.0, 1.0 - dist)) for doc, dist in results[:k]]
+
+    def get_chunks_by_doc(self, doc_id: str, chunk_indices: list[int] | None = None) -> list[Document]:
+        if self._store is None:
+            return []
+        docs = []
+        for doc in self._store.docstore._dict.values():
+            if doc.metadata.get("doc_id") != doc_id:
+                continue
+            if chunk_indices is not None:
+                if doc.metadata.get("chunk_index") not in chunk_indices:
+                    continue
+            docs.append(doc)
+        docs.sort(key=lambda d: d.metadata.get("chunk_index", 0))
+        return docs
+
     def get_all_documents(self) -> list[Document]:
         if self._store is None:
             return []

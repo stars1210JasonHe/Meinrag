@@ -9,10 +9,10 @@ from app.dependencies import (
     get_registry, get_current_user,
 )
 from app.db.repositories import DocumentRepository, ChatSessionRepository
-from app.models.schemas import QueryRequest, QueryResponse, SourceChunk
+from app.models.schemas import QueryRequest, QueryResponse, SourceChunk, ChunkContextRequest
 from langchain_core.output_parsers import StrOutputParser
 from app.rag.chain import build_rag_chain
-from app.rag.prompts import WEB_SEARCH_PROMPT
+from app.rag.prompts import WEB_SEARCH_PROMPT, CHUNK_CONTEXT_PROMPT, QUERY_REWRITE_PROMPT
 from app.vectorstore.base import VectorStoreManager
 from langchain_core.language_models import BaseChatModel
 
@@ -62,28 +62,49 @@ async def _invoke_with_retry(chain, inputs, max_attempts: int = 3):
     raise last_err
 
 
+async def _rewrite_search_queries(question: str, llm: BaseChatModel) -> list[str]:
+    """Use LLM to rewrite user question into optimized search queries."""
+    try:
+        rewrite_chain = QUERY_REWRITE_PROMPT | llm | StrOutputParser()
+        result = await rewrite_chain.ainvoke({"question": question})
+        queries = [q.strip() for q in result.strip().split("\n") if q.strip()]
+        return queries[:3] if queries else [question]
+    except Exception:
+        logger.warning("Query rewriting failed, using original question")
+        return [question]
+
+
 async def _web_search_fallback(
     request: QueryRequest,
     llm: BaseChatModel,
     memory_manager: ChatSessionRepository,
     settings: Settings,
+    current_user: str | None = None,
 ) -> QueryResponse:
     """Fall back to web search when no relevant documents are found."""
-    from duckduckgo_search import DDGS
+    from app.services.web_search import create_web_search_provider
 
-    loop = asyncio.get_event_loop()
-    try:
-        web_results = await loop.run_in_executor(
-            None,
-            lambda: DDGS().text(
-                request.question, max_results=settings.web_search_max_results
-            ),
-        )
-    except Exception as e:
-        logger.warning(f"Web search failed: {e}")
-        web_results = []
+    provider = create_web_search_provider(settings.web_search_provider)
 
-    if not web_results:
+    # Step 1: Rewrite query for better search results
+    search_queries = await _rewrite_search_queries(request.question, llm)
+    logger.info(f"Web search queries: {search_queries}")
+
+    # Step 2: Search with multiple queries, deduplicate by URL
+    all_results = []
+    seen_urls = set()
+    per_query_limit = max(3, settings.web_search_max_results // len(search_queries))
+    for query in search_queries:
+        try:
+            results = await provider.search(query, max_results=per_query_limit)
+            for r in results:
+                if r.url not in seen_urls:
+                    seen_urls.add(r.url)
+                    all_results.append(r)
+        except Exception as e:
+            logger.warning(f"Web search failed for query '{query}': {e}")
+
+    if not all_results:
         return QueryResponse(
             answer="I couldn't find relevant information in your documents or on the web.",
             sources=[],
@@ -92,13 +113,39 @@ async def _web_search_fallback(
             web_search_used=False,
         )
 
-    # Sanitize web content before injecting into LLM context
-    web_context = "\n\n---\n\n".join(
-        f"[{_sanitize(r['title'], 200)}]\n"
-        f"{_sanitize(r['body'], 800)}\n"
-        f"URL: {_sanitize(r['href'], 300)}"
-        for r in web_results
-    )
+    # Step 3: Fetch full page content for top results (parallel, with timeout)
+    import httpx
+    import re
+
+    async def _fetch_page(url: str) -> str:
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as client:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                text = resp.text
+                text = re.sub(r"<script[^>]*>.*?</script>", "", text, flags=re.DOTALL)
+                text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL)
+                text = re.sub(r"<[^>]+>", " ", text)
+                text = re.sub(r"\s+", " ", text).strip()
+                return text[:3000]
+        except Exception:
+            return ""
+
+    # Fetch pages for top 3 results in parallel
+    top_results = all_results[:min(6, len(all_results))]
+    page_texts = await asyncio.gather(*[_fetch_page(r.url) for r in top_results[:3]])
+
+    # Step 4: Build rich context with full page content where available
+    web_context_parts = []
+    for i, r in enumerate(top_results):
+        part = f"[{_sanitize(r.title, 200)}]\n"
+        if i < len(page_texts) and page_texts[i]:
+            part += f"{_sanitize(page_texts[i], 2000)}\n"
+        else:
+            part += f"{_sanitize(r.body, 800)}\n"
+        part += f"URL: {_sanitize(r.url, 300)}"
+        web_context_parts.append(part)
+    web_context = "\n\n---\n\n".join(web_context_parts)
 
     web_chain = WEB_SEARCH_PROMPT | llm | StrOutputParser()
     answer = await _invoke_with_retry(web_chain, {
@@ -107,15 +154,16 @@ async def _web_search_fallback(
     })
 
     if request.session_id:
-        await memory_manager.add_exchange(request.session_id, request.question, answer)
+        await memory_manager.add_exchange(request.session_id, request.question, answer, user_id=current_user)
 
     sources = [
         SourceChunk(
-            content=_sanitize(r["body"], 500),
-            source_file=_sanitize(r["title"], 200),
+            content=_sanitize(r.body, 500),
+            source_file=_sanitize(r.title, 200),
             source_type="web",
+            url=_sanitize(r.url, 300),
         )
-        for r in web_results
+        for r in top_results
     ]
 
     return QueryResponse(
@@ -179,28 +227,34 @@ async def query_documents(
         raise HTTPException(status_code=400, detail=str(e))
 
     try:
-        # Get source docs for the response
-        if doc_ids:
-            retrieved_docs = vector_store.similarity_search_with_filter(
-                request.question, k=request.top_k, doc_ids=doc_ids,
-            )
-        else:
-            retrieved_docs = vector_store.similarity_search(
-                request.question, k=request.top_k
+        # Force web search — skip vector search entirely
+        if request.force_web_search and settings.web_search_enabled:
+            return await _web_search_fallback(
+                request, llm, memory_manager, settings, current_user=current_user,
             )
 
-        # Web search fallback when no relevant documents found
-        # Only fall back for unscoped queries (not when user chose a specific collection/docs)
-        if not retrieved_docs and settings.web_search_enabled and not user_scoped:
-            return await _web_search_fallback(
-                request, llm, memory_manager, settings,
-            )
+        # Get source docs with similarity scores
+        retrieved = vector_store.similarity_search_with_scores(
+            request.question, k=request.top_k, doc_ids=doc_ids,
+        )
+
+        # Web search fallback: no results OR all scores below threshold
+        if settings.web_search_enabled and not user_scoped:
+            if not retrieved:
+                return await _web_search_fallback(
+                    request, llm, memory_manager, settings, current_user=current_user,
+                )
+            best_score = max(score for _, score in retrieved)
+            if best_score < settings.web_search_score_threshold:
+                return await _web_search_fallback(
+                    request, llm, memory_manager, settings, current_user=current_user,
+                )
 
         answer = await _invoke_with_retry(chain, request.question)
 
         # Store exchange in session memory
         if request.session_id:
-            await memory_manager.add_exchange(request.session_id, request.question, answer)
+            await memory_manager.add_exchange(request.session_id, request.question, answer, user_id=current_user)
 
         sources = [
             SourceChunk(
@@ -209,8 +263,9 @@ async def query_documents(
                 chunk_index=doc.metadata.get("chunk_index"),
                 doc_id=doc.metadata.get("doc_id"),
                 page=doc.metadata.get("page"),
+                score=round(score, 4),
             )
-            for doc in retrieved_docs
+            for doc, score in retrieved
         ]
 
         return QueryResponse(
@@ -228,3 +283,71 @@ async def query_documents(
                 detail="The AI provider returned an error. Please try again in a moment.",
             )
         raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
+
+
+@router.post("/query/chunk-context", response_model=QueryResponse)
+async def query_chunk_context(
+    request: ChunkContextRequest,
+    settings: Settings = Depends(get_settings),
+    vector_store: VectorStoreManager = Depends(get_vector_store),
+    llm: BaseChatModel = Depends(get_llm),
+    memory_manager: ChatSessionRepository = Depends(get_memory_manager),
+    current_user: str = Depends(get_current_user),
+):
+    """Ask a question about a specific source chunk (document or web)."""
+    if request.source_type == "web":
+        # Fetch the full web page and use as context
+        if not request.url:
+            raise HTTPException(status_code=400, detail="URL required for web source")
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+                resp = await client.get(request.url)
+                resp.raise_for_status()
+                page_text = resp.text
+            # Strip HTML tags for a rough text extraction
+            import re
+            page_text = re.sub(r"<script[^>]*>.*?</script>", "", page_text, flags=re.DOTALL)
+            page_text = re.sub(r"<style[^>]*>.*?</style>", "", page_text, flags=re.DOTALL)
+            page_text = re.sub(r"<[^>]+>", " ", page_text)
+            page_text = re.sub(r"\s+", " ", page_text).strip()
+            # Truncate to ~4000 chars
+            context = page_text[:4000]
+        except Exception as e:
+            logger.warning(f"Failed to fetch web page {request.url}: {e}")
+            context = f"(Could not fetch page content from {request.url})"
+    else:
+        # Fetch surrounding chunks from vector store
+        if not request.doc_id:
+            raise HTTPException(status_code=400, detail="doc_id required for document source")
+        center = request.chunk_index or 0
+        neighbor_indices = list(range(max(0, center - 2), center + 3))
+        chunks = vector_store.get_chunks_by_doc(request.doc_id, chunk_indices=neighbor_indices)
+        if not chunks:
+            raise HTTPException(status_code=404, detail="No chunks found for this document")
+        context = "\n\n---\n\n".join(
+            f"[Chunk {c.metadata.get('chunk_index', '?')}]\n{c.page_content}"
+            for c in chunks
+        )
+
+    chain = CHUNK_CONTEXT_PROMPT | llm | StrOutputParser()
+    try:
+        answer = await _invoke_with_retry(chain, {
+            "context": context,
+            "question": request.question,
+        })
+    except Exception as e:
+        logger.exception("Chunk context query failed")
+        raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
+
+    if request.session_id:
+        await memory_manager.add_exchange(
+            request.session_id, request.question, answer, user_id=current_user,
+        )
+
+    return QueryResponse(
+        answer=answer,
+        sources=[],
+        question=request.question,
+        session_id=request.session_id,
+    )

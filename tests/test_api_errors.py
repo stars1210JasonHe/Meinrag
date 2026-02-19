@@ -33,6 +33,7 @@ def mock_vector_store():
     store = MagicMock()
     store.similarity_search.return_value = []
     store.similarity_search_with_filter.return_value = []
+    store.similarity_search_with_scores.return_value = []
     store.get_all_documents.return_value = []
     return store
 
@@ -167,3 +168,23 @@ class TestDocumentListEmpty:
         data = resp.json()
         assert data["documents"] == []
         assert data["total"] == 0
+
+
+class TestSessionEndpoints:
+    """A5.7: Session API endpoint tests."""
+
+    def test_list_sessions_empty(self, client):
+        """GET /sessions with no sessions returns empty list."""
+        resp = client.get("/sessions")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_delete_nonexistent_session(self, client):
+        """DELETE /sessions/nonexistent returns 404."""
+        resp = client.delete("/sessions/nonexistent_session_id")
+        assert resp.status_code == 404
+
+    def test_get_nonexistent_session_messages(self, client):
+        """GET /sessions/nonexistent/messages returns 404."""
+        resp = client.get("/sessions/nonexistent_session_id/messages")
+        assert resp.status_code == 404

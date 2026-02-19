@@ -86,3 +86,105 @@ class TestMemoryIsolation:
         assert len(h2) == 2
         assert h1[0].content == "Q1"
         assert h2[0].content == "Q2"
+
+
+class TestSessionListing:
+    """A4.7: Session listing and management."""
+
+    async def test_list_sessions_empty(self, memory_manager):
+        """No sessions for a user returns empty list."""
+        sessions = await memory_manager.list_sessions("admin")
+        assert sessions == []
+
+    async def test_list_sessions_after_exchange(self, memory_manager):
+        """Sessions appear after adding exchanges with user_id."""
+        await memory_manager.add_exchange("s1", "Hello", "Hi there", user_id="admin")
+        await memory_manager.add_exchange("s2", "Bye", "Goodbye", user_id="admin")
+        sessions = await memory_manager.list_sessions("admin")
+        assert len(sessions) == 2
+        session_ids = {s["session_id"] for s in sessions}
+        assert "s1" in session_ids
+        assert "s2" in session_ids
+
+    async def test_list_sessions_user_isolation(self, db_session):
+        """Sessions from different users are isolated."""
+        from app.db.models import UserModel
+        db_session.add(UserModel(user_id="bob", display_name="Bob"))
+        await db_session.flush()
+
+        mgr = ChatSessionRepository(db_session, max_messages=20, session_ttl=300)
+        await mgr.add_exchange("s_admin", "Q1", "A1", user_id="admin")
+        await mgr.add_exchange("s_bob", "Q2", "A2", user_id="bob")
+
+        admin_sessions = await mgr.list_sessions("admin")
+        bob_sessions = await mgr.list_sessions("bob")
+        assert len(admin_sessions) == 1
+        assert admin_sessions[0]["session_id"] == "s_admin"
+        assert len(bob_sessions) == 1
+        assert bob_sessions[0]["session_id"] == "s_bob"
+
+    async def test_session_preview(self, memory_manager):
+        """Preview returns first human message content."""
+        await memory_manager.add_exchange("s1", "What is quantum computing?", "It is...", user_id="admin")
+        preview = await memory_manager.get_session_preview("s1")
+        assert "quantum computing" in preview
+
+    async def test_session_preview_empty(self, memory_manager):
+        """Preview for nonexistent session returns 'New Chat'."""
+        preview = await memory_manager.get_session_preview("nonexistent")
+        assert preview == "New Chat"
+
+
+class TestSessionDeletion:
+    """A4.8: Session deletion with ownership."""
+
+    async def test_delete_session(self, memory_manager):
+        """Delete session owned by user succeeds."""
+        await memory_manager.add_exchange("s1", "Q1", "A1", user_id="admin")
+        deleted = await memory_manager.delete_session("s1", "admin")
+        assert deleted is True
+        history = await memory_manager.get_history("s1")
+        assert history == []
+
+    async def test_delete_session_wrong_user(self, db_session):
+        """Delete session not owned by user fails."""
+        from app.db.models import UserModel
+        db_session.add(UserModel(user_id="charlie", display_name="Charlie"))
+        await db_session.flush()
+
+        mgr = ChatSessionRepository(db_session, max_messages=20, session_ttl=300)
+        await mgr.add_exchange("s1", "Q1", "A1", user_id="admin")
+        deleted = await mgr.delete_session("s1", "charlie")
+        assert deleted is False
+        # Session should still exist
+        history = await mgr.get_history("s1")
+        assert len(history) == 2
+
+
+class TestSessionMessages:
+    """A4.9: Get messages for display."""
+
+    async def test_get_messages_for_display(self, memory_manager):
+        """Get messages returns frontend-friendly dicts."""
+        await memory_manager.add_exchange("s1", "Hello", "Hi", user_id="admin")
+        messages = await memory_manager.get_messages_for_display("s1", "admin")
+        assert messages is not None
+        assert len(messages) == 2
+        assert messages[0] == {"role": "human", "content": "Hello"}
+        assert messages[1] == {"role": "ai", "content": "Hi"}
+
+    async def test_get_messages_wrong_user(self, db_session):
+        """Get messages for session not owned by user returns None."""
+        from app.db.models import UserModel
+        db_session.add(UserModel(user_id="dave", display_name="Dave"))
+        await db_session.flush()
+
+        mgr = ChatSessionRepository(db_session, max_messages=20, session_ttl=300)
+        await mgr.add_exchange("s1", "Q1", "A1", user_id="admin")
+        messages = await mgr.get_messages_for_display("s1", "dave")
+        assert messages is None
+
+    async def test_get_messages_nonexistent(self, memory_manager):
+        """Get messages for nonexistent session returns None."""
+        messages = await memory_manager.get_messages_for_display("nonexistent", "admin")
+        assert messages is None

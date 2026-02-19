@@ -226,7 +226,78 @@ class ChatSessionRepository:
                 messages.append(AIMessage(content=msg.content))
         return messages
 
-    async def add_exchange(self, session_id: str, question: str, answer: str) -> None:
+    async def list_sessions(self, user_id: str) -> list[dict]:
+        """Return metadata for all sessions belonging to user_id, most recent first."""
+        stmt = (
+            select(ChatSessionModel)
+            .where(ChatSessionModel.user_id == user_id)
+            .order_by(ChatSessionModel.last_access.desc())
+        )
+        result = await self._session.execute(stmt)
+        return [
+            {
+                "session_id": s.session_id,
+                "created_at": s.created_at.isoformat(),
+                "last_access": s.last_access.isoformat(),
+            }
+            for s in result.scalars().all()
+        ]
+
+    async def get_session_preview(self, session_id: str) -> str:
+        """Return the first human message content (truncated) as session title."""
+        stmt = (
+            select(ChatMessageModel)
+            .where(
+                ChatMessageModel.session_id == session_id,
+                ChatMessageModel.role == "human",
+            )
+            .order_by(ChatMessageModel.created_at)
+            .limit(1)
+        )
+        result = await self._session.execute(stmt)
+        msg = result.scalar_one_or_none()
+        return msg.content[:80] if msg else "New Chat"
+
+    async def get_messages_for_display(self, session_id: str, user_id: str) -> list[dict] | None:
+        """Return messages as frontend-friendly dicts. None if session not found or not owned."""
+        result = await self._session.execute(
+            select(ChatSessionModel).where(
+                ChatSessionModel.session_id == session_id,
+                ChatSessionModel.user_id == user_id,
+            )
+        )
+        if not result.scalar_one_or_none():
+            return None
+
+        msg_result = await self._session.execute(
+            select(ChatMessageModel)
+            .where(ChatMessageModel.session_id == session_id)
+            .order_by(ChatMessageModel.created_at)
+        )
+        return [
+            {"role": m.role, "content": m.content}
+            for m in msg_result.scalars().all()
+        ]
+
+    async def delete_session(self, session_id: str, user_id: str) -> bool:
+        """Delete a session only if it belongs to user_id."""
+        result = await self._session.execute(
+            select(ChatSessionModel).where(
+                ChatSessionModel.session_id == session_id,
+                ChatSessionModel.user_id == user_id,
+            )
+        )
+        if not result.scalar_one_or_none():
+            return False
+        await self._session.execute(
+            delete(ChatSessionModel).where(
+                ChatSessionModel.session_id == session_id
+            )
+        )
+        await self._session.flush()
+        return True
+
+    async def add_exchange(self, session_id: str, question: str, answer: str, user_id: str | None = None) -> None:
         # Ensure session exists
         result = await self._session.execute(
             select(ChatSessionModel).where(
@@ -235,7 +306,7 @@ class ChatSessionRepository:
         )
         chat_session = result.scalar_one_or_none()
         if not chat_session:
-            chat_session = ChatSessionModel(session_id=session_id)
+            chat_session = ChatSessionModel(session_id=session_id, user_id=user_id)
             self._session.add(chat_session)
             await self._session.flush()
 

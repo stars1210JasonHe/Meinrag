@@ -40,8 +40,20 @@ class VectorStoreManager(ABC):
         ...
 
     @abstractmethod
+    def similarity_search_with_scores(
+        self, query: str, k: int, doc_ids: list[str] | None = None,
+    ) -> list[tuple[Document, float]]:
+        """Return top-k documents with similarity scores (0.0–1.0), optionally filtered by doc_ids."""
+        ...
+
+    @abstractmethod
     def get_all_documents(self) -> list[Document]:
         """Return all documents in the store (used for BM25 indexing)."""
+        ...
+
+    @abstractmethod
+    def get_chunks_by_doc(self, doc_id: str, chunk_indices: list[int] | None = None) -> list[Document]:
+        """Return chunks for a doc, optionally filtered by chunk indices. Sorted by chunk_index."""
         ...
 
     @abstractmethod

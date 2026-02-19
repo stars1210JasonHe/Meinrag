@@ -23,6 +23,9 @@
 |          |  +----------------------------------------------------------+  |
 +----------+----------------------------------------------------------------+
 ```
+Q: [ai-ml] whats this?
+Q: [+ New Chat] this design is abs not correct, i prefer you move this to the sidebar area, , and slip two window. the top window is new chat, the user can check the history record of talking, and when user click the history, it can still remember the conversation and continue to chat. like openai's history design. the bottom window can show the category. but i think your design for now is not satisfy my requirement. the category can appear like folder and subfolder for user to click. and i prefer user can upload doc by draging doc into those folders
+
 
 ## 2. Header Detail
 
@@ -87,6 +90,7 @@
 | +- - - - - - - - - - - -+|
 +---------------------------+
 ```
+Q: And when i click one file, i prefer when can only search the relevant result in this file, if i click a folder or maybe collection, i can earch the relevant result in this folder or collection. Have you achieved this?
 
 ### Document Item Actions
 
@@ -180,6 +184,8 @@
 +----------------------------------------------------------------+
 ```
 
+Q: i prefer after p.5 or somethingelse, you can show me the possibility of this chunk
+
 ## 6. Chat Area - Web Search Fallback Response
 
 ```
@@ -209,7 +215,7 @@
 | [Ask a question...                                        ] [>]|
 +----------------------------------------------------------------+
 ```
-
+Q: ok , idid not quie understand, how do you design this part? using duckdo??? or should i use service from openai perplexity etc?
 ## 7. Loading State (Thinking)
 
 ```

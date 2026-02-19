@@ -56,6 +56,7 @@ class QueryRequest(BaseModel):
     doc_ids: list[str] | None = Field(default=None, description="Filter by document IDs")
     collection: str | None = Field(default=None, description="Filter by collection name")
     session_id: str | None = Field(default=None, description="Chat session ID for memory")
+    force_web_search: bool = Field(default=False, description="Skip docs, go straight to web search")
 
 
 class SourceChunk(BaseModel):
@@ -65,6 +66,8 @@ class SourceChunk(BaseModel):
     doc_id: str | None = None
     page: int | None = None
     source_type: Literal["document", "web"] = "document"
+    score: float | None = None
+    url: str | None = None
 
 
 class QueryResponse(BaseModel):
@@ -84,6 +87,22 @@ class UserInfo(BaseModel):
 class UserCreateRequest(BaseModel):
     user_id: str = Field(..., min_length=1, max_length=50, pattern=r"^[a-zA-Z0-9_-]+$")
     display_name: str = Field(..., min_length=1, max_length=100)
+
+
+class SessionInfo(BaseModel):
+    session_id: str
+    preview: str
+    created_at: str
+    last_access: str
+
+
+class ChunkContextRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=2000)
+    source_type: Literal["document", "web"] = "document"
+    doc_id: str | None = None
+    chunk_index: int | None = None
+    url: str | None = None
+    session_id: str | None = None
 
 
 class CollectionsResponse(BaseModel):
