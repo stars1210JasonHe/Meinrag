@@ -16,18 +16,20 @@ MEINRAG is a full-stack application that allows you to upload documents, organiz
 - **Multi-language Support**: Ask questions in English or Chinese (中文)
 - **Smart Collections**: Organize documents by topic or category with a hierarchical taxonomy
 - **AI Auto-Categorization**: Let AI suggest collection names based on document content
-- **Contextual Conversations**: Ask follow-up questions with chat memory
+- **Contextual Conversations**: Ask follow-up questions with persistent chat memory
 - **Source Citations**: Every answer includes source file, page number, and expandable chunk text
 - **Multiple Document Formats**: PDF, DOCX, TXT, MD, HTML, XLSX, PPTX
-- **Web Search Fallback**: Automatically searches the web when no relevant documents are found
+- **Smart Web Search**: Auto-triggers when docs are insufficient, with LLM query rewriting and full-page fetching
+- **Dual-Answer Mode**: Get both RAG answers from your docs and pure AI general knowledge on demand
 
 ### Advanced Features
 - **Hybrid Search**: Combines semantic vector search with BM25 keyword matching
 - **LLM Re-ranking**: Improves result quality using language model scoring
 - **Document Filtering**: Query specific documents or collections
-- **Session Management**: Multiple chat sessions per user with New Chat button
+- **Chunk Interaction**: Ask follow-up questions about specific source chunks, copy/quote text
+- **Session Management**: Multiple persistent chat sessions per user
 - **Flexible Vector Stores**: Support for ChromaDB and FAISS
-- **Multi-User System**: Simple user profiles with configurable document isolation
+- **Multi-User System**: User profiles with configurable document isolation
 
 ---
 
@@ -162,18 +164,18 @@ MEINRAG/
 │   ├── llm/                      # LLM provider integration
 │   ├── models/                   # Pydantic schemas
 │   ├── rag/                      # RAG pipeline (chain, prompts)
-│   ├── routers/                  # API endpoints
-│   ├── services/                 # Business logic (document processing, AI suggestions)
-│   └── vectorstore/              # Vector store implementations
+│   ├── routers/                  # API endpoints (health, documents, query, sessions)
+│   ├── services/                 # Business logic (document processing, AI suggestions, web search)
+│   └── vectorstore/              # Vector store implementations (ChromaDB, FAISS)
 ├── alembic/                      # Database migrations
-├── frontend/                     # React frontend
+├── frontend/                     # React 18 + Vite frontend
 │   ├── src/
-│   │   ├── App.jsx               # Main React component
+│   │   ├── App.jsx               # Main React component + state management
 │   │   ├── App.css               # Application styles
-│   │   └── main.jsx              # Entry point
+│   │   ├── api/                  # API client modules (client, documents, query, sessions, users)
+│   │   └── components/           # 15+ React components (Header, Sidebar, ChatArea, etc.)
 │   └── package.json
-├── scripts/                      # Utility scripts
-│   └── migrate_json_to_pg.py     # One-time JSON -> PostgreSQL migration
+├── tests/                        # Test suite (118 tests, in-memory SQLite)
 ├── data/                         # Uploaded files + vector store
 ├── docker-compose.yml            # PostgreSQL 16 container
 ├── alembic.ini                   # Alembic config
@@ -207,9 +209,10 @@ HYBRID_SEARCH_ENABLED=false      # Enable BM25+Vector fusion
 RERANK_ENABLED=false             # Enable LLM re-ranking
 MEMORY_SESSION_TTL=3600          # Chat session timeout (seconds)
 
-# Web Search Fallback
+# Web Search
 WEB_SEARCH_ENABLED=true          # Fall back to DuckDuckGo when no docs match
-WEB_SEARCH_MAX_RESULTS=3         # Number of web results to fetch
+WEB_SEARCH_MAX_RESULTS=9         # Number of web results per query set
+WEB_SEARCH_SCORE_THRESHOLD=0.5   # Min similarity score before triggering web fallback
 
 # User System
 DEFAULT_USER=admin               # Default user ID
@@ -249,15 +252,23 @@ RERANK_TOP_N=3
 - `DELETE /documents/{doc_id}` - Delete document
 
 ### Query
-- `POST /query` - Ask a question
+- `POST /query` - Ask a question (supports `collection`, `doc_ids`, `force_web_search`)
   ```json
   {
     "question": "What is this about?",
     "collection": "legal-compliance",
-    "session_id": "user123",
-    "top_k": 4
+    "session_id": "session-123",
+    "top_k": 4,
+    "force_web_search": false
   }
   ```
+- `POST /query/chunk-context` - Ask about a specific source chunk
+- `POST /query/ask-ai` - Get pure AI general knowledge answer (no document context)
+
+### Sessions
+- `GET /sessions` - List chat sessions
+- `GET /sessions/{session_id}/messages` - Get session messages
+- `DELETE /sessions/{session_id}` - Delete a session
 
 ### Health
 - `GET /health` - Check system status
@@ -322,26 +333,37 @@ Tests use in-memory SQLite automatically — no PostgreSQL needed to run the tes
 - [x] React frontend with sidebar, collections, source citations
 - [x] Multi-collection documents with inline editing and AI reclassify
 
-### v0.4 - Chat & Web Search (current)
+### v0.4 - Chat & Web Search
 - [x] New Chat button (multiple sessions per user)
 - [x] Web search fallback (DuckDuckGo, auto-triggers when no docs match)
 - [x] Page numbers in source citations
 - [x] Expandable source chunks with file download
-- [x] Blank state fix (centered welcome screen)
 
-### v0.5 - Frontend Redesign (next)
-- [ ] Frontend UI/UX redesign and polish
+### v0.5 - Frontend Redesign & Smart Search
+- [x] Complete frontend redesign with 15+ React components
+- [x] Smart web search: LLM query rewriting, multi-query, full-page fetching
+- [x] Score threshold auto-fallback to web search
+- [x] Manual web search button
+- [x] Chunk interaction: ask about, copy, quote source chunks
+- [x] Chat history sidebar with session management
+
+### v0.6 - Dual-Answer Mode (current)
+- [x] Enhanced RAG prompt: supplements with general knowledge when docs insufficient
+- [x] On-demand "Ask AI" button for pure general knowledge answers
+- [x] Collapsible "AI Knowledge" section with purple theme
+- [x] POST /query/ask-ai endpoint with validation
+
+### v0.7 - Streaming & Polish (next)
+- [ ] Streaming responses (SSE) for real-time token display
 - [ ] Markdown rendering for AI responses
-- [ ] Dark mode / theme support
-- [ ] Mobile responsive improvements
-- [ ] Drag-and-drop file upload
+- [ ] Production hardening (Docker, CI, structured logging)
 
 ### Future
-- [ ] User authentication (login/password)
+- [ ] User authentication (login/password with JWT)
 - [ ] Document versioning
 - [ ] Conversation export (PDF/Markdown)
-- [ ] Advanced analytics dashboard
-- [ ] Streaming responses (SSE)
+- [ ] Analytics dashboard
+- [ ] Dark mode / theme support
 - [ ] Multi-language UI (i18n)
 
 ---
