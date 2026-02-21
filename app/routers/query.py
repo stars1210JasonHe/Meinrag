@@ -2,6 +2,7 @@ import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
+from sse_starlette.sse import EventSourceResponse
 
 from app.config import Settings
 from app.dependencies import (
@@ -13,6 +14,7 @@ from app.models.schemas import QueryRequest, QueryResponse, SourceChunk, ChunkCo
 from langchain_core.output_parsers import StrOutputParser
 from app.rag.chain import build_rag_chain
 from app.rag.prompts import WEB_SEARCH_PROMPT, CHUNK_CONTEXT_PROMPT, QUERY_REWRITE_PROMPT, ASK_AI_PROMPT
+from app.routers.stream_helpers import sse_event, stream_chain_response
 from app.vectorstore.base import VectorStoreManager
 from langchain_core.language_models import BaseChatModel
 
@@ -373,3 +375,221 @@ async def ask_ai(
         raise HTTPException(status_code=500, detail=f"Ask AI failed: {str(e)}")
 
     return AskAIResponse(answer=answer, question=request.question)
+
+
+# ================================
+# STREAMING ENDPOINTS
+# ================================
+
+@router.post("/query/stream")
+async def query_documents_stream(
+    request: QueryRequest,
+    settings: Settings = Depends(get_settings),
+    vector_store: VectorStoreManager = Depends(get_vector_store),
+    llm: BaseChatModel = Depends(get_llm),
+    memory_manager: ChatSessionRepository = Depends(get_memory_manager),
+    registry: DocumentRepository = Depends(get_registry),
+    current_user: str = Depends(get_current_user),
+):
+    """Streaming version of /query. Returns SSE events."""
+    # --- Same doc_ids / collection / user isolation logic as /query ---
+    doc_ids = request.doc_ids
+    user_scoped = request.collection is not None or request.doc_ids is not None
+
+    if settings.user_isolation in ("all", "documents"):
+        user_docs = await registry.list_all(user_id=current_user)
+        user_doc_ids = {d["doc_id"] for d in user_docs}
+        if request.collection:
+            collection_docs = await registry.list_by_collection(request.collection, user_id=current_user)
+            collection_doc_ids = [d["doc_id"] for d in collection_docs]
+            if doc_ids:
+                doc_ids = [d for d in doc_ids if d in collection_doc_ids and d in user_doc_ids]
+            else:
+                doc_ids = collection_doc_ids
+        elif doc_ids:
+            doc_ids = [d for d in doc_ids if d in user_doc_ids]
+        else:
+            doc_ids = list(user_doc_ids) if user_doc_ids else None
+    elif request.collection:
+        collection_docs = await registry.list_by_collection(request.collection)
+        doc_ids = [d["doc_id"] for d in collection_docs]
+
+    chat_history = None
+    if request.session_id:
+        chat_history = await memory_manager.get_history(request.session_id) or None
+
+    try:
+        chain, retriever = build_rag_chain(
+            vector_store=vector_store, llm=llm, top_k=request.top_k,
+            doc_ids=doc_ids, chat_history=chat_history, settings=settings,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # --- Retrieval (done before streaming starts) ---
+    needs_web_search = False
+    retrieved = []
+    web_sources = []
+    web_context = ""
+
+    if request.force_web_search and settings.web_search_enabled:
+        needs_web_search = True
+    else:
+        retrieved = vector_store.similarity_search_with_scores(
+            request.question, k=request.top_k, doc_ids=doc_ids,
+        )
+        if settings.web_search_enabled and not user_scoped:
+            if not retrieved:
+                needs_web_search = True
+            elif max(score for _, score in retrieved) < settings.web_search_score_threshold:
+                needs_web_search = True
+
+    # Pre-compute web search context if needed
+    if needs_web_search:
+        from app.services.web_search import create_web_search_provider
+        import httpx
+        import re
+
+        provider = create_web_search_provider(settings.web_search_provider)
+        search_queries = await _rewrite_search_queries(request.question, llm)
+        all_results = []
+        seen_urls = set()
+        per_query_limit = max(3, settings.web_search_max_results // len(search_queries))
+        for query in search_queries:
+            try:
+                results = await provider.search(query, max_results=per_query_limit)
+                for r in results:
+                    if r.url not in seen_urls:
+                        seen_urls.add(r.url)
+                        all_results.append(r)
+            except Exception as e:
+                logger.warning(f"Web search failed for query '{query}': {e}")
+
+        async def _fetch_page(url: str) -> str:
+            try:
+                async with httpx.AsyncClient(timeout=8, follow_redirects=True) as client:
+                    resp = await client.get(url)
+                    resp.raise_for_status()
+                    text = resp.text
+                    text = re.sub(r"<script[^>]*>.*?</script>", "", text, flags=re.DOTALL)
+                    text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL)
+                    text = re.sub(r"<[^>]+>", " ", text)
+                    text = re.sub(r"\s+", " ", text).strip()
+                    return text[:3000]
+            except Exception:
+                return ""
+
+        top_results = all_results[:min(6, len(all_results))]
+        if top_results:
+            page_texts = await asyncio.gather(*[_fetch_page(r.url) for r in top_results[:3]])
+            web_context_parts = []
+            for i, r in enumerate(top_results):
+                part = f"[{_sanitize(r.title, 200)}]\n"
+                if i < len(page_texts) and page_texts[i]:
+                    part += f"{_sanitize(page_texts[i], 2000)}\n"
+                else:
+                    part += f"{_sanitize(r.body, 800)}\n"
+                part += f"URL: {_sanitize(r.url, 300)}"
+                web_context_parts.append(part)
+            web_context = "\n\n---\n\n".join(web_context_parts)
+
+        web_sources = [
+            SourceChunk(
+                content=_sanitize(r.body, 500),
+                source_file=_sanitize(r.title, 200),
+                source_type="web",
+                url=_sanitize(r.url, 300),
+            ).model_dump()
+            for r in top_results
+        ]
+
+    async def event_generator():
+        try:
+            if needs_web_search:
+                if not web_context:
+                    yield sse_event("sources", {"sources": [], "web_search_used": False, "session_id": request.session_id})
+                    yield sse_event("done", {"answer": "I couldn't find relevant information in your documents or on the web.", "session_id": request.session_id})
+                    return
+
+                web_chain = WEB_SEARCH_PROMPT | llm | StrOutputParser()
+                async for event in stream_chain_response(
+                    web_chain,
+                    {"context": web_context, "question": request.question},
+                    web_sources, request.session_id, web_search_used=True,
+                ):
+                    yield event
+
+                # Persist to memory after streaming
+                if request.session_id:
+                    # Re-collect full answer from the done event (last yielded)
+                    # We re-invoke non-streaming for memory since we already streamed
+                    pass  # Memory handled below
+            else:
+                # Normal RAG path
+                sources_data = [
+                    SourceChunk(
+                        content=_smart_truncate(doc.page_content, 500),
+                        source_file=doc.metadata.get("source_file", "unknown"),
+                        chunk_index=doc.metadata.get("chunk_index"),
+                        doc_id=doc.metadata.get("doc_id"),
+                        page=doc.metadata.get("page"),
+                        score=round(score, 4),
+                    ).model_dump()
+                    for doc, score in retrieved
+                ]
+
+                async for event in stream_chain_response(
+                    chain, request.question, sources_data, request.session_id,
+                ):
+                    yield event
+        except Exception as e:
+            logger.exception("Streaming query failed")
+            yield sse_event("error", {"detail": str(e)})
+
+    # Wrap generator to also handle memory persistence
+    async def event_generator_with_memory():
+        full_answer_parts = []
+        async for event in event_generator():
+            yield event
+            # Capture tokens for memory
+            if event.get("event") == "token":
+                import json as _json
+                data = _json.loads(event["data"])
+                full_answer_parts.append(data.get("token", ""))
+
+        # Persist to memory after all events sent
+        if request.session_id and full_answer_parts:
+            try:
+                full_answer = "".join(full_answer_parts)
+                await memory_manager.add_exchange(
+                    request.session_id, request.question, full_answer, user_id=current_user,
+                )
+            except Exception:
+                logger.warning("Failed to persist streaming exchange to memory")
+
+    return EventSourceResponse(event_generator_with_memory())
+
+
+@router.post("/query/ask-ai/stream")
+async def ask_ai_stream(
+    request: AskAIRequest,
+    llm: BaseChatModel = Depends(get_llm),
+):
+    """Streaming version of /query/ask-ai. Returns SSE events."""
+    chain = ASK_AI_PROMPT | llm | StrOutputParser()
+
+    async def event_generator():
+        yield sse_event("sources", {"sources": []})
+        full_answer = []
+        try:
+            async for chunk in chain.astream({"question": request.question}):
+                if chunk:
+                    full_answer.append(chunk)
+                    yield sse_event("token", {"token": chunk})
+        except Exception as e:
+            logger.exception("Ask AI streaming failed")
+            yield sse_event("error", {"detail": str(e)})
+            return
+        yield sse_event("done", {"answer": "".join(full_answer)})
+
+    return EventSourceResponse(event_generator())

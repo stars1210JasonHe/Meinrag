@@ -835,8 +835,132 @@ body {
   font-size: 0.93rem;
   line-height: 1.7;
   color: #2d2d2d;
-  white-space: pre-wrap;
 }
+
+/* ================================
+   MARKDOWN IN MESSAGES
+   ================================ */
+.message-assistant .message-text h1,
+.message-assistant .message-text h2,
+.message-assistant .message-text h3 {
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+  line-height: 1.3;
+}
+
+.message-assistant .message-text h1 { font-size: 1.3rem; }
+.message-assistant .message-text h2 { font-size: 1.15rem; }
+.message-assistant .message-text h3 { font-size: 1.05rem; }
+
+.message-assistant .message-text p {
+  margin-bottom: 0.6rem;
+}
+
+.message-assistant .message-text p:last-child {
+  margin-bottom: 0;
+}
+
+.message-assistant .message-text ul,
+.message-assistant .message-text ol {
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+}
+
+.message-assistant .message-text li {
+  margin-bottom: 0.3rem;
+}
+
+.message-assistant .message-text code {
+  background: #e8eaed;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.88rem;
+  font-family: 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+}
+
+.message-assistant .message-text pre {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 1rem;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 0.75rem 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.message-assistant .message-text pre code {
+  background: none;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+.message-assistant .message-text blockquote {
+  border-left: 3px solid #667eea;
+  margin: 0.75rem 0;
+  padding: 0.5rem 1rem;
+  background: #f8f9ff;
+  color: #555;
+}
+
+.message-assistant .message-text table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.75rem 0;
+  font-size: 0.9rem;
+}
+
+.message-assistant .message-text th,
+.message-assistant .message-text td {
+  border: 1px solid #e0e0e0;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+
+.message-assistant .message-text th {
+  background: #f5f7fa;
+  font-weight: 600;
+}
+
+.message-assistant .message-text a {
+  color: #667eea;
+  text-decoration: none;
+}
+
+.message-assistant .message-text a:hover {
+  text-decoration: underline;
+}
+
+.message-assistant .message-text strong {
+  font-weight: 600;
+}
+
+.message-assistant .message-text hr {
+  border: none;
+  border-top: 1px solid #e0e0e0;
+  margin: 1rem 0;
+}
+
+/* Same styles for AI Knowledge section */
+.ai-answer-content h1,
+.ai-answer-content h2,
+.ai-answer-content h3 {
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+  line-height: 1.3;
+}
+
+.ai-answer-content p { margin-bottom: 0.6rem; }
+.ai-answer-content p:last-child { margin-bottom: 0; }
+.ai-answer-content ul, .ai-answer-content ol { margin: 0.5rem 0; padding-left: 1.5rem; }
+.ai-answer-content li { margin-bottom: 0.3rem; }
+.ai-answer-content code { background: #e8eaed; padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.88rem; }
+.ai-answer-content pre { background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 6px; overflow-x: auto; margin: 0.75rem 0; }
+.ai-answer-content pre code { background: none; padding: 0; color: inherit; }
+.ai-answer-content a { color: #6b46c1; text-decoration: none; }
+.ai-answer-content a:hover { text-decoration: underline; }
+.ai-answer-content strong { font-weight: 600; }
 
 /* ================================
    INPUT BAR
@@ -966,6 +1090,27 @@ body {
 }
 
 .connection-error button:hover { background: #5a1520; }
+
+/* ================================
+   STREAMING CURSOR
+   ================================ */
+.message-text.streaming::after {
+  content: '\258C';
+  animation: blink 0.7s step-end infinite;
+  color: #667eea;
+  font-weight: 300;
+}
+
+.ai-answer-content.ai-streaming::after {
+  content: '\258C';
+  animation: blink 0.7s step-end infinite;
+  color: #6b46c1;
+  font-weight: 300;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
 
 /* ================================
    ANIMATIONS

@@ -1,0 +1,11 @@
+.git
+.env
+frontend/node_modules
+data/
+__pycache__
+*.pyc
+.pytest_cache
+tests/
+screenshots/
+.claude/
+nul

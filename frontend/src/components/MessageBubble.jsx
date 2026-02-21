@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Globe, Sparkles, ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
 import SourceCitation from './SourceCitation'
+import MarkdownRenderer from './MarkdownRenderer'
 
 export default function MessageBubble({ msg, msgIdx, onDownloadDoc, onAskAboutChunk, onQuote, onAskAI }) {
   const [aiExpanded, setAiExpanded] = useState(true)
@@ -24,17 +25,17 @@ export default function MessageBubble({ msg, msgIdx, onDownloadDoc, onAskAboutCh
   }
 
   // assistant
-  const showAskAIButton = msg.question && !msg.ai_answer && !msg.ai_loading
+  const showAskAIButton = msg.question && !msg.ai_answer && !msg.ai_loading && !msg.streaming
 
   return (
     <div className="message message-assistant">
       <div className="message-content">
-        <div className="message-text">
+        <div className={`message-text${msg.streaming ? ' streaming' : ''}`}>
           {msg.web_search_used && (
             <span className="web-search-badge"><Globe size={12} /> Web Search</span>
           )}
-          {msg.content}
-          {msg.sources && msg.sources.length > 0 && (
+          <MarkdownRenderer content={msg.content} />
+          {!msg.streaming && msg.sources && msg.sources.length > 0 && (
             <div className="sources">
               <div className="sources-title">
                 {msg.web_search_used ? 'Web Sources' : 'Sources'}
@@ -75,7 +76,7 @@ export default function MessageBubble({ msg, msgIdx, onDownloadDoc, onAskAboutCh
                 <span>AI Knowledge</span>
               </div>
               {aiExpanded && (
-                <div className="ai-answer-content">{msg.ai_answer}</div>
+                <div className={`ai-answer-content${msg.ai_loading ? ' ai-streaming' : ''}`}><MarkdownRenderer content={msg.ai_answer} /></div>
               )}
             </div>
           )}

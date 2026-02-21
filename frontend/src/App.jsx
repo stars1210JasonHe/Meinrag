@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import './App.css'
+import 'highlight.js/styles/github-dark.css'
 
 import Header from './components/Header'
 import Sidebar from './components/Sidebar'
@@ -8,7 +9,7 @@ import ChatArea from './components/ChatArea'
 import { fetchDocuments, fetchCollections, uploadDocument, deleteDocument, downloadDocument, patchDocumentCollections, reclassifyDocument } from './api/documents'
 import { fetchUsers, createUser } from './api/users'
 import { listSessions, getSessionMessages, deleteSession } from './api/sessions'
-import { sendQuery, sendChunkContextQuery, sendAskAI } from './api/query'
+import { sendQuery, sendQueryStream, sendChunkContextQuery, sendAskAI, sendAskAIStream } from './api/query'
 import { API_BASE } from './api/client'
 
 function App() {
@@ -119,27 +120,100 @@ function App() {
     setLoading(true)
     setMessages(prev => [...prev, { type: 'user', content: question }])
 
-    try {
-      const queryOpts = { sessionId, userId: currentUser, forceWebSearch }
-      if (selectedFilter.type === 'collection') queryOpts.collection = selectedFilter.value
-      if (selectedFilter.type === 'doc') queryOpts.docIds = [selectedFilter.value]
+    // Add placeholder assistant message for streaming
+    const assistantMsg = {
+      type: 'assistant',
+      content: '',
+      sources: [],
+      web_search_used: false,
+      streaming: true,
+      question,
+      ai_answer: null,
+      ai_loading: false,
+    }
+    setMessages(prev => [...prev, assistantMsg])
 
-      const result = await sendQuery(question, queryOpts)
-      setMessages(prev => [...prev, {
-        type: 'assistant',
-        content: result.answer,
-        sources: result.sources,
-        web_search_used: result.web_search_used || false,
-        question,
-        ai_answer: null,
-        ai_loading: false,
-      }])
+    const queryOpts = { sessionId, userId: currentUser, forceWebSearch }
+    if (selectedFilter.type === 'collection') queryOpts.collection = selectedFilter.value
+    if (selectedFilter.type === 'doc') queryOpts.docIds = [selectedFilter.value]
+
+    try {
+      await sendQueryStream(question, queryOpts, {
+        onSources: (data) => {
+          setMessages(prev => {
+            const updated = [...prev]
+            const last = updated[updated.length - 1]
+            if (last?.streaming) {
+              updated[updated.length - 1] = { ...last, sources: data.sources || [], web_search_used: data.web_search_used || false }
+            }
+            return updated
+          })
+        },
+        onToken: (token) => {
+          setMessages(prev => {
+            const updated = [...prev]
+            const last = updated[updated.length - 1]
+            if (last?.streaming) {
+              updated[updated.length - 1] = { ...last, content: last.content + token }
+            }
+            return updated
+          })
+        },
+        onDone: () => {
+          setMessages(prev => {
+            const updated = [...prev]
+            const last = updated[updated.length - 1]
+            if (last?.streaming) {
+              updated[updated.length - 1] = { ...last, streaming: false }
+            }
+            return updated
+          })
+        },
+        onError: (data) => {
+          setMessages(prev => {
+            const updated = [...prev]
+            const last = updated[updated.length - 1]
+            if (last?.streaming) {
+              updated[updated.length - 1] = { ...last, content: last.content || `Error: ${data.detail}`, streaming: false }
+            }
+            return updated
+          })
+        },
+      })
       listSessions(currentUser).then(setSessions).catch(() => {})
     } catch (error) {
-      setMessages(prev => [...prev, {
-        type: 'system',
-        content: `Error: ${error.response?.data?.detail || error.message}`,
-      }])
+      // Fallback to non-streaming if stream fails
+      try {
+        const result = await sendQuery(question, queryOpts)
+        setMessages(prev => {
+          const updated = [...prev]
+          const last = updated[updated.length - 1]
+          if (last?.streaming) {
+            updated[updated.length - 1] = {
+              ...last,
+              content: result.answer,
+              sources: result.sources,
+              web_search_used: result.web_search_used || false,
+              streaming: false,
+            }
+          }
+          return updated
+        })
+        listSessions(currentUser).then(setSessions).catch(() => {})
+      } catch (fallbackErr) {
+        setMessages(prev => {
+          const updated = [...prev]
+          const last = updated[updated.length - 1]
+          if (last?.streaming) {
+            updated[updated.length - 1] = {
+              ...last,
+              content: `Error: ${fallbackErr.response?.data?.detail || fallbackErr.message}`,
+              streaming: false,
+            }
+          }
+          return updated
+        })
+      }
     } finally {
       setLoading(false)
     }
@@ -182,18 +256,39 @@ function App() {
     if (!question) return
 
     setMessages(prev => prev.map((m, i) =>
-      i === msgIdx ? { ...m, ai_loading: true } : m
+      i === msgIdx ? { ...m, ai_loading: true, ai_answer: '' } : m
     ))
 
     try {
-      const result = await sendAskAI(question, { userId: currentUser })
-      setMessages(prev => prev.map((m, i) =>
-        i === msgIdx ? { ...m, ai_answer: result.answer, ai_loading: false } : m
-      ))
+      await sendAskAIStream(question, { userId: currentUser }, {
+        onToken: (token) => {
+          setMessages(prev => prev.map((m, i) =>
+            i === msgIdx ? { ...m, ai_answer: (m.ai_answer || '') + token } : m
+          ))
+        },
+        onDone: () => {
+          setMessages(prev => prev.map((m, i) =>
+            i === msgIdx ? { ...m, ai_loading: false } : m
+          ))
+        },
+        onError: (data) => {
+          setMessages(prev => prev.map((m, i) =>
+            i === msgIdx ? { ...m, ai_answer: `Error: ${data.detail}`, ai_loading: false } : m
+          ))
+        },
+      })
     } catch (error) {
-      setMessages(prev => prev.map((m, i) =>
-        i === msgIdx ? { ...m, ai_answer: `Error: ${error.response?.data?.detail || error.message}`, ai_loading: false } : m
-      ))
+      // Fallback to non-streaming
+      try {
+        const result = await sendAskAI(question, { userId: currentUser })
+        setMessages(prev => prev.map((m, i) =>
+          i === msgIdx ? { ...m, ai_answer: result.answer, ai_loading: false } : m
+        ))
+      } catch (fallbackErr) {
+        setMessages(prev => prev.map((m, i) =>
+          i === msgIdx ? { ...m, ai_answer: `Error: ${fallbackErr.response?.data?.detail || fallbackErr.message}`, ai_loading: false } : m
+        ))
+      }
     }
   }
 

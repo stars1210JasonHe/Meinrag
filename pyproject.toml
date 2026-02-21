@@ -41,6 +41,9 @@ dependencies = [
 
     # Web search fallback
     "duckduckgo-search>=7.0",
+
+    # Streaming
+    "sse-starlette>=2.0.0",
 ]
 
 [dependency-groups]
@@ -50,6 +53,7 @@ dev = [
     "httpx>=0.27.0",
     "fpdf2>=2.8.5",
     "aiosqlite>=0.22.1",
+    "playwright>=1.58.0",
 ]
 
 [tool.pytest.ini_options]
