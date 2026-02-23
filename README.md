@@ -13,6 +13,8 @@ MEINRAG is a full-stack application that allows you to upload documents, organiz
 ## Features
 
 ### Core Capabilities
+- **Streaming Responses**: Real-time token-by-token answer display via Server-Sent Events (SSE)
+- **Markdown Rendering**: AI responses render with proper formatting — bold, lists, code blocks, tables, syntax highlighting
 - **Multi-language Support**: Ask questions in English or Chinese (中文)
 - **Smart Collections**: Organize documents by topic or category with a hierarchical taxonomy
 - **AI Auto-Categorization**: Let AI suggest collection names based on document content
@@ -30,23 +32,27 @@ MEINRAG is a full-stack application that allows you to upload documents, organiz
 - **Session Management**: Multiple persistent chat sessions per user
 - **Flexible Vector Stores**: Support for ChromaDB and FAISS
 - **Multi-User System**: User profiles with configurable document isolation
+- **Docker Deployment**: Production-ready Dockerfile + docker-compose for full-stack deployment
+- **Deep Health Checks**: `/health/deep` endpoint tests DB, vector store, and LLM connectivity
 
 ---
 
 ## Tech Stack
 
 ### Backend
-- **Framework**: FastAPI
+- **Framework**: FastAPI with SSE streaming (sse-starlette)
 - **Database**: PostgreSQL 16 (via Docker) + SQLAlchemy 2.0 async
 - **Migrations**: Alembic
-- **LLM Integration**: LangChain with OpenAI/OpenRouter
+- **LLM Integration**: LangChain with OpenAI/OpenRouter (streaming enabled)
 - **Vector Stores**: ChromaDB, FAISS
 - **Embeddings**: OpenAI text-embedding-3-small
 - **Document Processing**: PyPDF2, python-docx, BeautifulSoup4, openpyxl, python-pptx
+- **Deployment**: Docker + docker-compose
 
 ### Frontend
 - **Framework**: React 18 with Vite
-- **HTTP Client**: Axios
+- **Markdown**: react-markdown + remark-gfm + rehype-highlight
+- **HTTP Client**: Axios + fetch (SSE streaming)
 - **Icons**: Lucide React
 - **Styling**: Custom CSS
 
@@ -165,6 +171,7 @@ MEINRAG/
 │   ├── models/                   # Pydantic schemas
 │   ├── rag/                      # RAG pipeline (chain, prompts)
 │   ├── routers/                  # API endpoints (health, documents, query, sessions)
+│   │   └── stream_helpers.py     # SSE event formatting + streaming generator
 │   ├── services/                 # Business logic (document processing, AI suggestions, web search)
 │   └── vectorstore/              # Vector store implementations (ChromaDB, FAISS)
 ├── alembic/                      # Database migrations
@@ -173,11 +180,13 @@ MEINRAG/
 │   │   ├── App.jsx               # Main React component + state management
 │   │   ├── App.css               # Application styles
 │   │   ├── api/                  # API client modules (client, documents, query, sessions, users)
-│   │   └── components/           # 15+ React components (Header, Sidebar, ChatArea, etc.)
+│   │   └── components/           # 15+ React components + MarkdownRenderer
 │   └── package.json
-├── tests/                        # Test suite (118 tests, in-memory SQLite)
+├── tests/                        # Test suite (125 tests, in-memory SQLite)
 ├── data/                         # Uploaded files + vector store
-├── docker-compose.yml            # PostgreSQL 16 container
+├── Dockerfile                    # Production container (python:3.12-slim + uv)
+├── .dockerignore                 # Docker build exclusions
+├── docker-compose.yml            # PostgreSQL 16 + app containers
 ├── alembic.ini                   # Alembic config
 ├── .env                          # Environment variables
 ├── pyproject.toml                # Python dependencies
@@ -262,8 +271,10 @@ RERANK_TOP_N=3
     "force_web_search": false
   }
   ```
+- `POST /query/stream` - Streaming version of `/query` via SSE (sources → tokens → done)
 - `POST /query/chunk-context` - Ask about a specific source chunk
 - `POST /query/ask-ai` - Get pure AI general knowledge answer (no document context)
+- `POST /query/ask-ai/stream` - Streaming version of `/query/ask-ai` via SSE
 
 ### Sessions
 - `GET /sessions` - List chat sessions
@@ -271,7 +282,8 @@ RERANK_TOP_N=3
 - `DELETE /sessions/{session_id}` - Delete a session
 
 ### Health
-- `GET /health` - Check system status
+- `GET /health` - Quick system status
+- `GET /health/deep` - Deep health check (tests DB, vector store, LLM connectivity)
 
 ---
 
@@ -347,18 +359,21 @@ Tests use in-memory SQLite automatically — no PostgreSQL needed to run the tes
 - [x] Chunk interaction: ask about, copy, quote source chunks
 - [x] Chat history sidebar with session management
 
-### v0.6 - Dual-Answer Mode (current)
+### v0.6 - Dual-Answer Mode
 - [x] Enhanced RAG prompt: supplements with general knowledge when docs insufficient
 - [x] On-demand "Ask AI" button for pure general knowledge answers
 - [x] Collapsible "AI Knowledge" section with purple theme
 - [x] POST /query/ask-ai endpoint with validation
 
-### v0.7 - Streaming & Polish (next)
-- [ ] Streaming responses (SSE) for real-time token display
-- [ ] Markdown rendering for AI responses
-- [ ] Production hardening (Docker, CI, structured logging)
+### v0.7 - Streaming, Markdown & Production (current)
+- [x] Streaming responses (SSE) — real-time token display for both RAG and Ask AI
+- [x] Markdown rendering — bold, lists, code blocks, tables, syntax highlighting
+- [x] Deep health checks — `/health/deep` tests DB, vector store, LLM
+- [x] Docker deployment — Dockerfile + docker-compose for full-stack deployment
+- [x] 125 tests passing
 
 ### Future
+- [ ] Advanced retrieval (parent-document retriever, metadata filtering)
 - [ ] User authentication (login/password with JWT)
 - [ ] Document versioning
 - [ ] Conversation export (PDF/Markdown)

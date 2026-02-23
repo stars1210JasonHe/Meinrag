@@ -1,6 +1,6 @@
 # MEINRAG Roadmap
 
-Current status as of 2026-02-19. **Version: v0.6**
+Current status as of 2026-02-23. **Version: v0.7**
 
 ---
 
@@ -103,34 +103,41 @@ Current status as of 2026-02-19. **Version: v0.6**
 - [x] Collapsible "AI Knowledge" section with purple theme
 - [x] `AskAIRequest`/`AskAIResponse` schemas with validation
 
+### Phase 14 — Streaming Responses
+- [x] `POST /query/stream` endpoint returning Server-Sent Events (SSE)
+- [x] `POST /query/ask-ai/stream` endpoint for streaming Ask AI responses
+- [x] Stream LLM tokens as they arrive via `chain.astream()` + `sse-starlette`
+- [x] Frontend consumes SSE via `fetch()` + `ReadableStream` (POST-compatible)
+- [x] CRLF normalization in SSE parser for Windows compatibility
+- [x] Streaming cursor (blinking `|`) with automatic fallback to non-streaming
+
+### Phase 15 — Markdown Rendering
+- [x] `react-markdown` + `remark-gfm` for GitHub-flavored markdown
+- [x] `rehype-highlight` for syntax-highlighted code blocks
+- [x] `MarkdownRenderer` component used for both RAG answers and AI Knowledge
+- [x] Scoped CSS for headings, lists, code, tables, blockquotes, links
+
+### Phase 16 — Production Hardening
+- [x] `GET /health/deep` endpoint — tests DB, vector store, and LLM connectivity
+- [x] `Dockerfile` — `python:3.12-slim` + `uv` from official image, `--no-dev` install
+- [x] `.dockerignore` — excludes `.git`, `.env`, `node_modules`, `tests/`, etc.
+- [x] `docker-compose.yml` — app service with postgres healthcheck dependency
+- [x] 125 tests passing (7 new streaming + deep health tests)
+
 ---
 
 ## Up Next
-
-### Phase 14 — Streaming Responses
-- [ ] `POST /query/stream` endpoint returning Server-Sent Events (SSE)
-- [ ] Stream LLM tokens as they arrive instead of waiting for full answer
-- [ ] Frontend renders partial answers in real time
-- [ ] Streaming for both RAG and Ask AI responses
-
-### Phase 15 — Markdown Rendering
-- [ ] Install `react-markdown` + `remark-gfm` for GitHub-flavored markdown
-- [ ] Render AI responses with proper formatting (bold, lists, code blocks, tables)
-- [ ] Syntax highlighting for code blocks (`rehype-highlight`)
-- [ ] Apply to both RAG answers and AI Knowledge section
-
-### Phase 16 — Observability & Production Hardening
-- [ ] Structured JSON logging
-- [ ] Request tracing (correlation IDs)
-- [ ] LangSmith or custom callback handler for chain tracing
-- [ ] Health endpoint checks LLM/vector store connectivity
-- [ ] Dockerfile + docker-compose for full-stack deployment
-- [ ] CI pipeline (lint, test, build image)
 
 ### Phase 17 — Advanced Retrieval
 - [ ] Parent-document retriever (store small chunks, retrieve full sections)
 - [ ] Metadata-rich filtering (date range, file type, tags)
 - [ ] Configurable embedding models (swap out `text-embedding-3-small`)
+
+### Phase 18 — Observability
+- [ ] Structured JSON logging
+- [ ] Request tracing (correlation IDs)
+- [ ] LangSmith or custom callback handler for chain tracing
+- [ ] CI pipeline (lint, test, build image)
 
 ### Future Ideas
 - [ ] User authentication (login/password with JWT)
@@ -172,16 +179,17 @@ app/
     collection_suggester.py  AI collection suggestion
     web_search.py        DuckDuckGo web search service
   routers/
-    health.py            GET /health
+    health.py            GET /health, GET /health/deep
     documents.py         Upload, list, delete, collections, reclassify
-    query.py             POST /query, /query/chunk-context, /query/ask-ai
+    query.py             POST /query, /query/stream, /query/chunk-context, /query/ask-ai, /query/ask-ai/stream
+    stream_helpers.py    SSE event formatting + async streaming generator
     sessions.py          GET/DELETE /sessions
 frontend/
   src/
-    App.jsx              Main React component + state management
-    App.css              Application styles
+    App.jsx              Main React component + state management (streaming-aware)
+    App.css              Application styles + markdown + streaming cursor
     api/                 API client modules (client, documents, query, sessions, users)
-    components/          15+ React components (Header, Sidebar, ChatArea, MessageBubble, etc.)
+    components/          15+ React components + MarkdownRenderer
 ```
 
 ## Query Pipeline (current)
@@ -214,6 +222,11 @@ request (question, top_k, doc_ids?, session_id?, collection?, force_web_search?)
   |-- RAG chain:
   |     select prompt (with/without chat_history)
   |     LCEL: retriever | format_docs -> prompt -> LLM -> StrOutputParser
+  |
+  |-- streaming path (/query/stream):
+  |     sources sent as first SSE event
+  |     LLM tokens streamed via chain.astream()
+  |     done event with full answer for memory persistence
   |
   |-- store exchange in ChatSessionRepository (if session_id)
   |
