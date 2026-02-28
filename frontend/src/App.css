@@ -750,6 +750,70 @@ body {
   overflow-y: auto;
 }
 
+/* Chunk type badges */
+.source-chunk-type {
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.1rem 0.4rem;
+  border-radius: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.source-chunk-type-table {
+  background: #e3f2fd;
+  color: #1565c0;
+}
+
+.source-chunk-type-image {
+  background: #f3e5f5;
+  color: #7b1fa2;
+}
+
+/* Table rendering in source content */
+.source-content-table table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.78rem;
+  margin: 0;
+}
+
+.source-content-table th,
+.source-content-table td {
+  border: 1px solid #e0e0e0;
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+}
+
+.source-content-table th {
+  background: #f5f7fa;
+  font-weight: 600;
+}
+
+.source-content-table {
+  max-height: 400px;
+  overflow: auto;
+  white-space: normal;
+}
+
+/* Image display in source content */
+.source-content-image {
+  white-space: normal;
+}
+
+.source-image {
+  max-width: 100%;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  border: 1px solid #e8e8e8;
+}
+
+.source-image-description {
+  font-size: 0.8rem;
+  color: #666;
+  line-height: 1.5;
+}
+
 /* Web search badge */
 .web-search-badge {
   display: inline-flex;

@@ -83,7 +83,7 @@ async def upload_document(
     try:
         # Process and index
         processor = DocumentProcessor(settings)
-        chunks = processor.load_and_split(upload_path)
+        chunks = processor.load_and_split(upload_path, doc_id=doc_id)
 
         # Parse collections from comma-separated string
         parsed_collections: list[str] | None = None
@@ -169,6 +169,26 @@ async def list_collections(
         taxonomy_categories=PRIMARY_CATEGORIES,
         existing_collections=existing,
     )
+
+
+@router.get("/images/{doc_id}/{filename}")
+async def get_document_image(
+    doc_id: str,
+    filename: str,
+    settings: Settings = Depends(get_settings),
+):
+    """Serve stored images extracted from documents."""
+    # Sanitize filename to prevent path traversal
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    image_path = settings.upload_dir / doc_id / "images" / filename
+    if not image_path.exists():
+        raise HTTPException(status_code=404, detail="Image not found")
+    # Determine media type from extension
+    ext = image_path.suffix.lower()
+    media_types = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif"}
+    media_type = media_types.get(ext, "image/png")
+    return FileResponse(path=str(image_path), media_type=media_type)
 
 
 @router.get("/{doc_id}/download")

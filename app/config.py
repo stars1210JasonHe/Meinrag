@@ -2,6 +2,7 @@ from enum import Enum
 from typing import Literal
 from pathlib import Path
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,6 +14,12 @@ class LLMProvider(str, Enum):
 class VectorStoreType(str, Enum):
     CHROMA = "chroma"
     FAISS = "faiss"
+
+
+class ParseMode(str, Enum):
+    DEFAULT = "default"
+    ENHANCED = "enhanced"
+    VISION = "vision"
 
 
 class Settings(BaseSettings):
@@ -33,7 +40,7 @@ class Settings(BaseSettings):
     openrouter_site_name: str = "MEINRAG"
 
     # Vector store
-    vector_store: VectorStoreType = VectorStoreType.CHROMA
+    vector_store: VectorStoreType = VectorStoreType.FAISS
 
     # Paths
     upload_dir: Path = Path("data/uploads")
@@ -41,6 +48,19 @@ class Settings(BaseSettings):
     # Chunking
     chunk_size: int = 1000
     chunk_overlap: int = 200
+
+    # Document parsing mode:
+    #   "default"  — text-only extraction (fast, all file types)
+    #   "enhanced" — tables + images via PyMuPDF (PDF only, falls back to default for others)
+    #   "vision"   — render pages as images → vision LLM → structured markdown (all file types)
+    parse_mode: ParseMode = ParseMode.DEFAULT
+    image_description_model: str = "gpt-4o-mini"
+    image_description_max_tokens: int = 512
+
+    # Vision mode settings
+    vision_model: str = "gpt-4o-mini"
+    vision_max_tokens: int = 4096
+    vision_page_dpi: int = 150
 
     # Retrieval
     retrieval_top_k: int = 4
@@ -80,6 +100,19 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     log_level: str = "info"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _compat_parse_mode(cls, values):
+        """Backward compat: accept PDF_PARSE_MODE as alias for PARSE_MODE."""
+        if isinstance(values, dict):
+            legacy_key = "pdf_parse_mode"
+            new_key = "parse_mode"
+            if legacy_key in values and new_key not in values:
+                values[new_key] = values.pop(legacy_key)
+            elif legacy_key in values:
+                values.pop(legacy_key)
+        return values
 
 
 def get_settings() -> Settings:

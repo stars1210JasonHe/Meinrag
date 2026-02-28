@@ -21,7 +21,13 @@ def format_docs(docs: list[Document]) -> str:
         source = doc.metadata.get("source_file", "unknown")
         page = doc.metadata.get("page")
         page_str = f" (p.{page + 1})" if page is not None else ""
-        formatted.append(f"[Source {i}: {source}{page_str}]\n{doc.page_content}")
+        chunk_type = doc.metadata.get("chunk_type", "text")
+        type_label = ""
+        if chunk_type == "table":
+            type_label = " [TABLE]"
+        elif chunk_type == "image":
+            type_label = " [IMAGE DESCRIPTION]"
+        formatted.append(f"[Source {i}: {source}{page_str}{type_label}]\n{doc.page_content}")
     return "\n\n---\n\n".join(formatted)
 
 

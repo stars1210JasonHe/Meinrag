@@ -266,6 +266,8 @@ async def query_documents(
                 doc_id=doc.metadata.get("doc_id"),
                 page=doc.metadata.get("page"),
                 score=round(score, 4),
+                chunk_type=doc.metadata.get("chunk_type"),
+                image_path=doc.metadata.get("image_path"),
             )
             for doc, score in retrieved
         ]
@@ -534,6 +536,8 @@ async def query_documents_stream(
                         doc_id=doc.metadata.get("doc_id"),
                         page=doc.metadata.get("page"),
                         score=round(score, 4),
+                        chunk_type=doc.metadata.get("chunk_type"),
+                        image_path=doc.metadata.get("image_path"),
                     ).model_dump()
                     for doc, score in retrieved
                 ]

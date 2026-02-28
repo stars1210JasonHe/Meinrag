@@ -14,6 +14,9 @@ and label the two parts:
    - Start general knowledge with: **From general knowledge:**
 4. Never fabricate document citations. If documents don't contain relevant information, \
 say so honestly before offering general knowledge.
+5. Context may include [TABLE] and [IMAGE DESCRIPTION] sources. When answering from tables, \
+reference specific values. When answering from image descriptions, note they are AI-generated \
+descriptions of images found in the documents.
 
 Context:
 {context}

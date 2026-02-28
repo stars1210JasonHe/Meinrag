@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { ChevronDown, ChevronRight, Download, Globe, MessageCircleQuestion, Copy, Quote } from 'lucide-react'
+import MarkdownRenderer from './MarkdownRenderer'
+import { API_BASE } from '../api/client'
 
 function scoreColor(score) {
   if (score >= 0.85) return '#e8f5e9' // green
@@ -13,12 +15,25 @@ function scoreTextColor(score) {
   return '#c62828'
 }
 
+function ChunkTypeBadge({ chunkType }) {
+  if (!chunkType || chunkType === 'text') return null
+  const config = {
+    table: { label: 'Table', className: 'source-chunk-type-table' },
+    image: { label: 'Image', className: 'source-chunk-type-image' },
+  }
+  const { label, className } = config[chunkType] || {}
+  if (!label) return null
+  return <span className={`source-chunk-type ${className}`}>{label}</span>
+}
+
 export default function SourceCitation({ source, msgIdx, sourceIdx, onDownload, onAskAbout, onQuote }) {
   const [expanded, setExpanded] = useState(false)
   const [askInput, setAskInput] = useState('')
   const [showAskInput, setShowAskInput] = useState(false)
   const [copied, setCopied] = useState(false)
   const isWeb = source.source_type === 'web'
+  const isTable = source.chunk_type === 'table'
+  const isImage = source.chunk_type === 'image'
 
   const handleAskSubmit = () => {
     if (!askInput.trim()) return
@@ -45,6 +60,32 @@ export default function SourceCitation({ source, msgIdx, sourceIdx, onDownload, 
     onQuote(quoted)
   }
 
+  const renderExpandedContent = () => {
+    if (isTable) {
+      return (
+        <div className="source-content source-content-table">
+          <MarkdownRenderer content={source.content} />
+        </div>
+      )
+    }
+    if (isImage) {
+      return (
+        <div className="source-content source-content-image">
+          {source.image_path && (
+            <img
+              className="source-image"
+              src={`${API_BASE}/documents/images/${source.image_path}`}
+              alt="Extracted from document"
+              loading="lazy"
+            />
+          )}
+          <div className="source-image-description">{source.content}</div>
+        </div>
+      )
+    }
+    return <div className="source-content">{source.content}</div>
+  }
+
   return (
     <div className={`source-item ${isWeb ? 'source-web' : ''}`}>
       <div className="source-header" onClick={() => setExpanded(!expanded)}>
@@ -53,6 +94,7 @@ export default function SourceCitation({ source, msgIdx, sourceIdx, onDownload, 
           : expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />
         }
         <span className="source-file">{source.source_file}</span>
+        <ChunkTypeBadge chunkType={source.chunk_type} />
         {source.page != null && (
           <span className="source-page">p.{source.page + 1}</span>
         )}
@@ -102,9 +144,7 @@ export default function SourceCitation({ source, msgIdx, sourceIdx, onDownload, 
           </button>
         )}
       </div>
-      {expanded && (
-        <div className="source-content">{source.content}</div>
-      )}
+      {expanded && renderExpandedContent()}
       {showAskInput && (
         <div className="source-ask-input">
           <input
