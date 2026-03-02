@@ -2,9 +2,12 @@ import { useState } from 'react'
 import { Globe, Sparkles, ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
 import SourceCitation from './SourceCitation'
 import MarkdownRenderer from './MarkdownRenderer'
+import ImageGallery from './ImageGallery'
+import ImageLightbox from './ImageLightbox'
 
 export default function MessageBubble({ msg, msgIdx, onDownloadDoc, onAskAboutChunk, onQuote, onAskAI }) {
   const [aiExpanded, setAiExpanded] = useState(true)
+  const [lightboxIndex, setLightboxIndex] = useState(null)
 
   if (msg.type === 'system') {
     return (
@@ -27,6 +30,9 @@ export default function MessageBubble({ msg, msgIdx, onDownloadDoc, onAskAboutCh
   // assistant
   const showAskAIButton = msg.question && !msg.ai_answer && !msg.ai_loading && !msg.streaming
 
+  const imageSources = (msg.sources || []).filter(s => s.chunk_type === 'image' && s.image_path)
+  const nonImageSources = (msg.sources || []).filter(s => !(s.chunk_type === 'image' && s.image_path))
+
   return (
     <div className="message message-assistant">
       <div className="message-content">
@@ -35,12 +41,20 @@ export default function MessageBubble({ msg, msgIdx, onDownloadDoc, onAskAboutCh
             <span className="web-search-badge"><Globe size={12} /> Web Search</span>
           )}
           <MarkdownRenderer content={msg.content} />
-          {!msg.streaming && msg.sources && msg.sources.length > 0 && (
+
+          {!msg.streaming && imageSources.length > 0 && (
+            <ImageGallery
+              imageSources={imageSources}
+              onOpenLightbox={(i) => setLightboxIndex(i)}
+            />
+          )}
+
+          {!msg.streaming && nonImageSources.length > 0 && (
             <div className="sources">
               <div className="sources-title">
                 {msg.web_search_used ? 'Web Sources' : 'Sources'}
               </div>
-              {msg.sources.map((source, i) => (
+              {nonImageSources.map((source, i) => (
                 <SourceCitation
                   key={i}
                   source={source}
@@ -82,6 +96,13 @@ export default function MessageBubble({ msg, msgIdx, onDownloadDoc, onAskAboutCh
           )}
         </div>
       </div>
+
+      <ImageLightbox
+        imageSources={imageSources}
+        currentIndex={lightboxIndex}
+        onClose={() => setLightboxIndex(null)}
+        onNavigate={(i) => setLightboxIndex(i)}
+      />
     </div>
   )
 }

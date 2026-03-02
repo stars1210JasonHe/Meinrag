@@ -4,6 +4,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from langchain_core.documents import Document
@@ -120,7 +121,7 @@ class DocumentProcessor:
         import fitz  # PyMuPDF
 
         suffix = file_path.suffix.lower()
-        converted_pdf_path: Path | None = None
+        converted_tmp_dir: Path | None = None
 
         # Step 1: Get a PDF to work with
         if suffix == ".pdf":
@@ -133,6 +134,7 @@ class DocumentProcessor:
                 )
             logger.info(f"Converting {file_path.name} to PDF via LibreOffice")
             converted_pdf_path = self._convert_to_pdf(file_path)
+            converted_tmp_dir = converted_pdf_path.parent
             pdf_path = converted_pdf_path
 
         try:
@@ -141,28 +143,47 @@ class DocumentProcessor:
             dpi = self._settings.vision_page_dpi
             logger.info(f"Vision mode: processing {file_path.name} ({total_pages} pages at {dpi} DPI)")
 
-            # Step 2: Process each page
-            all_page_markdowns: list[tuple[int, str]] = []
+            # Create vision LLM once for all pages
+            vision_llm = self._create_vision_llm()
 
+            # Step 2: Render all pages to base64 (CPU-bound, done in main thread)
+            rendered_pages: list[tuple[int, str, str]] = []  # (page_num, b64, fallback_text)
             for page_num in range(total_pages):
                 page = pdf_doc[page_num]
+                page_b64 = self._render_page_to_base64(page, dpi=dpi)
+                fallback_text = page.get_text("text").strip()
+                rendered_pages.append((page_num, page_b64, fallback_text))
+
+            pdf_doc.close()
+
+            # Step 3: Send to vision LLM concurrently (IO-bound)
+            max_workers = min(5, total_pages)
+            all_page_markdowns: list[tuple[int, str]] = []
+
+            def _describe_page(args: tuple[int, str, str]) -> tuple[int, str]:
+                page_num, page_b64, fallback_text = args
                 try:
-                    page_b64 = self._render_page_to_base64(page, dpi=dpi)
-                    markdown = self._vision_describe_page(page_b64, page_num, total_pages)
+                    markdown = self._vision_describe_page(page_b64, page_num, total_pages, vision_llm)
                     logger.debug(f"Vision: page {page_num + 1}/{total_pages} -> {len(markdown)} chars")
+                    return (page_num, markdown)
                 except Exception as e:
                     logger.warning(
                         f"Vision failed for page {page_num + 1}/{total_pages}: {e}. "
                         f"Falling back to text extraction."
                     )
-                    markdown = page.get_text("text").strip()
+                    return (page_num, fallback_text)
 
-                if markdown.strip():
-                    all_page_markdowns.append((page_num, markdown))
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {executor.submit(_describe_page, rp): rp[0] for rp in rendered_pages}
+                for future in as_completed(futures):
+                    page_num, markdown = future.result()
+                    if markdown.strip():
+                        all_page_markdowns.append((page_num, markdown))
 
-            pdf_doc.close()
+            # Sort by page number to maintain order
+            all_page_markdowns.sort(key=lambda x: x[0])
 
-            # Step 3: Segment and chunk each page's markdown
+            # Step 4: Segment and chunk each page's markdown
             images_dir = None
             if doc_id:
                 images_dir = self._settings.upload_dir / doc_id / "images"
@@ -219,7 +240,7 @@ class DocumentProcessor:
                         all_chunks.append(d)
                         image_count += 1
 
-            # Step 4: Set chunk indices
+            # Step 5: Set chunk indices
             for i, chunk in enumerate(all_chunks):
                 chunk.metadata["chunk_index"] = i
 
@@ -231,8 +252,8 @@ class DocumentProcessor:
             return all_chunks
 
         finally:
-            if converted_pdf_path and converted_pdf_path.exists():
-                shutil.rmtree(converted_pdf_path.parent, ignore_errors=True)
+            if converted_tmp_dir and converted_tmp_dir.exists():
+                shutil.rmtree(converted_tmp_dir, ignore_errors=True)
 
     def _convert_to_pdf(self, file_path: Path) -> Path:
         """Convert any document to PDF using LibreOffice headless mode.
@@ -242,6 +263,12 @@ class DocumentProcessor:
         """
         if not _check_libreoffice_available():
             raise RuntimeError("LibreOffice (soffice) not found on PATH.")
+
+        # Validate file_path resolves within upload directory
+        resolved = file_path.resolve()
+        upload_root = self._settings.upload_dir.resolve()
+        if not str(resolved).startswith(str(upload_root)):
+            raise ValueError(f"File path outside upload directory: {file_path}")
 
         tmp_dir = Path(tempfile.mkdtemp(prefix="meinrag_lo_"))
         try:
@@ -284,19 +311,25 @@ class DocumentProcessor:
         png_bytes = pixmap.tobytes("png")
         return base64.b64encode(png_bytes).decode("ascii")
 
-    def _vision_describe_page(self, page_b64: str, page_num: int, total_pages: int) -> str:
-        """Send a rendered page image to a vision LLM and get structured markdown back."""
-        from langchain_core.messages import HumanMessage
+    def _create_vision_llm(self):
+        """Create a single vision LLM instance for reuse across pages."""
         from langchain_openai import ChatOpenAI
 
         if not self._settings.openai_api_key:
             raise RuntimeError("OpenAI API key required for vision mode")
 
-        vision_llm = ChatOpenAI(
+        return ChatOpenAI(
             model=self._settings.vision_model,
             max_tokens=self._settings.vision_max_tokens,
             api_key=self._settings.openai_api_key,
         )
+
+    def _vision_describe_page(self, page_b64: str, page_num: int, total_pages: int, vision_llm=None) -> str:
+        """Send a rendered page image to a vision LLM and get structured markdown back."""
+        from langchain_core.messages import HumanMessage
+
+        if vision_llm is None:
+            vision_llm = self._create_vision_llm()
 
         prompt_text = (
             f"Convert this document page (page {page_num + 1} of {total_pages}) to well-structured markdown.\n"
@@ -565,7 +598,7 @@ class DocumentProcessor:
             image_bytes = base64.b64decode(b64_data)
             filename = f"page{page_num}_img{img_idx}.{ext}"
             (images_dir / filename).write_bytes(image_bytes)
-            return f"{doc_id}/images/{filename}"
+            return f"{doc_id}/{filename}"
         except Exception as e:
             logger.warning(f"Failed to save image: {e}")
             return None

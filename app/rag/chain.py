@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 def format_docs(docs: list[Document]) -> str:
     """Format retrieved documents into a single context string."""
     formatted = []
+    image_counter = 0
     for i, doc in enumerate(docs, 1):
         source = doc.metadata.get("source_file", "unknown")
         page = doc.metadata.get("page")
@@ -26,7 +27,8 @@ def format_docs(docs: list[Document]) -> str:
         if chunk_type == "table":
             type_label = " [TABLE]"
         elif chunk_type == "image":
-            type_label = " [IMAGE DESCRIPTION]"
+            image_counter += 1
+            type_label = f" [FIGURE {image_counter}]"
         formatted.append(f"[Source {i}: {source}{page_str}{type_label}]\n{doc.page_content}")
     return "\n\n---\n\n".join(formatted)
 
