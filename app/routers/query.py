@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -112,6 +113,20 @@ async def _resolve_doc_ids(
     return doc_ids, user_scoped
 
 
+def _parse_bbox(raw) -> list[float] | None:
+    """Parse bbox from metadata — may be a JSON string or already a list."""
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return None
+    if isinstance(raw, list):
+        return raw
+    return None
+
+
 def _build_source_chunks(retrieved: list) -> list[SourceChunk]:
     """Build SourceChunk list from retrieved (doc, score) pairs."""
     return [
@@ -124,25 +139,27 @@ def _build_source_chunks(retrieved: list) -> list[SourceChunk]:
             score=round(score, 4),
             chunk_type=doc.metadata.get("chunk_type"),
             image_path=doc.metadata.get("image_path"),
+            bbox=_parse_bbox(doc.metadata.get("bbox")),
         )
         for doc, score in retrieved
     ]
 
 
-def _supplement_image_chunks(
+def _supplement_visual_chunks(
     retrieved: list,
     vector_store: VectorStoreManager,
     doc_ids: list[str] | None,
 ) -> list:
-    """Append image chunks from queried documents that weren't already retrieved.
+    """Append image and table chunks from queried documents that weren't already retrieved.
 
     Image chunks have short descriptions that rarely match queries via similarity
-    search, so we always include them as supplementary visual context.
+    search, and table chunks may also rank poorly. We always include them as
+    supplementary visual context.
     """
     if not doc_ids:
         return retrieved
 
-    # Collect doc_ids already seen and chunk_indices of retrieved image chunks
+    # Collect doc_ids already seen and chunk_indices of retrieved chunks
     retrieved_keys = set()
     for doc, _ in retrieved:
         meta = doc.metadata
@@ -154,7 +171,11 @@ def _supplement_image_chunks(
         chunks = vector_store.get_chunks_by_doc(did)
         for chunk in chunks:
             meta = chunk.metadata
-            if meta.get("chunk_type") != "image" or not meta.get("image_path"):
+            ct = meta.get("chunk_type")
+            # Supplement images (with image_path) and tables
+            if ct == "image" and not meta.get("image_path"):
+                continue
+            if ct not in ("image", "table"):
                 continue
             key = (meta.get("doc_id"), meta.get("chunk_index"))
             if key not in retrieved_keys:
@@ -162,7 +183,7 @@ def _supplement_image_chunks(
                 retrieved_keys.add(key)
 
     if extra:
-        logger.info(f"Supplemented {len(extra)} image chunks from queried documents")
+        logger.info(f"Supplemented {len(extra)} visual chunks (images+tables) from queried documents")
     return retrieved + extra
 
 
@@ -349,7 +370,7 @@ async def query_documents(
             )
 
         # Supplement with image chunks that weren't retrieved by similarity
-        retrieved = _supplement_image_chunks(retrieved, vector_store, doc_ids)
+        retrieved = _supplement_visual_chunks(retrieved, vector_store, doc_ids)
 
         answer = await _invoke_with_retry(chain, request.question)
 
@@ -505,7 +526,7 @@ async def query_documents_stream(
         )
         needs_web_search = _should_web_search(request, settings, user_scoped, retrieved)
         if not needs_web_search:
-            retrieved = _supplement_image_chunks(retrieved, vector_store, doc_ids)
+            retrieved = _supplement_visual_chunks(retrieved, vector_store, doc_ids)
 
     # Pre-compute web search context if needed
     web_context = ""

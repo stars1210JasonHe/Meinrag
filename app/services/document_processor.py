@@ -1,4 +1,5 @@
 import base64
+import json
 import logging
 import re
 import shutil
@@ -197,10 +198,23 @@ class DocumentProcessor:
             all_chunks: list[Document] = []
             text_count = table_count = image_count = 0
 
+            # Pre-extract bounding boxes for all pages from the PDF
+            page_bboxes: dict[int, dict] = {}
+            if suffix == ".pdf":
+                for page_num, _ in all_page_markdowns:
+                    try:
+                        page_bboxes[page_num] = self._extract_page_bboxes(
+                            str(pdf_path), page_num
+                        )
+                    except Exception as e:
+                        logger.debug(f"BBox extraction failed for page {page_num}: {e}")
+
             for page_num, page_markdown in all_page_markdowns:
                 segments = self._separate_content_segments(page_markdown)
-
+                bboxes = page_bboxes.get(page_num, {"tables": [], "images": []})
+                page_table_idx = 0
                 page_img_idx = 0
+
                 for content, chunk_type in segments:
                     content = content.strip()
                     if not content:
@@ -222,18 +236,27 @@ class DocumentProcessor:
                             text_count += 1
 
                     elif chunk_type == "table":
+                        bbox = None
+                        if page_table_idx < len(bboxes["tables"]):
+                            bbox = json.dumps(bboxes["tables"][page_table_idx])
+                        page_table_idx += 1
                         table_parts = self._split_large_table(content, self._settings.chunk_size * 3)
                         for part in table_parts:
-                            d = Document(
-                                page_content=part,
-                                metadata={**base_meta, "chunk_type": "table"},
-                            )
+                            meta = {**base_meta, "chunk_type": "table"}
+                            if bbox:
+                                meta["bbox"] = bbox
+                            d = Document(page_content=part, metadata=meta)
                             all_chunks.append(d)
                             table_count += 1
 
                     elif chunk_type == "image":
                         description = self._extract_image_description(content)
                         meta = {**base_meta, "chunk_type": "image"}
+                        bbox = None
+                        if page_img_idx < len(bboxes["images"]):
+                            bbox = json.dumps(bboxes["images"][page_img_idx])
+                        if bbox:
+                            meta["bbox"] = bbox
                         if images_dir and doc_id:
                             image_path = self._save_image_from_content(
                                 content, images_dir, doc_id, page_num, page_img_idx
@@ -246,7 +269,7 @@ class DocumentProcessor:
                                 )
                             if image_path:
                                 meta["image_path"] = image_path
-                            page_img_idx += 1
+                        page_img_idx += 1
                         d = Document(page_content=description, metadata=meta)
                         all_chunks.append(d)
                         image_count += 1
@@ -436,11 +459,23 @@ class DocumentProcessor:
         all_chunks: list[Document] = []
         text_count = table_count = image_count = 0
 
+        # Pre-extract bounding boxes for all pages
+        page_bboxes: dict[int, dict] = {}
+        for pg in pages:
+            pn = pg.metadata.get("page", 0)
+            if pn not in page_bboxes:
+                try:
+                    page_bboxes[pn] = self._extract_page_bboxes(str(file_path), pn)
+                except Exception as e:
+                    logger.debug(f"BBox extraction failed for page {pn}: {e}")
+
         for page in pages:
             page_num = page.metadata.get("page", 0)
             segments = self._separate_content_segments(page.page_content)
-
+            bboxes = page_bboxes.get(page_num, {"tables": [], "images": []})
+            page_table_idx = 0
             page_img_idx = 0
+
             for content, chunk_type in segments:
                 content = content.strip()
                 if not content:
@@ -456,24 +491,32 @@ class DocumentProcessor:
                         text_count += 1
 
                 elif chunk_type == "table":
+                    bbox = None
+                    if page_table_idx < len(bboxes["tables"]):
+                        bbox = json.dumps(bboxes["tables"][page_table_idx])
+                    page_table_idx += 1
                     table_parts = self._split_large_table(content, self._settings.chunk_size * 3)
                     for part in table_parts:
-                        doc = Document(
-                            page_content=part,
-                            metadata={**page.metadata, "chunk_type": "table"},
-                        )
+                        meta = {**page.metadata, "chunk_type": "table"}
+                        if bbox:
+                            meta["bbox"] = bbox
+                        doc = Document(page_content=part, metadata=meta)
                         all_chunks.append(doc)
                         table_count += 1
 
                 elif chunk_type == "image":
                     image_path = None
+                    meta = {**page.metadata, "chunk_type": "image"}
+                    bbox = None
+                    if page_img_idx < len(bboxes["images"]):
+                        bbox = json.dumps(bboxes["images"][page_img_idx])
+                    if bbox:
+                        meta["bbox"] = bbox
                     if images_dir and doc_id:
                         image_path = self._save_image_from_content(
                             content, images_dir, doc_id, page_num, page_img_idx
                         )
-                        page_img_idx += 1
-
-                    meta = {**page.metadata, "chunk_type": "image"}
+                    page_img_idx += 1
                     if image_path:
                         meta["image_path"] = image_path
 
@@ -495,6 +538,36 @@ class DocumentProcessor:
     # ========================================
     # SHARED HELPERS
     # ========================================
+
+    @staticmethod
+    def _extract_page_bboxes(pdf_path: str, page_num: int) -> dict:
+        """Extract bounding boxes for tables and images on a page using PyMuPDF."""
+        import fitz
+
+        doc = fitz.open(pdf_path)
+        try:
+            page = doc[page_num]
+
+            table_bboxes = []
+            try:
+                tables = page.find_tables()
+                table_bboxes = [list(t.bbox) for t in tables.tables]
+            except Exception:
+                pass
+
+            image_bboxes = []
+            for img in page.get_images(full=True):
+                try:
+                    bbox = list(page.get_image_bbox(img))
+                    # Skip tiny images (icons, bullets, etc.)
+                    if bbox[2] - bbox[0] > 20 and bbox[3] - bbox[1] > 20:
+                        image_bboxes.append(bbox)
+                except Exception:
+                    pass
+
+            return {"tables": table_bboxes, "images": image_bboxes}
+        finally:
+            doc.close()
 
     @staticmethod
     def _separate_content_segments(page_content: str) -> list[tuple[str, str]]:

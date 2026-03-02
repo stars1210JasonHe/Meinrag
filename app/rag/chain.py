@@ -18,6 +18,7 @@ def format_docs(docs: list[Document]) -> str:
     """Format retrieved documents into a single context string."""
     formatted = []
     image_counter = 0
+    table_counter = 0
     for i, doc in enumerate(docs, 1):
         source = doc.metadata.get("source_file", "unknown")
         page = doc.metadata.get("page")
@@ -25,7 +26,8 @@ def format_docs(docs: list[Document]) -> str:
         chunk_type = doc.metadata.get("chunk_type", "text")
         type_label = ""
         if chunk_type == "table":
-            type_label = " [TABLE]"
+            table_counter += 1
+            type_label = f" [TABLE {table_counter}]"
         elif chunk_type == "image":
             image_counter += 1
             type_label = f" [FIGURE {image_counter}]"

@@ -690,6 +690,29 @@ body {
   font-weight: 500;
 }
 
+.source-view-pdf-btn {
+  background: #fff3e0;
+  border: 1px solid #ffb74d;
+  color: #e65100;
+  cursor: pointer;
+  padding: 0.15rem 0.45rem;
+  margin-left: 0.4rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.source-view-pdf-btn:hover {
+  background: #ffe0b2;
+  border-color: #ff9800;
+  color: #bf360c;
+}
+
 .source-download {
   background: none;
   border: none;
@@ -1417,6 +1440,209 @@ body {
 }
 
 /* ================================
+   TABLE GALLERY
+   ================================ */
+.table-gallery {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid #d0d0d0;
+}
+
+.table-gallery-header {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #1565c0;
+  margin-bottom: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.table-gallery-strip {
+  display: flex;
+  gap: 0.75rem;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  padding-bottom: 0.5rem;
+}
+
+.table-gallery-strip::-webkit-scrollbar { height: 4px; }
+.table-gallery-strip::-webkit-scrollbar-track { background: #f0f0f0; border-radius: 2px; }
+.table-gallery-strip::-webkit-scrollbar-thumb { background: #c0c0c0; border-radius: 2px; }
+.table-gallery-strip::-webkit-scrollbar-thumb:hover { background: #999; }
+
+.table-gallery-card {
+  flex: 0 0 200px;
+  scroll-snap-align: start;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+  background: #fff;
+}
+
+.table-gallery-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(21, 101, 192, 0.15);
+}
+
+.table-gallery-thumb-wrapper {
+  position: relative;
+  height: 130px;
+  overflow: hidden;
+  background: #fafafa;
+}
+
+.table-gallery-preview {
+  transform: scale(0.55);
+  transform-origin: top left;
+  width: 182%;
+  padding: 0.5rem;
+  font-size: 0.75rem;
+  pointer-events: none;
+}
+
+.table-gallery-preview table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.table-gallery-preview th,
+.table-gallery-preview td {
+  border: 1px solid #ddd;
+  padding: 2px 4px;
+  font-size: 0.65rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 80px;
+}
+
+.table-gallery-preview th {
+  background: #f0f4f8;
+  font-weight: 600;
+}
+
+.table-gallery-table-label {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  background: rgba(21, 101, 192, 0.85);
+  color: white;
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+}
+
+.table-gallery-caption {
+  padding: 0.5rem 0.6rem 0.25rem;
+  font-size: 0.75rem;
+  color: #444;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.table-gallery-card-meta {
+  padding: 0.25rem 0.6rem 0.5rem;
+  display: flex;
+  gap: 0.4rem;
+  font-size: 0.65rem;
+  color: #999;
+}
+
+/* ================================
+   LIGHTBOX VIEW TOGGLE + TABLE
+   ================================ */
+.lightbox-view-toggle {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 0.75rem;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.lightbox-view-toggle button {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.6);
+  padding: 6px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 500;
+  transition: all 0.15s;
+}
+
+.lightbox-view-toggle button:hover {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.lightbox-view-toggle button.active {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+}
+
+.lightbox-table-content {
+  background: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  max-height: 75vh;
+  max-width: 90vw;
+  overflow: auto;
+  user-select: text;
+  color: #333;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  transition: transform 0.15s ease-out;
+}
+
+.lightbox-table-content table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.lightbox-table-content th,
+.lightbox-table-content td {
+  border: 1px solid #ddd;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.lightbox-table-content th {
+  background: #f0f4f8;
+  font-weight: 600;
+}
+
+.lightbox-table-content tr:nth-child(even) {
+  background: #fafafa;
+}
+
+.lightbox-text-content {
+  background: white;
+  border-radius: 8px;
+  padding: 1.5rem 2rem;
+  max-height: 75vh;
+  max-width: 80vw;
+  min-width: 300px;
+  overflow: auto;
+  user-select: text;
+  color: #333;
+  transition: transform 0.15s ease-out;
+}
+
+.lightbox-text-body {
+  font-size: 0.95rem;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ================================
    STREAMING CURSOR
    ================================ */
 .message-text.streaming::after {
@@ -1518,14 +1744,24 @@ body {
     margin-left: 0;
     padding: 0.12rem;
   }
+  .source-view-pdf-btn {
+    margin-left: 0.2rem;
+    padding: 0.1rem 0.35rem;
+    font-size: 0.65rem;
+  }
 
   .message-text { max-width: 85%; }
 
   .image-gallery-card { flex: 0 0 160px; }
   .image-gallery-thumb-wrapper { height: 100px; }
 
+  .table-gallery-card { flex: 0 0 160px; }
+  .table-gallery-thumb-wrapper { height: 100px; }
+
   .lightbox-container { max-width: 95vw; }
   .lightbox-image { max-height: 60vh; }
+  .lightbox-table-content { max-height: 60vh; padding: 1rem; }
+  .lightbox-text-content { max-height: 60vh; padding: 1rem; }
   .lightbox-close { top: -32px; }
 }
 

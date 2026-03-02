@@ -3,11 +3,12 @@ import { Globe, Sparkles, ChevronDown, ChevronRight, Loader2 } from 'lucide-reac
 import SourceCitation from './SourceCitation'
 import MarkdownRenderer from './MarkdownRenderer'
 import ImageGallery from './ImageGallery'
-import ImageLightbox from './ImageLightbox'
+import TableGallery from './TableGallery'
+import ContentLightbox from './ContentLightbox'
 
 export default function MessageBubble({ msg, msgIdx, onDownloadDoc, onAskAboutChunk, onQuote, onAskAI }) {
   const [aiExpanded, setAiExpanded] = useState(true)
-  const [lightboxIndex, setLightboxIndex] = useState(null)
+  const [lightboxState, setLightboxState] = useState({ type: null, index: null })
 
   if (msg.type === 'system') {
     return (
@@ -31,7 +32,16 @@ export default function MessageBubble({ msg, msgIdx, onDownloadDoc, onAskAboutCh
   const showAskAIButton = msg.question && !msg.ai_answer && !msg.ai_loading && !msg.streaming
 
   const imageSources = (msg.sources || []).filter(s => s.chunk_type === 'image' && s.image_path)
-  const nonImageSources = (msg.sources || []).filter(s => !(s.chunk_type === 'image' && s.image_path))
+  const tableSources = (msg.sources || []).filter(s => s.chunk_type === 'table')
+  const textSources = (msg.sources || []).filter(
+    s => s.chunk_type !== 'table' && !(s.chunk_type === 'image' && s.image_path)
+  )
+
+  // Determine which sources to pass to the lightbox
+  const lightboxSources = lightboxState.type === 'image' ? imageSources
+    : lightboxState.type === 'table' ? tableSources
+    : lightboxState.type === 'text' ? textSources
+    : []
 
   return (
     <div className="message message-assistant">
@@ -45,16 +55,23 @@ export default function MessageBubble({ msg, msgIdx, onDownloadDoc, onAskAboutCh
           {!msg.streaming && imageSources.length > 0 && (
             <ImageGallery
               imageSources={imageSources}
-              onOpenLightbox={(i) => setLightboxIndex(i)}
+              onOpenLightbox={(i) => setLightboxState({ type: 'image', index: i })}
             />
           )}
 
-          {!msg.streaming && nonImageSources.length > 0 && (
+          {!msg.streaming && tableSources.length > 0 && (
+            <TableGallery
+              tableSources={tableSources}
+              onOpenLightbox={(i) => setLightboxState({ type: 'table', index: i })}
+            />
+          )}
+
+          {!msg.streaming && textSources.length > 0 && (
             <div className="sources">
               <div className="sources-title">
                 {msg.web_search_used ? 'Web Sources' : 'Sources'}
               </div>
-              {nonImageSources.map((source, i) => (
+              {textSources.map((source, i) => (
                 <SourceCitation
                   key={i}
                   source={source}
@@ -63,6 +80,7 @@ export default function MessageBubble({ msg, msgIdx, onDownloadDoc, onAskAboutCh
                   onDownload={onDownloadDoc}
                   onAskAbout={onAskAboutChunk}
                   onQuote={onQuote}
+                  onViewPdf={(idx) => setLightboxState({ type: 'text', index: idx })}
                 />
               ))}
             </div>
@@ -97,11 +115,12 @@ export default function MessageBubble({ msg, msgIdx, onDownloadDoc, onAskAboutCh
         </div>
       </div>
 
-      <ImageLightbox
-        imageSources={imageSources}
-        currentIndex={lightboxIndex}
-        onClose={() => setLightboxIndex(null)}
-        onNavigate={(i) => setLightboxIndex(i)}
+      <ContentLightbox
+        sources={lightboxSources}
+        currentIndex={lightboxState.index}
+        onClose={() => setLightboxState({ type: null, index: null })}
+        onNavigate={(i) => setLightboxState(prev => ({ ...prev, index: i }))}
+        type={lightboxState.type}
       />
     </div>
   )

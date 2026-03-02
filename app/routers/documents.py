@@ -1,11 +1,12 @@
 import uuid
 import hashlib
 import logging
+import re
 import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from app.config import Settings
 from app.classification import PRIMARY_CATEGORIES
@@ -198,6 +199,140 @@ async def get_document_image(
     return FileResponse(path=str(image_path), media_type=media_type)
 
 
+@router.get("/{doc_id}/page-highlight")
+async def get_page_highlight(
+    doc_id: str,
+    page: int = Query(..., ge=0),
+    bbox: str | None = Query(None, description="x0,y0,x1,y1"),
+    text: str | None = Query(None, max_length=2000, description="Chunk text to search for and highlight"),
+    settings: Settings = Depends(get_settings),
+    registry: DocumentRepository = Depends(get_registry),
+    current_user: str = Depends(get_current_user),
+):
+    """Render a PDF page with highlighted region (bbox → red rect, text → yellow highlight)."""
+    import fitz
+
+    # Sanitize doc_id
+    if ".." in doc_id or "/" in doc_id or "\\" in doc_id:
+        raise HTTPException(status_code=400, detail="Invalid doc_id")
+
+    # Ownership check
+    doc_record = await registry.get(doc_id)
+    if not doc_record:
+        raise HTTPException(status_code=404, detail="Document not found")
+    user_filter = _get_user_filter(settings, current_user)
+    if user_filter and doc_record.get("user_id") != user_filter:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Parse bbox if provided
+    coords = None
+    if bbox:
+        if not re.match(r'^[\d.,\s-]+$', bbox):
+            raise HTTPException(status_code=400, detail="Invalid bbox format")
+        try:
+            coords = [float(x.strip()) for x in bbox.split(",")]
+            if len(coords) != 4:
+                raise ValueError
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="bbox must be x0,y0,x1,y1")
+
+    # Find the PDF file on disk
+    pdf_path = None
+    for f in settings.upload_dir.iterdir():
+        if f.name.startswith(doc_id) and f.suffix.lower() == ".pdf" and f.is_file():
+            pdf_path = f
+            break
+
+    if not pdf_path:
+        raise HTTPException(status_code=404, detail="PDF not found for this document")
+
+    try:
+        doc = fitz.open(str(pdf_path))
+        try:
+            if page >= len(doc):
+                raise HTTPException(status_code=400, detail=f"Page {page} out of range (max {len(doc) - 1})")
+
+            pg = doc[page]
+
+            if coords:
+                # Draw red rectangle for bbox (tables/images)
+                shape = pg.new_shape()
+                shape.draw_rect(fitz.Rect(*coords))
+                shape.finish(color=(1, 0, 0), width=2.5)
+                shape.commit()
+            elif text:
+                # Text search: split into fragments and highlight matches
+                _highlight_text_on_page(pg, text)
+
+            # Render to PNG
+            pixmap = pg.get_pixmap(dpi=150)
+            png_bytes = pixmap.tobytes("png")
+        finally:
+            doc.close()
+
+        return Response(
+            content=png_bytes,
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Page highlight failed for {doc_id} page {page}")
+        raise HTTPException(status_code=500, detail=f"Failed to render page: {str(e)}")
+
+
+def _split_into_fragments(text: str, target_len: int = 60) -> list[str]:
+    """Split text into fragments of roughly target_len characters at word boundaries."""
+    words = text.split()
+    fragments = []
+    current = ""
+    for w in words:
+        candidate = f"{current} {w}" if current else w
+        if len(candidate) >= target_len and current:
+            fragments.append(current)
+            current = w
+        else:
+            current = candidate
+    if current:
+        fragments.append(current)
+    return fragments
+
+
+def _highlight_text_on_page(pg, text: str) -> None:
+    """Search for text fragments on a PDF page and add yellow highlight annotations."""
+    # Clean up the text: collapse whitespace
+    clean = " ".join(text.split())
+    if not clean:
+        return
+
+    # Try progressively smaller fragments for better match coverage
+    # Each size is tried fresh — smaller fragments match more flexibly
+    all_rects = []
+    for frag_size in (80, 50, 30):
+        all_rects.clear()
+        for frag in _split_into_fragments(clean, frag_size):
+            rects = pg.search_for(frag, quads=False)
+            all_rects.extend(rects)
+        if len(all_rects) >= 2:
+            break
+
+    # If fragment search found nothing, try individual sentences
+    if not all_rects:
+        for line in clean.split(". "):
+            line = line.strip()
+            if len(line) > 15:
+                rects = pg.search_for(line[:100], quads=False)
+                all_rects.extend(rects)
+
+    # Add yellow semi-transparent highlight annotations
+    for rect in all_rects:
+        annot = pg.add_highlight_annot(rect)
+        annot.set_colors(stroke=(1, 0.9, 0))  # yellow
+        annot.set_opacity(0.4)
+        annot.update()
+
+
 @router.get("/{doc_id}/download")
 async def download_document(
     doc_id: str,
@@ -298,15 +433,22 @@ async def delete_document(
     if not await registry.get(doc_id):
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
 
-    vector_store.delete_document(doc_id)
+    try:
+        vector_store.delete_document(doc_id)
+    except Exception as e:
+        logger.warning(f"Vector store delete failed for {doc_id} (continuing): {e}")
+
     await registry.remove(doc_id)
 
     # Remove uploaded file/directory from disk
     for f in settings.upload_dir.iterdir():
         if f.name.startswith(doc_id):
-            if f.is_dir():
-                shutil.rmtree(f, ignore_errors=True)
-            else:
-                f.unlink(missing_ok=True)
+            try:
+                if f.is_dir():
+                    shutil.rmtree(f, ignore_errors=True)
+                else:
+                    f.unlink(missing_ok=True)
+            except Exception as e:
+                logger.warning(f"Failed to remove {f}: {e}")
 
     return DeleteResponse(doc_id=doc_id, message="Document deleted successfully")

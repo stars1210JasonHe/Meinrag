@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, Download, Globe, MessageCircleQuestion, Copy, Quote } from 'lucide-react'
+import { ChevronDown, ChevronRight, Download, Globe, MessageCircleQuestion, Copy, Quote, FileText } from 'lucide-react'
 import MarkdownRenderer from './MarkdownRenderer'
 import { API_BASE } from '../api/client'
 
@@ -26,7 +26,7 @@ function ChunkTypeBadge({ chunkType }) {
   return <span className={`source-chunk-type ${className}`}>{label}</span>
 }
 
-export default function SourceCitation({ source, msgIdx, sourceIdx, onDownload, onAskAbout, onQuote }) {
+export default function SourceCitation({ source, msgIdx, sourceIdx, onDownload, onAskAbout, onQuote, onViewPdf }) {
   const [expanded, setExpanded] = useState(false)
   const [askInput, setAskInput] = useState('')
   const [showAskInput, setShowAskInput] = useState(false)
@@ -134,6 +134,16 @@ export default function SourceCitation({ source, msgIdx, sourceIdx, onDownload, 
         >
           <Quote size={12} />
         </button>
+        {source.doc_id && source.page != null && !isWeb && onViewPdf && (
+          <button
+            className="source-view-pdf-btn"
+            onClick={e => { e.stopPropagation(); onViewPdf(sourceIdx) }}
+            title="View highlighted in PDF"
+          >
+            <FileText size={13} />
+            <span>PDF</span>
+          </button>
+        )}
         {source.doc_id && (
           <button
             className="source-download"

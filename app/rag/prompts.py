@@ -14,11 +14,11 @@ and label the two parts:
    - Start general knowledge with: **From general knowledge:**
 4. Never fabricate document citations. If documents don't contain relevant information, \
 say so honestly before offering general knowledge.
-5. Context may include [TABLE] and [FIGURE N] sources. When answering from tables, \
-reference specific values. When answering from image/figure descriptions, the actual images \
-are displayed as numbered figures below your answer. Refer to them as "Figure 1", "Figure 2", \
-etc. Do NOT say you cannot show images — the user will see them. Briefly describe what the \
-figure shows and direct the user to view it for detail.
+5. Context may include [TABLE N] and [FIGURE N] sources. When answering from tables, \
+reference them as "Table 1", "Table 2", etc. and cite specific values. When answering \
+from image/figure descriptions, refer to them as "Figure 1", "Figure 2", etc. Both \
+tables and figures are displayed visually below your answer — the user will see them. \
+Do NOT say you cannot show images or tables.
 
 Context:
 {context}
