@@ -76,122 +76,20 @@ async def _rewrite_search_queries(question: str, llm: BaseChatModel) -> list[str
         return [question]
 
 
-async def _web_search_fallback(
+async def _resolve_doc_ids(
     request: QueryRequest,
-    llm: BaseChatModel,
-    memory_manager: ChatSessionRepository,
     settings: Settings,
-    current_user: str | None = None,
-) -> QueryResponse:
-    """Fall back to web search when no relevant documents are found."""
-    from app.services.web_search import create_web_search_provider
+    registry: DocumentRepository,
+    current_user: str,
+) -> tuple[list[str] | None, bool]:
+    """Resolve doc_ids from request, applying collection filters and user isolation.
 
-    provider = create_web_search_provider(settings.web_search_provider)
-
-    # Step 1: Rewrite query for better search results
-    search_queries = await _rewrite_search_queries(request.question, llm)
-    logger.info(f"Web search queries: {search_queries}")
-
-    # Step 2: Search with multiple queries, deduplicate by URL
-    all_results = []
-    seen_urls = set()
-    per_query_limit = max(3, settings.web_search_max_results // len(search_queries))
-    for query in search_queries:
-        try:
-            results = await provider.search(query, max_results=per_query_limit)
-            for r in results:
-                if r.url not in seen_urls:
-                    seen_urls.add(r.url)
-                    all_results.append(r)
-        except Exception as e:
-            logger.warning(f"Web search failed for query '{query}': {e}")
-
-    if not all_results:
-        return QueryResponse(
-            answer="I couldn't find relevant information in your documents or on the web.",
-            sources=[],
-            question=request.question,
-            session_id=request.session_id,
-            web_search_used=False,
-        )
-
-    # Step 3: Fetch full page content for top results (parallel, with timeout)
-    import httpx
-    import re
-
-    async def _fetch_page(url: str) -> str:
-        try:
-            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as client:
-                resp = await client.get(url)
-                resp.raise_for_status()
-                text = resp.text
-                text = re.sub(r"<script[^>]*>.*?</script>", "", text, flags=re.DOTALL)
-                text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL)
-                text = re.sub(r"<[^>]+>", " ", text)
-                text = re.sub(r"\s+", " ", text).strip()
-                return text[:3000]
-        except Exception:
-            return ""
-
-    # Fetch pages for top 3 results in parallel
-    top_results = all_results[:min(6, len(all_results))]
-    page_texts = await asyncio.gather(*[_fetch_page(r.url) for r in top_results[:3]])
-
-    # Step 4: Build rich context with full page content where available
-    web_context_parts = []
-    for i, r in enumerate(top_results):
-        part = f"[{_sanitize(r.title, 200)}]\n"
-        if i < len(page_texts) and page_texts[i]:
-            part += f"{_sanitize(page_texts[i], 2000)}\n"
-        else:
-            part += f"{_sanitize(r.body, 800)}\n"
-        part += f"URL: {_sanitize(r.url, 300)}"
-        web_context_parts.append(part)
-    web_context = "\n\n---\n\n".join(web_context_parts)
-
-    web_chain = WEB_SEARCH_PROMPT | llm | StrOutputParser()
-    answer = await _invoke_with_retry(web_chain, {
-        "context": web_context,
-        "question": request.question,
-    })
-
-    if request.session_id:
-        await memory_manager.add_exchange(request.session_id, request.question, answer, user_id=current_user)
-
-    sources = [
-        SourceChunk(
-            content=_sanitize(r.body, 500),
-            source_file=_sanitize(r.title, 200),
-            source_type="web",
-            url=_sanitize(r.url, 300),
-        )
-        for r in top_results
-    ]
-
-    return QueryResponse(
-        answer=answer,
-        sources=sources,
-        question=request.question,
-        session_id=request.session_id,
-        web_search_used=True,
-    )
-
-
-@router.post("/query", response_model=QueryResponse)
-async def query_documents(
-    request: QueryRequest,
-    settings: Settings = Depends(get_settings),
-    vector_store: VectorStoreManager = Depends(get_vector_store),
-    llm: BaseChatModel = Depends(get_llm),
-    memory_manager: ChatSessionRepository = Depends(get_memory_manager),
-    registry: DocumentRepository = Depends(get_registry),
-    current_user: str = Depends(get_current_user),
-):
-    # Resolve collection to doc_ids via registry
+    Returns (doc_ids, user_scoped) where user_scoped is True if the query
+    is explicitly scoped to a collection or doc_ids.
+    """
     doc_ids = request.doc_ids
     user_scoped = request.collection is not None or request.doc_ids is not None
 
-    # User isolation: restrict to user's documents
     if settings.user_isolation in ("all", "documents"):
         user_docs = await registry.list_all(user_id=current_user)
         user_doc_ids = {d["doc_id"] for d in user_docs}
@@ -210,6 +108,210 @@ async def query_documents(
     elif request.collection:
         collection_docs = await registry.list_by_collection(request.collection)
         doc_ids = [d["doc_id"] for d in collection_docs]
+
+    return doc_ids, user_scoped
+
+
+def _build_source_chunks(retrieved: list) -> list[SourceChunk]:
+    """Build SourceChunk list from retrieved (doc, score) pairs."""
+    return [
+        SourceChunk(
+            content=_smart_truncate(doc.page_content, 500),
+            source_file=doc.metadata.get("source_file", "unknown"),
+            chunk_index=doc.metadata.get("chunk_index"),
+            doc_id=doc.metadata.get("doc_id"),
+            page=doc.metadata.get("page"),
+            score=round(score, 4),
+            chunk_type=doc.metadata.get("chunk_type"),
+            image_path=doc.metadata.get("image_path"),
+        )
+        for doc, score in retrieved
+    ]
+
+
+def _supplement_image_chunks(
+    retrieved: list,
+    vector_store: VectorStoreManager,
+    doc_ids: list[str] | None,
+) -> list:
+    """Append image chunks from queried documents that weren't already retrieved.
+
+    Image chunks have short descriptions that rarely match queries via similarity
+    search, so we always include them as supplementary visual context.
+    """
+    if not doc_ids:
+        return retrieved
+
+    # Collect doc_ids already seen and chunk_indices of retrieved image chunks
+    retrieved_keys = set()
+    for doc, _ in retrieved:
+        meta = doc.metadata
+        key = (meta.get("doc_id"), meta.get("chunk_index"))
+        retrieved_keys.add(key)
+
+    extra = []
+    for did in doc_ids:
+        chunks = vector_store.get_chunks_by_doc(did)
+        for chunk in chunks:
+            meta = chunk.metadata
+            if meta.get("chunk_type") != "image" or not meta.get("image_path"):
+                continue
+            key = (meta.get("doc_id"), meta.get("chunk_index"))
+            if key not in retrieved_keys:
+                extra.append((chunk, 0.0))
+                retrieved_keys.add(key)
+
+    if extra:
+        logger.info(f"Supplemented {len(extra)} image chunks from queried documents")
+    return retrieved + extra
+
+
+async def _fetch_page(url: str) -> str:
+    """Fetch a web page and extract plain text content."""
+    import httpx
+    import re
+
+    try:
+        async with httpx.AsyncClient(timeout=8, follow_redirects=True) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            text = resp.text
+            text = re.sub(r"<script[^>]*>.*?</script>", "", text, flags=re.DOTALL)
+            text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL)
+            text = re.sub(r"<[^>]+>", " ", text)
+            text = re.sub(r"\s+", " ", text).strip()
+            return text[:3000]
+    except Exception:
+        return ""
+
+
+async def _build_web_search_context(
+    question: str, llm: BaseChatModel, settings: Settings,
+) -> tuple[str, list]:
+    """Run web search, fetch pages, and return (context_str, top_results).
+
+    Returns ("", []) if no results found.
+    """
+    from app.services.web_search import create_web_search_provider
+
+    provider = create_web_search_provider(settings.web_search_provider)
+    search_queries = await _rewrite_search_queries(question, llm)
+    logger.info(f"Web search queries: {search_queries}")
+
+    all_results = []
+    seen_urls = set()
+    per_query_limit = max(3, settings.web_search_max_results // len(search_queries))
+    for query in search_queries:
+        try:
+            results = await provider.search(query, max_results=per_query_limit)
+            for r in results:
+                if r.url not in seen_urls:
+                    seen_urls.add(r.url)
+                    all_results.append(r)
+        except Exception as e:
+            logger.warning(f"Web search failed for query '{query}': {e}")
+
+    if not all_results:
+        return "", []
+
+    top_results = all_results[:min(6, len(all_results))]
+    page_texts = await asyncio.gather(*[_fetch_page(r.url) for r in top_results[:3]])
+
+    web_context_parts = []
+    for i, r in enumerate(top_results):
+        part = f"[{_sanitize(r.title, 200)}]\n"
+        if i < len(page_texts) and page_texts[i]:
+            part += f"{_sanitize(page_texts[i], 2000)}\n"
+        else:
+            part += f"{_sanitize(r.body, 800)}\n"
+        part += f"URL: {_sanitize(r.url, 300)}"
+        web_context_parts.append(part)
+
+    return "\n\n---\n\n".join(web_context_parts), top_results
+
+
+def _web_source_chunks(top_results: list) -> list[SourceChunk]:
+    """Build SourceChunk list from web search results."""
+    return [
+        SourceChunk(
+            content=_sanitize(r.body, 500),
+            source_file=_sanitize(r.title, 200),
+            source_type="web",
+            url=_sanitize(r.url, 300),
+        )
+        for r in top_results
+    ]
+
+
+def _should_web_search(
+    request: QueryRequest,
+    settings: Settings,
+    user_scoped: bool,
+    retrieved: list,
+) -> bool:
+    """Determine if we should fall back to web search."""
+    if not settings.web_search_enabled:
+        return False
+    if request.force_web_search:
+        return True
+    if user_scoped:
+        return False
+    if not retrieved:
+        return True
+    best_score = max(score for _, score in retrieved)
+    return best_score < settings.web_search_score_threshold
+
+
+async def _web_search_fallback(
+    request: QueryRequest,
+    llm: BaseChatModel,
+    memory_manager: ChatSessionRepository,
+    settings: Settings,
+    current_user: str | None = None,
+) -> QueryResponse:
+    """Fall back to web search when no relevant documents are found."""
+    web_context, top_results = await _build_web_search_context(
+        request.question, llm, settings,
+    )
+
+    if not top_results:
+        return QueryResponse(
+            answer="I couldn't find relevant information in your documents or on the web.",
+            sources=[],
+            question=request.question,
+            session_id=request.session_id,
+            web_search_used=False,
+        )
+
+    web_chain = WEB_SEARCH_PROMPT | llm | StrOutputParser()
+    answer = await _invoke_with_retry(web_chain, {
+        "context": web_context,
+        "question": request.question,
+    })
+
+    if request.session_id:
+        await memory_manager.add_exchange(request.session_id, request.question, answer, user_id=current_user)
+
+    return QueryResponse(
+        answer=answer,
+        sources=_web_source_chunks(top_results),
+        question=request.question,
+        session_id=request.session_id,
+        web_search_used=True,
+    )
+
+
+@router.post("/query", response_model=QueryResponse)
+async def query_documents(
+    request: QueryRequest,
+    settings: Settings = Depends(get_settings),
+    vector_store: VectorStoreManager = Depends(get_vector_store),
+    llm: BaseChatModel = Depends(get_llm),
+    memory_manager: ChatSessionRepository = Depends(get_memory_manager),
+    registry: DocumentRepository = Depends(get_registry),
+    current_user: str = Depends(get_current_user),
+):
+    doc_ids, user_scoped = await _resolve_doc_ids(request, settings, registry, current_user)
 
     # Load chat history if session_id provided
     chat_history = None
@@ -240,17 +342,14 @@ async def query_documents(
             request.question, k=request.top_k, doc_ids=doc_ids,
         )
 
-        # Web search fallback: no results OR all scores below threshold
-        if settings.web_search_enabled and not user_scoped:
-            if not retrieved:
-                return await _web_search_fallback(
-                    request, llm, memory_manager, settings, current_user=current_user,
-                )
-            best_score = max(score for _, score in retrieved)
-            if best_score < settings.web_search_score_threshold:
-                return await _web_search_fallback(
-                    request, llm, memory_manager, settings, current_user=current_user,
-                )
+        # Web search fallback if needed
+        if _should_web_search(request, settings, user_scoped, retrieved):
+            return await _web_search_fallback(
+                request, llm, memory_manager, settings, current_user=current_user,
+            )
+
+        # Supplement with image chunks that weren't retrieved by similarity
+        retrieved = _supplement_image_chunks(retrieved, vector_store, doc_ids)
 
         answer = await _invoke_with_retry(chain, request.question)
 
@@ -258,23 +357,9 @@ async def query_documents(
         if request.session_id:
             await memory_manager.add_exchange(request.session_id, request.question, answer, user_id=current_user)
 
-        sources = [
-            SourceChunk(
-                content=_smart_truncate(doc.page_content, 500),
-                source_file=doc.metadata.get("source_file", "unknown"),
-                chunk_index=doc.metadata.get("chunk_index"),
-                doc_id=doc.metadata.get("doc_id"),
-                page=doc.metadata.get("page"),
-                score=round(score, 4),
-                chunk_type=doc.metadata.get("chunk_type"),
-                image_path=doc.metadata.get("image_path"),
-            )
-            for doc, score in retrieved
-        ]
-
         return QueryResponse(
             answer=answer,
-            sources=sources,
+            sources=_build_source_chunks(retrieved),
             question=request.question,
             session_id=request.session_id,
         )
@@ -394,27 +479,7 @@ async def query_documents_stream(
     current_user: str = Depends(get_current_user),
 ):
     """Streaming version of /query. Returns SSE events."""
-    # --- Same doc_ids / collection / user isolation logic as /query ---
-    doc_ids = request.doc_ids
-    user_scoped = request.collection is not None or request.doc_ids is not None
-
-    if settings.user_isolation in ("all", "documents"):
-        user_docs = await registry.list_all(user_id=current_user)
-        user_doc_ids = {d["doc_id"] for d in user_docs}
-        if request.collection:
-            collection_docs = await registry.list_by_collection(request.collection, user_id=current_user)
-            collection_doc_ids = [d["doc_id"] for d in collection_docs]
-            if doc_ids:
-                doc_ids = [d for d in doc_ids if d in collection_doc_ids and d in user_doc_ids]
-            else:
-                doc_ids = collection_doc_ids
-        elif doc_ids:
-            doc_ids = [d for d in doc_ids if d in user_doc_ids]
-        else:
-            doc_ids = list(user_doc_ids) if user_doc_ids else None
-    elif request.collection:
-        collection_docs = await registry.list_by_collection(request.collection)
-        doc_ids = [d["doc_id"] for d in collection_docs]
+    doc_ids, user_scoped = await _resolve_doc_ids(request, settings, registry, current_user)
 
     chat_history = None
     if request.session_id:
@@ -429,10 +494,8 @@ async def query_documents_stream(
         raise HTTPException(status_code=400, detail=str(e))
 
     # --- Retrieval (done before streaming starts) ---
-    needs_web_search = False
     retrieved = []
-    web_sources = []
-    web_context = ""
+    needs_web_search = False
 
     if request.force_web_search and settings.web_search_enabled:
         needs_web_search = True
@@ -440,70 +503,18 @@ async def query_documents_stream(
         retrieved = vector_store.similarity_search_with_scores(
             request.question, k=request.top_k, doc_ids=doc_ids,
         )
-        if settings.web_search_enabled and not user_scoped:
-            if not retrieved:
-                needs_web_search = True
-            elif max(score for _, score in retrieved) < settings.web_search_score_threshold:
-                needs_web_search = True
+        needs_web_search = _should_web_search(request, settings, user_scoped, retrieved)
+        if not needs_web_search:
+            retrieved = _supplement_image_chunks(retrieved, vector_store, doc_ids)
 
     # Pre-compute web search context if needed
+    web_context = ""
+    web_sources = []
     if needs_web_search:
-        from app.services.web_search import create_web_search_provider
-        import httpx
-        import re
-
-        provider = create_web_search_provider(settings.web_search_provider)
-        search_queries = await _rewrite_search_queries(request.question, llm)
-        all_results = []
-        seen_urls = set()
-        per_query_limit = max(3, settings.web_search_max_results // len(search_queries))
-        for query in search_queries:
-            try:
-                results = await provider.search(query, max_results=per_query_limit)
-                for r in results:
-                    if r.url not in seen_urls:
-                        seen_urls.add(r.url)
-                        all_results.append(r)
-            except Exception as e:
-                logger.warning(f"Web search failed for query '{query}': {e}")
-
-        async def _fetch_page(url: str) -> str:
-            try:
-                async with httpx.AsyncClient(timeout=8, follow_redirects=True) as client:
-                    resp = await client.get(url)
-                    resp.raise_for_status()
-                    text = resp.text
-                    text = re.sub(r"<script[^>]*>.*?</script>", "", text, flags=re.DOTALL)
-                    text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL)
-                    text = re.sub(r"<[^>]+>", " ", text)
-                    text = re.sub(r"\s+", " ", text).strip()
-                    return text[:3000]
-            except Exception:
-                return ""
-
-        top_results = all_results[:min(6, len(all_results))]
-        if top_results:
-            page_texts = await asyncio.gather(*[_fetch_page(r.url) for r in top_results[:3]])
-            web_context_parts = []
-            for i, r in enumerate(top_results):
-                part = f"[{_sanitize(r.title, 200)}]\n"
-                if i < len(page_texts) and page_texts[i]:
-                    part += f"{_sanitize(page_texts[i], 2000)}\n"
-                else:
-                    part += f"{_sanitize(r.body, 800)}\n"
-                part += f"URL: {_sanitize(r.url, 300)}"
-                web_context_parts.append(part)
-            web_context = "\n\n---\n\n".join(web_context_parts)
-
-        web_sources = [
-            SourceChunk(
-                content=_sanitize(r.body, 500),
-                source_file=_sanitize(r.title, 200),
-                source_type="web",
-                url=_sanitize(r.url, 300),
-            ).model_dump()
-            for r in top_results
-        ]
+        web_context, top_results = await _build_web_search_context(
+            request.question, llm, settings,
+        )
+        web_sources = [s.model_dump() for s in _web_source_chunks(top_results)]
 
     async def event_generator():
         try:
@@ -520,27 +531,9 @@ async def query_documents_stream(
                     web_sources, request.session_id, web_search_used=True,
                 ):
                     yield event
-
-                # Persist to memory after streaming
-                if request.session_id:
-                    # Re-collect full answer from the done event (last yielded)
-                    # We re-invoke non-streaming for memory since we already streamed
-                    pass  # Memory handled below
             else:
                 # Normal RAG path
-                sources_data = [
-                    SourceChunk(
-                        content=_smart_truncate(doc.page_content, 500),
-                        source_file=doc.metadata.get("source_file", "unknown"),
-                        chunk_index=doc.metadata.get("chunk_index"),
-                        doc_id=doc.metadata.get("doc_id"),
-                        page=doc.metadata.get("page"),
-                        score=round(score, 4),
-                        chunk_type=doc.metadata.get("chunk_type"),
-                        image_path=doc.metadata.get("image_path"),
-                    ).model_dump()
-                    for doc, score in retrieved
-                ]
+                sources_data = [s.model_dump() for s in _build_source_chunks(retrieved)]
 
                 async for event in stream_chain_response(
                     chain, request.question, sources_data, request.session_id,

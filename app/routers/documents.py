@@ -1,6 +1,7 @@
 import uuid
 import hashlib
 import logging
+import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
@@ -176,12 +177,18 @@ async def get_document_image(
     doc_id: str,
     filename: str,
     settings: Settings = Depends(get_settings),
+    current_user: str = Depends(get_current_user),
 ):
     """Serve stored images extracted from documents."""
-    # Sanitize filename to prevent path traversal
-    if ".." in filename or "/" in filename or "\\" in filename:
-        raise HTTPException(status_code=400, detail="Invalid filename")
-    image_path = settings.upload_dir / doc_id / "images" / filename
+    # Sanitize both doc_id and filename to prevent path traversal
+    for param_name, param_val in [("doc_id", doc_id), ("filename", filename)]:
+        if ".." in param_val or "/" in param_val or "\\" in param_val:
+            raise HTTPException(status_code=400, detail=f"Invalid {param_name}")
+    # Resolve and verify path stays within upload directory
+    image_path = (settings.upload_dir / doc_id / "images" / filename).resolve()
+    upload_root = settings.upload_dir.resolve()
+    if not str(image_path).startswith(str(upload_root)):
+        raise HTTPException(status_code=400, detail="Invalid path")
     if not image_path.exists():
         raise HTTPException(status_code=404, detail="Image not found")
     # Determine media type from extension
@@ -294,9 +301,12 @@ async def delete_document(
     vector_store.delete_document(doc_id)
     await registry.remove(doc_id)
 
-    # Remove uploaded file from disk
+    # Remove uploaded file/directory from disk
     for f in settings.upload_dir.iterdir():
         if f.name.startswith(doc_id):
-            f.unlink(missing_ok=True)
+            if f.is_dir():
+                shutil.rmtree(f, ignore_errors=True)
+            else:
+                f.unlink(missing_ok=True)
 
     return DeleteResponse(doc_id=doc_id, message="Document deleted successfully")

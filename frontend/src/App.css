@@ -1326,10 +1326,21 @@ body {
 }
 
 .lightbox-image {
-  max-height: 65vh;
+  max-height: 75vh;
   max-width: 100%;
   object-fit: contain;
   border-radius: 4px;
+  transition: transform 0.15s ease-out;
+  user-select: none;
+}
+
+.lightbox-image-area.zoomed {
+  overflow: hidden;
+  cursor: grab;
+}
+
+.lightbox-image-area.zoomed .lightbox-image {
+  transition: none;
 }
 
 .lightbox-no-image {
@@ -1360,6 +1371,45 @@ body {
 
 .lightbox-description::-webkit-scrollbar { width: 3px; }
 .lightbox-description::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.3); border-radius: 2px; }
+
+.lightbox-zoom-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.lightbox-zoom-controls button {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.8);
+  border-radius: 6px;
+  padding: 6px 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: all 0.15s;
+}
+
+.lightbox-zoom-controls button:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+}
+
+.lightbox-zoom-level {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.8rem;
+  min-width: 45px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.lightbox-hint {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.7rem;
+  margin-top: 0.4rem;
+}
 
 @keyframes lightbox-fade-in {
   from { opacity: 0; }
@@ -1475,7 +1525,7 @@ body {
   .image-gallery-thumb-wrapper { height: 100px; }
 
   .lightbox-container { max-width: 95vw; }
-  .lightbox-image { max-height: 50vh; }
+  .lightbox-image { max-height: 60vh; }
   .lightbox-close { top: -32px; }
 }
 

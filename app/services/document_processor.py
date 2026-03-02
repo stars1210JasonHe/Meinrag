@@ -189,6 +189,11 @@ class DocumentProcessor:
                 images_dir = self._settings.upload_dir / doc_id / "images"
                 images_dir.mkdir(parents=True, exist_ok=True)
 
+            # Build page render lookup for fallback image saving
+            page_renders: dict[int, str] = {}
+            for page_num, page_b64, _ in rendered_pages:
+                page_renders[page_num] = page_b64
+
             all_chunks: list[Document] = []
             text_count = table_count = image_count = 0
 
@@ -233,6 +238,12 @@ class DocumentProcessor:
                             image_path = self._save_image_from_content(
                                 content, images_dir, doc_id, page_num, page_img_idx
                             )
+                            # Fallback: save the rendered page image
+                            if not image_path and page_num in page_renders:
+                                image_path = self._save_page_render(
+                                    page_renders[page_num], images_dir, doc_id,
+                                    page_num, page_img_idx,
+                                )
                             if image_path:
                                 meta["image_path"] = image_path
                             page_img_idx += 1
@@ -601,6 +612,20 @@ class DocumentProcessor:
             return f"{doc_id}/{filename}"
         except Exception as e:
             logger.warning(f"Failed to save image: {e}")
+            return None
+
+    @staticmethod
+    def _save_page_render(
+        page_b64: str, images_dir: Path, doc_id: str, page_num: int, img_idx: int
+    ) -> str | None:
+        """Save a rendered page screenshot as the image for a vision-mode image chunk."""
+        try:
+            image_bytes = base64.b64decode(page_b64)
+            filename = f"page{page_num}_img{img_idx}.png"
+            (images_dir / filename).write_bytes(image_bytes)
+            return f"{doc_id}/{filename}"
+        except Exception as e:
+            logger.warning(f"Failed to save page render as image: {e}")
             return None
 
     @staticmethod
