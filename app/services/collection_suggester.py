@@ -2,6 +2,7 @@ import json
 import logging
 
 from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseChatModel
 
 from app.classification import TAXONOMY, PRIMARY_CATEGORIES
@@ -47,8 +48,26 @@ def suggest_collections(
     chunks: list[Document],
     llm: BaseChatModel,
     existing_collections: list[str] | None = None,
+    embeddings: Embeddings | None = None,
 ) -> list[str]:
-    """Analyze document content and suggest collection names from the taxonomy."""
+    """Analyze document content and suggest collection names from the taxonomy.
+
+    If *embeddings* is provided, tries fast embedding-based classification first.
+    Falls back to the LLM path when the embedding score is too low or on error.
+    """
+    # ── fast path: embedding cosine similarity ───────────────────────
+    if embeddings is not None:
+        try:
+            from app.services.embedding_classifier import classify_by_embedding
+            result = classify_by_embedding(chunks, embeddings)
+            if result is not None:
+                logger.info("Embedding classifier succeeded: %s", result)
+                return result
+            logger.debug("Embedding classifier returned None, falling back to LLM")
+        except Exception:
+            logger.warning("Embedding classifier failed, falling back to LLM", exc_info=True)
+
+    # ── LLM path (original) ─────────────────────────────────────────
     # Take first 3 chunks or ~1500 chars
     content = "\n\n".join([c.page_content for c in chunks[:3]])
     content = content[:1500]

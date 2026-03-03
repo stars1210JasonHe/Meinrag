@@ -11,9 +11,10 @@ from fastapi.responses import FileResponse, Response
 from app.config import Settings
 from app.classification import PRIMARY_CATEGORIES
 from app.dependencies import (
-    get_settings, get_vector_store, get_registry, get_llm, get_current_user,
+    get_settings, get_vector_store, get_registry, get_llm, get_embeddings, get_current_user,
 )
 from app.db.repositories import DocumentRepository
+from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseChatModel
 from app.models.schemas import (
     UploadResponse,
@@ -46,6 +47,7 @@ async def upload_document(
     settings: Settings = Depends(get_settings),
     vector_store: VectorStoreManager = Depends(get_vector_store),
     llm: BaseChatModel = Depends(get_llm),
+    embeddings: Embeddings = Depends(get_embeddings),
     registry: DocumentRepository = Depends(get_registry),
     current_user: str = Depends(get_current_user),
 ):
@@ -97,7 +99,7 @@ async def upload_document(
         if auto_suggest and not parsed_collections:
             from app.services.collection_suggester import suggest_collections
             existing = await registry.get_all_collections()
-            suggested_collections = suggest_collections(chunks, llm, existing)
+            suggested_collections = suggest_collections(chunks, llm, existing, embeddings=embeddings)
             parsed_collections = suggested_collections
 
         # Default to ["other"] if nothing specified
@@ -392,6 +394,7 @@ async def reclassify_document(
     settings: Settings = Depends(get_settings),
     vector_store: VectorStoreManager = Depends(get_vector_store),
     llm: BaseChatModel = Depends(get_llm),
+    embeddings: Embeddings = Depends(get_embeddings),
     registry: DocumentRepository = Depends(get_registry),
 ):
     doc = await registry.get(doc_id)
@@ -407,7 +410,7 @@ async def reclassify_document(
 
     from app.services.collection_suggester import suggest_collections
     existing = await registry.get_all_collections()
-    new_collections = suggest_collections(doc_chunks, llm, existing)
+    new_collections = suggest_collections(doc_chunks, llm, existing, embeddings=embeddings)
 
     # Update registry
     await registry.update_collections(doc_id, new_collections)

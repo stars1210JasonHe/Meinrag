@@ -1,9 +1,13 @@
 """B4: AI Collection Suggestion tests - Requires API key."""
+from unittest.mock import MagicMock
+
 import pytest
 
+from app.classification import PRIMARY_CATEGORIES, ALL_DOMAINS
 from app.llm.provider import create_chat_model
 from app.services.collection_suggester import suggest_collections
 from app.services.document_processor import DocumentProcessor
+from app.services.embedding_classifier import clear_cache as clear_embedding_cache
 from tests.conftest import online, PDF_AI_SAFETY, PDF_PATTERNS, PDF_LAW
 
 
@@ -69,3 +73,34 @@ class TestAISuggestion:
         assert isinstance(suggestions, list)
         assert len(suggestions) >= 1
         print(f"  With existing collections -> {suggestions}")
+
+
+@online
+class TestEmbeddingClassification:
+    """Tests using real OpenAI embeddings (requires API key)."""
+
+    def test_embedding_classification(self, settings):
+        """Embedding classifier returns valid taxonomy categories for a real PDF."""
+        from langchain_openai import OpenAIEmbeddings
+        clear_embedding_cache()
+
+        embeddings = OpenAIEmbeddings(
+            model=settings.openai_embedding_model,
+            openai_api_key=settings.openai_api_key,
+        )
+        processor = DocumentProcessor(settings)
+        chunks = processor.load_and_split(PDF_AI_SAFETY)
+
+        # LLM fallback mock (in case embedding threshold isn't met)
+        fallback_llm = MagicMock()
+        fallback_llm.invoke.return_value = MagicMock(content='["other"]')
+        result = suggest_collections(chunks, llm=fallback_llm, embeddings=embeddings)
+        assert isinstance(result, list)
+        assert len(result) >= 1
+        # First element should be a valid primary category
+        assert result[0] in PRIMARY_CATEGORIES, f"{result[0]} not in taxonomy categories"
+        # Additional elements should be valid domains
+        for item in result[1:]:
+            assert item in ALL_DOMAINS, f"{item} not in taxonomy domains"
+        print(f"  AI safety paper (embedding) -> {result}")
+        clear_embedding_cache()
