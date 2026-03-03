@@ -594,10 +594,32 @@ body {
 /* ================================
    SOURCE CITATIONS
    ================================ */
+.collapsible-section {
+  margin-top: 0.75rem;
+}
+
+.collapsible-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #667eea;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 0.35rem 0.6rem;
+  border-radius: 6px;
+  transition: background 0.15s;
+  user-select: none;
+}
+
+.collapsible-header:hover {
+  background: #eef0ff;
+}
+
 .sources {
-  margin-top: 1.25rem;
-  padding-top: 1rem;
-  border-top: 1px solid #d0d0d0;
+  margin-top: 0.5rem;
 }
 
 .sources-title {

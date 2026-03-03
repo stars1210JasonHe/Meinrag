@@ -9,7 +9,7 @@ from app.classification import TAXONOMY, PRIMARY_CATEGORIES
 logger = logging.getLogger(__name__)
 
 SUGGESTION_PROMPT = """\
-You are a document classifier. Analyze the document excerpt below and classify it using the provided taxonomy.
+You are a document classifier. Analyze the document filename and excerpt below and classify it using the provided taxonomy.
 
 ## Taxonomy (Primary Category → Domains)
 {taxonomy_text}
@@ -20,9 +20,13 @@ You are a document classifier. Analyze the document excerpt below and classify i
 ## Rules
 1. Pick exactly 1 primary category from the taxonomy above.
 2. Pick 1-2 domains from that category (or from a second category if the document spans topics).
-3. Return ONLY a JSON array of collection names, e.g. ["legal-compliance", "contracts-agreements"]
+3. Return ONLY a JSON array of collection names, e.g. ["research-scientific", "physics"]
 4. Use only lowercase, hyphen-separated names.
 5. You may include ONE custom collection name if the document clearly doesn't fit the taxonomy.
+6. Pay attention to the filename — it often indicates the document's field.
+
+## Filename
+{filename}
 
 ## Document excerpt
 {content}
@@ -49,6 +53,9 @@ def suggest_collections(
     content = "\n\n".join([c.page_content for c in chunks[:3]])
     content = content[:1500]
 
+    # Extract filename from first chunk metadata
+    filename = chunks[0].metadata.get("source_file", "unknown") if chunks else "unknown"
+
     existing = ", ".join(existing_collections) if existing_collections else "(none)"
 
     try:
@@ -56,6 +63,7 @@ def suggest_collections(
             SUGGESTION_PROMPT.format(
                 taxonomy_text=_build_taxonomy_text(),
                 existing_collections=existing,
+                filename=filename,
                 content=content,
             )
         )

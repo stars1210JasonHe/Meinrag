@@ -60,6 +60,13 @@ class DocumentProcessor:
         """Load a file and split it into chunks."""
         suffix = file_path.suffix.lower()
 
+        # Strip doc_id prefix from filename for clean display in citations
+        # Files are saved as "{doc_id}_{original_name}" on disk
+        clean_name = file_path.name
+        if doc_id and clean_name.startswith(f"{doc_id}_"):
+            clean_name = clean_name[len(doc_id) + 1:]
+        self._clean_name = clean_name
+
         if suffix not in SUPPORTED_EXTENSIONS:
             raise ValueError(
                 f"Unsupported file type: {suffix}. "
@@ -102,7 +109,7 @@ class DocumentProcessor:
         logger.info(f"Split into {len(chunks)} chunk(s)")
 
         for i, chunk in enumerate(chunks):
-            chunk.metadata["source_file"] = file_path.name
+            chunk.metadata["source_file"] = self._clean_name
             chunk.metadata["chunk_index"] = i
             chunk.metadata["chunk_type"] = "text"
 
@@ -221,7 +228,7 @@ class DocumentProcessor:
                         continue
 
                     base_meta = {
-                        "source_file": file_path.name,
+                        "source_file": self._clean_name,
                         "page": page_num,
                         "parse_mode": "vision",
                     }
@@ -403,7 +410,7 @@ class DocumentProcessor:
 
             chunks = self._splitter.split_documents(documents)
             for i, chunk in enumerate(chunks):
-                chunk.metadata["source_file"] = file_path.name  # original name
+                chunk.metadata["source_file"] = self._clean_name  # original name
                 chunk.metadata["chunk_index"] = i
                 chunk.metadata["chunk_type"] = "text"
 
@@ -526,7 +533,7 @@ class DocumentProcessor:
                     image_count += 1
 
         for i, chunk in enumerate(all_chunks):
-            chunk.metadata["source_file"] = file_path.name
+            chunk.metadata["source_file"] = self._clean_name
             chunk.metadata["chunk_index"] = i
 
         logger.info(

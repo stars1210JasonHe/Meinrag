@@ -42,7 +42,7 @@ def _get_user_filter(settings: Settings, user_id: str) -> str | None:
 async def upload_document(
     file: UploadFile = File(...),
     collections: str | None = Query(default=None, description="Comma-separated collection names"),
-    auto_suggest: bool = False,
+    auto_suggest: bool = True,
     settings: Settings = Depends(get_settings),
     vector_store: VectorStoreManager = Depends(get_vector_store),
     llm: BaseChatModel = Depends(get_llm),
