@@ -4,7 +4,7 @@ from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 
-from app.vectorstore.base import VectorStoreManager
+from app.vectorstore.base import VectorStoreManager, l2sq_to_score
 
 
 class FAISSStoreManager(VectorStoreManager):
@@ -84,14 +84,7 @@ class FAISSStoreManager(VectorStoreManager):
         results = self._store.similarity_search_with_score(query, k=fetch_k)
         if doc_ids:
             results = [(d, s) for d, s in results if d.metadata.get("doc_id") in doc_ids]
-        # FAISS returns L2² distance; for unit-normalized vectors (OpenAI),
-        # cosine_similarity = 1 - L2²/2  (from |a-b|² = 2 - 2·cos(a,b))
-        # Rescale to user-friendly range: text-embedding-3-small cosines
-        # typically span [0.15, 0.65], so map that to [0, 1].
-        return [
-            (doc, min(1.0, max(0.0, (1.0 - dist / 2.0 - 0.15) / 0.50)))
-            for doc, dist in results[:k]
-        ]
+        return [(doc, l2sq_to_score(dist)) for doc, dist in results[:k]]
 
     def get_chunks_by_doc(self, doc_id: str, chunk_indices: list[int] | None = None) -> list[Document]:
         if self._store is None:

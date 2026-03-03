@@ -81,7 +81,7 @@ class Settings(BaseSettings):
     web_search_enabled: bool = True
     web_search_max_results: int = 9
     web_search_provider: str = "duckduckgo"
-    web_search_score_threshold: float = 0.0  # disabled; users click Globe button for web search
+    web_search_score_threshold: float = 0.0  # score-based auto-fallback disabled; web search still triggers on empty results or force_web_search
 
     # Database
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/meinrag"

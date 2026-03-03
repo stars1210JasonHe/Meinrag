@@ -55,6 +55,7 @@ class DocumentProcessor:
             length_function=len,
             separators=["\n\n", "\n", ". ", " ", ""],
         )
+        self._clean_name: str = "unknown"  # set per load_and_split() call
 
     def load_and_split(self, file_path: Path, doc_id: str | None = None) -> list[Document]:
         """Load a file and split it into chunks."""
