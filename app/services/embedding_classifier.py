@@ -18,8 +18,8 @@ from app.classification import TAXONOMY
 logger = logging.getLogger(__name__)
 
 # ── thresholds ───────────────────────────────────────────────────────────
-CATEGORY_THRESHOLD = 0.30  # min raw cosine for primary category match
-DOMAIN_THRESHOLD = 0.25    # min raw cosine for domain selection
+CATEGORY_THRESHOLD = 0.18  # min raw cosine for primary category match
+DOMAIN_THRESHOLD = 0.15    # min raw cosine for domain selection
 MAX_DOMAINS = 2
 
 # ── taxonomy embedding cache ─────────────────────────────────────────────
@@ -103,11 +103,31 @@ def _cosine_similarity(query: np.ndarray, targets: np.ndarray) -> np.ndarray:
     return t_norms @ q_norm
 
 
+def _strip_markdown(text: str) -> str:
+    """Remove markdown formatting noise that dilutes semantic signal."""
+    # Remove code fences
+    text = re.sub(r"```\w*\n?", "", text)
+    # Remove bold/italic markers
+    text = re.sub(r"\*{1,3}|_{1,3}", "", text)
+    # Remove markdown headings markers (keep the text)
+    text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
+    # Remove LaTeX commands like \textsuperscript{...}, \textbf{...}
+    text = re.sub(r"\\(?:textsuperscript|textbf|textit|mathrm|mathbf)\{([^}]*)\}", r"\1", text)
+    # Remove <sup>...</sup>, <sub>...</sub> tags
+    text = re.sub(r"</?(?:sup|sub|br|em|strong|b|i)>", "", text)
+    # Remove image references ![...](...) and links [...](...) — keep link text
+    text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)
+    text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    # Collapse whitespace
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
 def _extract_smart_sample(chunks) -> str:
     """Build a classification-friendly text sample from document chunks.
 
     Uses filename + first chunk + second chunk + last chunk, capped at 2000 chars.
-    Much more representative than the current "first 3 chunks concatenated".
+    Strips markdown formatting to boost semantic signal for embeddings.
     """
     if not chunks:
         return ""
@@ -123,15 +143,15 @@ def _extract_smart_sample(chunks) -> str:
 
     # First chunk (title / abstract area)
     if len(chunks) >= 1:
-        parts.append(chunks[0].page_content[:600])
+        parts.append(_strip_markdown(chunks[0].page_content[:800])[:600])
 
     # Second chunk (intro / methodology)
     if len(chunks) >= 2:
-        parts.append(chunks[1].page_content[:400])
+        parts.append(_strip_markdown(chunks[1].page_content[:600])[:400])
 
     # Last chunk (conclusion / references area)
     if len(chunks) >= 3:
-        parts.append(chunks[-1].page_content[:400])
+        parts.append(_strip_markdown(chunks[-1].page_content[:600])[:400])
 
     sample = "\n\n".join(parts)
     return sample[:2000]

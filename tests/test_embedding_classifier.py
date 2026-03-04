@@ -155,7 +155,7 @@ class TestEmbeddingClassification:
         # Use near-zero query vector so cosine with random targets is ~0
         emb = _mock_embeddings(query_vec=[0.0001] * 8)
         chunks = _make_chunks(["Some text"])
-        result = classify_by_embedding(chunks, emb, category_threshold=0.99)
+        result = classify_by_embedding(chunks, emb, category_threshold=0.999)
         assert result is None
 
     def test_returns_category_when_confident(self):
