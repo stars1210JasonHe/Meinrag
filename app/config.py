@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     image_description_model: str = "gpt-4o-mini"
     image_description_max_tokens: int = 512
 
+    # Poppler figure extraction (enhanced mode)
+    poppler_figure_extraction: bool = True
+
     # Vision mode settings
     vision_model: str = "gpt-4o-mini"
     vision_max_tokens: int = 4096

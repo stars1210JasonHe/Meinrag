@@ -426,7 +426,7 @@ class DocumentProcessor:
     # ========================================
 
     def _load_pdf_enhanced(self, file_path: Path, doc_id: str | None = None) -> list[Document]:
-        """Load PDF with PyMuPDF for table and image extraction."""
+        """Load PDF with PyMuPDF for text+tables and poppler for images."""
         from langchain_community.document_loaders import PyMuPDFLoader
 
         logger.info(f"Loading {file_path.name} with PyMuPDFLoader (enhanced mode)")
@@ -435,24 +435,6 @@ class DocumentProcessor:
             "mode": "page",
             "extract_tables": "markdown",
         }
-
-        # Add image extraction if OpenAI API key is available
-        if self._settings.openai_api_key:
-            try:
-                from langchain_community.document_loaders.parsers import LLMImageBlobParser
-                from langchain_openai import ChatOpenAI
-
-                image_llm = ChatOpenAI(
-                    model=self._settings.image_description_model,
-                    max_tokens=self._settings.image_description_max_tokens,
-                    api_key=self._settings.openai_api_key,
-                )
-                image_parser = LLMImageBlobParser(model=image_llm)
-                loader_kwargs["images_inner_format"] = "markdown-img"
-                loader_kwargs["extract_images"] = True
-                logger.info("Image extraction enabled with LLM descriptions")
-            except Exception as e:
-                logger.warning(f"Could not set up image extraction: {e}")
 
         loader = PyMuPDFLoader(str(file_path), **loader_kwargs)
         pages = loader.load()
@@ -467,7 +449,7 @@ class DocumentProcessor:
         all_chunks: list[Document] = []
         text_count = table_count = image_count = 0
 
-        # Pre-extract bounding boxes for all pages
+        # Pre-extract bounding boxes for tables only
         page_bboxes: dict[int, dict] = {}
         for pg in pages:
             pn = pg.metadata.get("page", 0)
@@ -482,7 +464,6 @@ class DocumentProcessor:
             segments = self._separate_content_segments(page.page_content)
             bboxes = page_bboxes.get(page_num, {"tables": [], "images": []})
             page_table_idx = 0
-            page_img_idx = 0
 
             for content, chunk_type in segments:
                 content = content.strip()
@@ -512,26 +493,27 @@ class DocumentProcessor:
                         all_chunks.append(doc)
                         table_count += 1
 
-                elif chunk_type == "image":
-                    image_path = None
-                    meta = {**page.metadata, "chunk_type": "image"}
-                    bbox = None
-                    if page_img_idx < len(bboxes["images"]):
-                        bbox = json.dumps(bboxes["images"][page_img_idx])
-                    if bbox:
-                        meta["bbox"] = bbox
-                    if images_dir and doc_id:
-                        image_path = self._save_image_from_content(
-                            content, images_dir, doc_id, page_num, page_img_idx
-                        )
-                    page_img_idx += 1
-                    if image_path:
-                        meta["image_path"] = image_path
+                # Skip image segments from PyMuPDF — poppler handles images below
 
-                    description = self._extract_image_description(content)
-                    doc = Document(page_content=description, metadata=meta)
-                    all_chunks.append(doc)
+        # Poppler-based figure extraction
+        if self._settings.poppler_figure_extraction and images_dir and doc_id:
+            try:
+                from app.services.poppler_extractor import extract_figures
+
+                figures = extract_figures(file_path, images_dir, doc_id)
+                for fig in figures:
+                    meta = {
+                        "chunk_type": "image",
+                        "page": fig.page_num,
+                        "image_path": fig.image_path,
+                        "source_file": self._clean_name,
+                    }
+                    if fig.bbox:
+                        meta["bbox"] = json.dumps(fig.bbox)
+                    all_chunks.append(Document(page_content=fig.caption, metadata=meta))
                     image_count += 1
+            except Exception as e:
+                logger.warning(f"Poppler figure extraction failed: {e}")
 
         for i, chunk in enumerate(all_chunks):
             chunk.metadata["source_file"] = self._clean_name
