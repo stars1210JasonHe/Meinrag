@@ -78,12 +78,19 @@ def has_poppler() -> bool:
 
 def _run_poppler(cmd: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
     """Run a poppler command with bundled path in env if available."""
+    import os
+
     env = None
     poppler_bin = _find_poppler_bin()
     if poppler_bin is not None:
-        import os
         env = os.environ.copy()
+        # Keep PATH for DLL dependencies
         env["PATH"] = str(poppler_bin) + os.pathsep + env.get("PATH", "")
+        # Resolve full executable path so subprocess finds it on Windows
+        exe_name = cmd[0] + (".exe" if os.name == "nt" else "")
+        full_exe = poppler_bin / exe_name
+        if full_exe.exists():
+            cmd = [str(full_exe)] + cmd[1:]
 
     proc = subprocess.run(
         cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,

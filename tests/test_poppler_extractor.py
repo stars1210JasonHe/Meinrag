@@ -1,6 +1,8 @@
 """Offline tests for poppler_extractor module."""
 
+import os
 import re
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -13,6 +15,7 @@ from app.services.poppler_extractor import (
     _get_caption_regexes,
     _group_into_lines,
     _match_caption,
+    _run_poppler,
     extract_figures,
     has_poppler,
 )
@@ -163,3 +166,36 @@ class TestMatchCaption:
         ]
         result = _match_caption(img_rect, captions, proximity=80)
         assert result is None
+
+
+class TestRunPoppler:
+    @pytest.mark.skipif(not has_poppler(), reason="poppler not available")
+    def test_run_poppler_uses_full_exe_path(self):
+        """Verify that when bundled poppler exists, the exe resolves to a full path."""
+        poppler_bin = _find_poppler_bin()
+        if poppler_bin is None:
+            pytest.skip("no bundled poppler bin directory")
+        exe_name = "pdftohtml" + (".exe" if os.name == "nt" else "")
+        full_exe = poppler_bin / exe_name
+        assert full_exe.exists(), f"Expected bundled exe at {full_exe}"
+
+
+class TestExtractFiguresIntegration:
+    _TEST_PDF = Path(__file__).parent.parent / "test cases1" / "ai_tool_verification_ttrl.pdf"
+
+    @pytest.mark.skipif(not has_poppler(), reason="poppler not available")
+    def test_extract_returns_figures(self, tmp_path):
+        if not self._TEST_PDF.exists():
+            pytest.skip(f"Test PDF not found: {self._TEST_PDF}")
+        figures = extract_figures(self._TEST_PDF, tmp_path / "images", "test_doc")
+        assert len(figures) > 0, "Expected at least one figure from test PDF"
+        for fig in figures:
+            assert isinstance(fig, ExtractedFigure)
+            assert isinstance(fig.page_num, int)
+            assert fig.page_num >= 0
+            assert isinstance(fig.image_path, str)
+            assert fig.image_path.startswith("test_doc/")
+            assert isinstance(fig.caption, str)
+            assert len(fig.caption) > 0
+            assert isinstance(fig.bbox, list)
+            assert len(fig.bbox) == 4
