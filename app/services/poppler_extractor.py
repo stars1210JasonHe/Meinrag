@@ -281,6 +281,36 @@ def _match_caption(
     return best
 
 
+def _get_nearby_text(
+    lines: list[dict],
+    img_rect: tuple[float, float, float, float],
+    max_chars: int = 200,
+) -> str:
+    """Get text from lines near an image as fallback description.
+
+    Collects text from lines within 60px above or below the image.
+    """
+    _, img_top, _, img_bottom = img_rect
+    proximity = 60
+    nearby_parts = []
+    total = 0
+
+    for line in sorted(lines, key=lambda ln: ln["top"]):
+        line_top = line["top"]
+        line_bottom = line["bottom"]
+        # Line is near the image: within proximity above or below
+        above = img_top - line_bottom
+        below = line_top - img_bottom
+        if (0 <= above <= proximity) or (0 <= below <= proximity):
+            segs = sorted(line["segments"], key=lambda s: s["left"])
+            line_text = " ".join(s["text"] for s in segs if s["text"])
+            if line_text and total + len(line_text) <= max_chars:
+                nearby_parts.append(line_text)
+                total += len(line_text)
+
+    return " ".join(nearby_parts)
+
+
 def extract_figures(
     pdf_path: Path,
     images_dir: Path,
@@ -367,7 +397,8 @@ def extract_figures(
                 if best_cap:
                     caption = best_cap["text"].strip()
                 else:
-                    caption = f"Figure on page {pnum + 1}"
+                    nearby = _get_nearby_text(lines, img_rect)
+                    caption = nearby if nearby else f"Figure on page {pnum + 1}"
 
                 # Convert and save image
                 src_path = Path(src)

@@ -13,6 +13,7 @@ from app.services.poppler_extractor import (
     _extract_captions,
     _find_poppler_bin,
     _get_caption_regexes,
+    _get_nearby_text,
     _group_into_lines,
     _match_caption,
     _run_poppler,
@@ -226,6 +227,36 @@ class TestMultiLineCaptions:
         assert len(captions) == 1
         assert "Continuation line 3" in captions[0]["text"]
         assert "Continuation line 4" not in captions[0]["text"]
+
+
+class TestNearbyTextFallback:
+    def test_collects_nearby_text(self):
+        """_get_nearby_text should return text segments close to an image."""
+        lines = [
+            {"top": 100.0, "bottom": 112.0, "segments": [
+                {"top": 100.0, "left": 82.0, "width": 300.0, "height": 12.0,
+                 "text": "As shown in the diagram below, the pipeline"},
+            ]},
+            {"top": 250.0, "bottom": 262.0, "segments": [
+                {"top": 250.0, "left": 82.0, "width": 300.0, "height": 12.0,
+                 "text": "The results demonstrate clear improvement."},
+            ]},
+        ]
+        img_rect = (82.0, 120.0, 400.0, 240.0)  # image between the two lines
+        text = _get_nearby_text(lines, img_rect, max_chars=200)
+        assert "diagram below" in text
+        assert "results demonstrate" in text
+
+    def test_returns_empty_when_no_nearby_text(self):
+        lines = [
+            {"top": 500.0, "bottom": 512.0, "segments": [
+                {"top": 500.0, "left": 82.0, "width": 100.0, "height": 12.0,
+                 "text": "Far away text."},
+            ]},
+        ]
+        img_rect = (82.0, 100.0, 400.0, 200.0)
+        text = _get_nearby_text(lines, img_rect, max_chars=200)
+        assert text == ""
 
 
 class TestExtractFiguresIntegration:
