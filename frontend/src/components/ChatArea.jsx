@@ -84,7 +84,7 @@ function WelcomeScreen() {
             <li><strong>Multi-Collection:</strong> Documents can belong to multiple categories</li>
             <li><strong>User Profiles:</strong> Isolated document spaces per user</li>
             <li><strong>AI Classification:</strong> Auto-categorize using taxonomy</li>
-            <li><strong>Source Citations:</strong> Relevance scores, expandable chunks, downloads</li>
+            <li><strong>Source Citations:</strong> Relevance scores, expandable excerpts, downloads</li>
           </ul>
         </div>
       </div>

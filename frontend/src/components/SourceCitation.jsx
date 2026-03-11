@@ -110,7 +110,7 @@ export default function SourceCitation({ source, msgIdx, sourceIdx, onDownload, 
           </span>
         )}
         {source.chunk_index != null && (
-          <span className="source-chunk-idx">chunk {source.chunk_index}</span>
+          <span className="source-chunk-idx">#{source.chunk_index + 1}</span>
         )}
         <button
           className="source-ask-btn"
@@ -122,7 +122,7 @@ export default function SourceCitation({ source, msgIdx, sourceIdx, onDownload, 
         <button
           className="source-copy-btn"
           onClick={handleCopy}
-          title={copied ? 'Copied!' : 'Copy chunk text'}
+          title={copied ? 'Copied!' : 'Copy source text'}
         >
           <Copy size={12} />
           {copied && <span className="copied-badge">Copied</span>}
