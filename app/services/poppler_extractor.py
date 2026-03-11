@@ -60,8 +60,8 @@ def _find_poppler_bin() -> Path | None:
         return _BUNDLED_POPPLER
     # Check system PATH
     if shutil.which("pdftohtml") is not None:
-        return None  # system PATH, no extra env needed
-    return None
+        return None  # on system PATH — no extra env needed
+    return None  # not found anywhere
 
 
 def has_poppler() -> bool:
@@ -381,7 +381,8 @@ def extract_figures(
             xml_file = candidates[0]
 
         try:
-            tree = ET.parse(xml_file)
+            parser = ET.XMLParser()
+            tree = ET.parse(xml_file, parser=parser)
             root = tree.getroot()
         except Exception as e:
             logger.warning(f"Failed to parse pdftohtml XML: {e}")
@@ -389,79 +390,78 @@ def extract_figures(
 
         import fitz as fitz_mod
         pdf_doc = fitz_mod.open(str(pdf_path))
+        try:
+            for page in root.findall("page"):
+                # pdftohtml uses 1-indexed pages, we use 0-indexed
+                pnum_1indexed = int(page.get("number", "1"))
+                pnum = pnum_1indexed - 1
 
-        for page in root.findall("page"):
-            # pdftohtml uses 1-indexed pages, we use 0-indexed
-            pnum_1indexed = int(page.get("number", "1"))
-            pnum = pnum_1indexed - 1
-
-            xml_page_width = float(page.get("width", 0))
-            xml_page_height = float(page.get("height", 0))
-            if pnum < len(pdf_doc):
-                pdf_rect = pdf_doc[pnum].rect
-                pdf_page_width = pdf_rect.width
-                pdf_page_height = pdf_rect.height
-            else:
-                pdf_page_width = xml_page_width
-                pdf_page_height = xml_page_height
-
-            # Parse text and find captions
-            segments = _parse_page_text(page)
-            lines = _group_into_lines(segments, line_tol)
-            captions = _extract_captions(lines, chunk_gap)
-
-            # Collect images
-            for img_idx, im in enumerate(page.findall("image")):
-                top = float(im.get("top", 0))
-                left = float(im.get("left", 0))
-                width = float(im.get("width", 0))
-                height = float(im.get("height", 0))
-                src = im.get("src")
-
-                if not src or width * height < min_area:
-                    continue
-
-                img_rect = (left, top, left + width, top + height)
-                raw_bbox = [left, top, left + width, top + height]
-                bbox = _convert_bbox_to_pdf_points(
-                    raw_bbox, xml_page_width, xml_page_height,
-                    pdf_page_width, pdf_page_height,
-                )
-
-                # Match to caption
-                best_cap = _match_caption(img_rect, captions, proximity)
-                if best_cap:
-                    caption = best_cap["text"].strip()
+                xml_page_width = float(page.get("width", 0))
+                xml_page_height = float(page.get("height", 0))
+                if pnum < len(pdf_doc):
+                    pdf_rect = pdf_doc[pnum].rect
+                    pdf_page_width = pdf_rect.width
+                    pdf_page_height = pdf_rect.height
                 else:
-                    nearby = _get_nearby_text(lines, img_rect)
-                    caption = nearby if nearby else f"Figure on page {pnum + 1}"
+                    pdf_page_width = xml_page_width
+                    pdf_page_height = xml_page_height
 
-                # Convert and save image
-                src_path = Path(src)
-                if not src_path.is_absolute():
-                    src_path = xml_file.parent / src_path
+                # Parse text and find captions
+                segments = _parse_page_text(page)
+                lines = _group_into_lines(segments, line_tol)
+                captions = _extract_captions(lines, chunk_gap)
 
-                if not src_path.exists():
-                    logger.debug(f"Image file not found: {src_path}")
-                    continue
+                # Collect images
+                for img_idx, im in enumerate(page.findall("image")):
+                    top = float(im.get("top", 0))
+                    left = float(im.get("left", 0))
+                    width = float(im.get("width", 0))
+                    height = float(im.get("height", 0))
+                    src = im.get("src")
 
-                filename = f"page{pnum}_img{img_idx}.png"
-                dest_png = images_dir / filename
-                try:
-                    _convert_to_png(src_path, dest_png)
-                except Exception as e:
-                    logger.warning(f"Failed to convert image {src_path}: {e}")
-                    continue
+                    if not src or width * height < min_area:
+                        continue
 
-                image_path = f"{doc_id}/{filename}"
-                figures.append(ExtractedFigure(
-                    page_num=pnum,
-                    image_path=image_path,
-                    caption=caption,
-                    bbox=bbox,
-                ))
+                    img_rect = (left, top, left + width, top + height)
+                    bbox = _convert_bbox_to_pdf_points(
+                        list(img_rect), xml_page_width, xml_page_height,
+                        pdf_page_width, pdf_page_height,
+                    )
 
-        pdf_doc.close()
+                    # Match to caption
+                    best_cap = _match_caption(img_rect, captions, proximity)
+                    if best_cap:
+                        caption = best_cap["text"].strip()
+                    else:
+                        nearby = _get_nearby_text(lines, img_rect)
+                        caption = nearby if nearby else f"Figure on page {pnum + 1}"
+
+                    # Convert and save image
+                    src_path = Path(src)
+                    if not src_path.is_absolute():
+                        src_path = xml_file.parent / src_path
+
+                    if not src_path.exists():
+                        logger.debug(f"Image file not found: {src_path}")
+                        continue
+
+                    filename = f"page{pnum}_img{img_idx}.png"
+                    dest_png = images_dir / filename
+                    try:
+                        _convert_to_png(src_path, dest_png)
+                    except Exception as e:
+                        logger.warning(f"Failed to convert image {src_path}: {e}")
+                        continue
+
+                    image_path = f"{doc_id}/{filename}"
+                    figures.append(ExtractedFigure(
+                        page_num=pnum,
+                        image_path=image_path,
+                        caption=caption,
+                        bbox=bbox,
+                    ))
+        finally:
+            pdf_doc.close()
 
     logger.info(f"Poppler extracted {len(figures)} figure(s) from {pdf_path.name}")
     return figures
