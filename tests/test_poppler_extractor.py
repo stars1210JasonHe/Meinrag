@@ -10,6 +10,7 @@ import pytest
 from app.services.poppler_extractor import (
     DEFAULT_CONFIG,
     ExtractedFigure,
+    _convert_bbox_to_pdf_points,
     _extract_captions,
     _find_poppler_bin,
     _get_caption_regexes,
@@ -257,6 +258,30 @@ class TestNearbyTextFallback:
         img_rect = (82.0, 100.0, 400.0, 200.0)
         text = _get_nearby_text(lines, img_rect, max_chars=200)
         assert text == ""
+
+
+class TestBboxCoordinateConversion:
+    def test_poppler_bbox_converts_to_pdf_points(self):
+        """Bbox should be scaled from poppler pixels to PDF points."""
+        # Poppler XML page: 1190x1684 pixels, PDF page: 595x842 points
+        # Scale: 0.5x, 0.5y
+        result = _convert_bbox_to_pdf_points(
+            [100.0, 200.0, 500.0, 600.0],
+            1190.0, 1684.0, 595.0, 842.0
+        )
+        assert result == [50.0, 100.0, 250.0, 300.0]
+
+    def test_no_conversion_when_dimensions_match(self):
+        """If dimensions match, bbox stays the same."""
+        bbox = [100.0, 200.0, 400.0, 500.0]
+        result = _convert_bbox_to_pdf_points(bbox, 595.0, 842.0, 595.0, 842.0)
+        assert result == bbox
+
+    def test_zero_xml_dimensions_returns_original(self):
+        """If XML dimensions are zero, return original bbox."""
+        bbox = [100.0, 200.0, 400.0, 500.0]
+        result = _convert_bbox_to_pdf_points(bbox, 0.0, 0.0, 595.0, 842.0)
+        assert result == bbox
 
 
 class TestExtractFiguresIntegration:

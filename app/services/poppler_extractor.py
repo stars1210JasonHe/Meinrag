@@ -311,6 +311,25 @@ def _get_nearby_text(
     return " ".join(nearby_parts)
 
 
+def _convert_bbox_to_pdf_points(
+    bbox: list[float],
+    xml_page_width: float,
+    xml_page_height: float,
+    pdf_page_width: float,
+    pdf_page_height: float,
+) -> list[float]:
+    """Convert poppler XML pixel coordinates to PDF points.
+
+    Poppler's pdftohtml XML uses pixel coords; PyMuPDF uses PDF points.
+    Scale by ratio of PDF page dimensions to XML page dimensions.
+    """
+    if xml_page_width <= 0 or xml_page_height <= 0:
+        return bbox
+    sx = pdf_page_width / xml_page_width
+    sy = pdf_page_height / xml_page_height
+    return [bbox[0] * sx, bbox[1] * sy, bbox[2] * sx, bbox[3] * sy]
+
+
 def extract_figures(
     pdf_path: Path,
     images_dir: Path,
@@ -368,10 +387,23 @@ def extract_figures(
             logger.warning(f"Failed to parse pdftohtml XML: {e}")
             return []
 
+        import fitz as fitz_mod
+        pdf_doc = fitz_mod.open(str(pdf_path))
+
         for page in root.findall("page"):
             # pdftohtml uses 1-indexed pages, we use 0-indexed
             pnum_1indexed = int(page.get("number", "1"))
             pnum = pnum_1indexed - 1
+
+            xml_page_width = float(page.get("width", 0))
+            xml_page_height = float(page.get("height", 0))
+            if pnum < len(pdf_doc):
+                pdf_rect = pdf_doc[pnum].rect
+                pdf_page_width = pdf_rect.width
+                pdf_page_height = pdf_rect.height
+            else:
+                pdf_page_width = xml_page_width
+                pdf_page_height = xml_page_height
 
             # Parse text and find captions
             segments = _parse_page_text(page)
@@ -390,7 +422,11 @@ def extract_figures(
                     continue
 
                 img_rect = (left, top, left + width, top + height)
-                bbox = [left, top, left + width, top + height]
+                raw_bbox = [left, top, left + width, top + height]
+                bbox = _convert_bbox_to_pdf_points(
+                    raw_bbox, xml_page_width, xml_page_height,
+                    pdf_page_width, pdf_page_height,
+                )
 
                 # Match to caption
                 best_cap = _match_caption(img_rect, captions, proximity)
@@ -424,6 +460,8 @@ def extract_figures(
                     caption=caption,
                     bbox=bbox,
                 ))
+
+        pdf_doc.close()
 
     logger.info(f"Poppler extracted {len(figures)} figure(s) from {pdf_path.name}")
     return figures
