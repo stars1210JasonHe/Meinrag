@@ -157,11 +157,30 @@ def _group_into_lines(segments: list[dict], line_tol: float) -> list[dict]:
     return lines
 
 
+_SECTION_HEADING_RE = re.compile(r"^\d+\.\s+[A-Z]")
+
+
 def _extract_captions(lines: list[dict], chunk_gap: float) -> list[dict]:
-    """Extract figure captions from grouped text lines."""
+    """Extract figure captions from grouped text lines.
+
+    After finding a caption line, collects up to 3 continuation lines
+    where the vertical gap from the previous line bottom to the next
+    line top is <= 20px.  Stops early if the next line matches a caption
+    pattern, a section heading pattern, or is empty.
+    """
     caption_regexes = _get_caption_regexes()
+    max_continuation = 3
+    continuation_gap = 20.0  # max px gap between consecutive caption lines
+
+    # Sort lines by vertical position so continuation lookup works
+    sorted_lines = sorted(lines, key=lambda ln: ln["top"])
+
     caps = []
-    for line in lines:
+    consumed: set[int] = set()  # indices of lines consumed as continuations
+
+    for line_idx, line in enumerate(sorted_lines):
+        if line_idx in consumed:
+            continue
         segs = sorted(line["segments"], key=lambda s: s["left"])
         if not segs:
             continue
@@ -189,6 +208,38 @@ def _extract_captions(lines: list[dict], chunk_gap: float) -> list[dict]:
                 right = max(s["left"] + s["width"] for s in chunk)
                 top = min(s["top"] for s in chunk)
                 bottom = max(s["top"] + s["height"] for s in chunk)
+
+                # --- Collect continuation lines ---
+                prev_bottom = bottom
+                cont_count = 0
+                for next_idx in range(line_idx + 1, len(sorted_lines)):
+                    if cont_count >= max_continuation:
+                        break
+                    next_line = sorted_lines[next_idx]
+                    gap_to_next = next_line["top"] - prev_bottom
+                    if gap_to_next > continuation_gap:
+                        break
+
+                    next_segs = sorted(
+                        next_line["segments"], key=lambda s: s["left"]
+                    )
+                    next_text = " ".join(
+                        s["text"] for s in next_segs if s["text"]
+                    ).strip()
+
+                    if not next_text:
+                        break
+                    if any(r.match(next_text) for r in caption_regexes):
+                        break
+                    if _SECTION_HEADING_RE.match(next_text):
+                        break
+
+                    chunk_text += " " + next_text
+                    bottom = next_line["bottom"]
+                    prev_bottom = bottom
+                    consumed.add(next_idx)
+                    cont_count += 1
+
                 caps.append({
                     "rect": (left, top, right, bottom),
                     "text": chunk_text,

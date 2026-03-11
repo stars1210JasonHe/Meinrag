@@ -180,6 +180,54 @@ class TestRunPoppler:
         assert full_exe.exists(), f"Expected bundled exe at {full_exe}"
 
 
+class TestMultiLineCaptions:
+    def test_continuation_lines_appended(self):
+        """Lines immediately following a caption line should be joined."""
+        segments = [
+            {"top": 300.0, "left": 82.0, "width": 60.0, "height": 12.0, "text": "Figure 1."},
+            {"top": 300.0, "left": 150.0, "width": 200.0, "height": 12.0, "text": "Architecture of the T3RL system"},
+            {"top": 314.0, "left": 82.0, "width": 300.0, "height": 12.0, "text": "showing the verifier and tool integration pipeline."},
+            {"top": 340.0, "left": 82.0, "width": 200.0, "height": 12.0, "text": "In this section, we describe our method."},
+        ]
+        lines = _group_into_lines(segments, line_tol=2.0)
+        captions = _extract_captions(lines, chunk_gap=40.0)
+        assert len(captions) == 1
+        assert "showing the verifier" in captions[0]["text"]
+
+    def test_stops_at_non_continuation(self):
+        """Caption continuation stops when a new paragraph/section begins."""
+        segments = [
+            {"top": 300.0, "left": 82.0, "width": 60.0, "height": 12.0, "text": "Figure 1."},
+            {"top": 300.0, "left": 150.0, "width": 200.0, "height": 12.0, "text": "The pipeline overview."},
+            # Gap of 30px (>1 line height) then a new section
+            {"top": 350.0, "left": 82.0, "width": 200.0, "height": 12.0, "text": "3. Method"},
+            {"top": 364.0, "left": 82.0, "width": 300.0, "height": 12.0, "text": "We propose a new approach."},
+        ]
+        lines = _group_into_lines(segments, line_tol=2.0)
+        captions = _extract_captions(lines, chunk_gap=40.0)
+        assert len(captions) == 1
+        assert "3. Method" not in captions[0]["text"]
+        assert "new approach" not in captions[0]["text"]
+
+    def test_max_continuation_lines(self):
+        """Caption should not absorb more than 3 continuation lines."""
+        segments = [
+            {"top": 300.0, "left": 82.0, "width": 200.0, "height": 12.0, "text": "Figure 1. Title"},
+        ]
+        # Add 6 continuation lines
+        for i in range(6):
+            segments.append({
+                "top": 314.0 + i * 14.0, "left": 82.0,
+                "width": 300.0, "height": 12.0,
+                "text": f"Continuation line {i+1}.",
+            })
+        lines = _group_into_lines(segments, line_tol=2.0)
+        captions = _extract_captions(lines, chunk_gap=40.0)
+        assert len(captions) == 1
+        assert "Continuation line 3" in captions[0]["text"]
+        assert "Continuation line 4" not in captions[0]["text"]
+
+
 class TestExtractFiguresIntegration:
     _TEST_PDF = Path(__file__).parent.parent / "test cases1" / "ai_tool_verification_ttrl.pdf"
 
