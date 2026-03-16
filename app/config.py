@@ -20,6 +20,7 @@ class ParseMode(str, Enum):
     DEFAULT = "default"
     ENHANCED = "enhanced"
     VISION = "vision"
+    DOCLING = "docling"
 
 
 class Settings(BaseSettings):
@@ -53,12 +54,18 @@ class Settings(BaseSettings):
     #   "default"  — text-only extraction (fast, all file types)
     #   "enhanced" — tables + images via PyMuPDF (PDF only, falls back to default for others)
     #   "vision"   — render pages as images → vision LLM → structured markdown (all file types)
+    #   "docling"  — neural layout analysis via docling (best accuracy, requires optional install)
     parse_mode: ParseMode = ParseMode.DEFAULT
     image_description_model: str = "gpt-4o-mini"
     image_description_max_tokens: int = 512
 
     # Poppler figure extraction (enhanced mode)
     poppler_figure_extraction: bool = True
+
+    # Docling mode settings (requires: uv sync --extra docling)
+    docling_ocr: bool = False
+    docling_picture_description: bool = False
+    docling_device: str = "auto"  # "auto", "cpu", "cuda", "mps"
 
     # Vision mode settings
     vision_model: str = "gpt-4o-mini"

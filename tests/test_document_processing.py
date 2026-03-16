@@ -192,10 +192,11 @@ class TestVisionMode:
         assert isinstance(result, bool)
 
     def test_parse_mode_enum_values(self):
-        """ParseMode enum has default, enhanced, vision."""
+        """ParseMode enum has default, enhanced, vision, docling."""
         assert ParseMode.DEFAULT == "default"
         assert ParseMode.ENHANCED == "enhanced"
         assert ParseMode.VISION == "vision"
+        assert ParseMode.DOCLING == "docling"
 
     def test_parse_mode_default_unchanged(self):
         """Default parse_mode is 'default'."""
