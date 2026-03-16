@@ -86,8 +86,9 @@ class Settings(BaseSettings):
     web_search_provider: str = "duckduckgo"
     web_search_score_threshold: float = 0.0  # score-based auto-fallback disabled; web search still triggers on empty results or force_web_search
 
-    # Database
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/meinrag"
+    # Database: SQLite (default, zero-setup) or PostgreSQL (docker compose up postgres -d)
+    # "postgresql+asyncpg://postgres:postgres@localhost:5432/meinrag"
+    database_url: str = "sqlite+aiosqlite:///data/meinrag.db"
 
     # User system
     default_user: str = "admin"

@@ -72,7 +72,7 @@ async def lifespan(app: FastAPI):
     logger.info(
         f"MEINRAG started | LLM={settings.llm_provider.value} "
         f"| VectorStore={settings.vector_store.value} "
-        f"| DB=PostgreSQL "
+        f"| DB={'SQLite' if 'sqlite' in settings.database_url else 'PostgreSQL'} "
         f"| Isolation={settings.user_isolation}"
     )
     yield
