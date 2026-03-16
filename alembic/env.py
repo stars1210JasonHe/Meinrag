@@ -1,4 +1,4 @@
-"""Alembic env.py — async-aware for asyncpg."""
+"""Alembic env.py — supports both asyncpg (PostgreSQL) and aiosqlite (SQLite)."""
 import asyncio
 from logging.config import fileConfig
 
@@ -17,6 +17,11 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
+def _is_sqlite() -> bool:
+    url = config.get_main_option("sqlalchemy.url", "")
+    return url.startswith("sqlite")
+
+
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
@@ -24,13 +29,18 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        render_as_batch=_is_sqlite(),
     )
     with context.begin_transaction():
         context.run_migrations()
 
 
 def do_run_migrations(connection):
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        render_as_batch=_is_sqlite(),
+    )
     with context.begin_transaction():
         context.run_migrations()
 
