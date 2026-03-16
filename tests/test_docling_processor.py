@@ -101,3 +101,75 @@ class TestDoclingConfig:
     def test_parse_mode_docling_exists(self):
         from app.config import ParseMode
         assert ParseMode.DOCLING == "docling"
+
+
+# ── Integration tests (require docling installed + test PDFs) ────────────
+
+from app.services.docling_processor import has_docling
+
+docling_installed = pytest.mark.skipif(
+    not has_docling(), reason="docling not installed"
+)
+
+
+@docling_installed
+class TestDoclingIntegration:
+    """Integration tests — require docling installed + test PDFs."""
+
+    def test_process_pdf_returns_chunks(self):
+        """Process a real PDF and verify chunks have correct metadata."""
+        from app.services.docling_processor import process
+        from app.config import Settings
+
+        pdf = Path("test cases/attention_is_all_you_need.pdf")
+        if not pdf.exists():
+            pytest.skip("Test PDF not available")
+
+        settings = Settings()
+        chunks = process(pdf, "test_int", settings, "attention.pdf")
+
+        assert len(chunks) > 0
+
+        for chunk in chunks:
+            assert "chunk_type" in chunk.metadata
+            assert chunk.metadata["chunk_type"] in ("text", "table", "image")
+            assert "page" in chunk.metadata
+            assert chunk.metadata["source_file"] == "attention.pdf"
+            assert chunk.metadata["parse_mode"] == "docling"
+            assert "chunk_index" in chunk.metadata
+
+        types = [c.metadata["chunk_type"] for c in chunks]
+        assert "image" in types, "Should extract at least one figure"
+        assert "table" in types, "Should extract at least one table"
+
+        # Image chunks should have image_path
+        image_chunks = [c for c in chunks if c.metadata["chunk_type"] == "image"]
+        has_path = any("image_path" in c.metadata for c in image_chunks)
+        assert has_path, "At least one image should have image_path"
+
+        # Table chunks should be markdown format (not triplet)
+        table_chunks = [c for c in chunks if c.metadata["chunk_type"] == "table"]
+        for tc in table_chunks:
+            assert "|" in tc.page_content, "Tables should be markdown format"
+
+    def test_process_pdf_bbox_valid(self):
+        """Verify bbox is a JSON list of 4 floats with x0<x1, y0<y1."""
+        from app.services.docling_processor import process
+        from app.config import Settings
+
+        pdf = Path("test cases/attention_is_all_you_need.pdf")
+        if not pdf.exists():
+            pytest.skip("Test PDF not available")
+
+        settings = Settings()
+        chunks = process(pdf, "test_bbox", settings, "attention.pdf")
+
+        bbox_chunks = [c for c in chunks if "bbox" in c.metadata]
+        assert len(bbox_chunks) > 0, "Some chunks should have bbox"
+
+        for chunk in bbox_chunks:
+            bbox = json.loads(chunk.metadata["bbox"])
+            assert len(bbox) == 4
+            x0, y0, x1, y1 = bbox
+            assert x0 < x1, f"x0 ({x0}) should be < x1 ({x1})"
+            assert y0 < y1, f"y0 ({y0}) should be < y1 ({y1})"
