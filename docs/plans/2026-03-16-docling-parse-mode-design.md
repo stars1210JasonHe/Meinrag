@@ -15,6 +15,21 @@ Current enhanced mode limitations:
 
 Docling solves all of these with local neural models (no API costs for core processing).
 
+## Evaluation Results (tested 2026-03-16)
+
+Tested on `attention_is_all_you_need.pdf` and `physics_terahertz_spintronic.pdf`:
+
+| Metric | Docling (optimized) | Enhanced (PyMuPDF+Poppler) |
+|---|---|---|
+| Figure detection | Exact count (4/6) | Over-extracts (22 duplicates) or under-extracts (3/6) |
+| Caption quality | Clean, correct association | Duplicated/wrong captions |
+| Table structure | DataFrame export with shape (4x4, 10x5, 20x13) | Markdown only, Unicode crash on some |
+| Bounding boxes | Every element | Partial coverage |
+| Processing time (CPU) | 31-50s per paper | 3-6s per paper |
+| Processing time (GPU) | ~5-10s estimated | N/A |
+
+**Verdict:** Docling extraction quality is significantly better. Speed is acceptable with GPU and optimizations.
+
 ## Architecture
 
 ### Processing Pipeline
@@ -23,14 +38,17 @@ Docling solves all of these with local neural models (no API costs for core proc
 Upload request
   → DocumentProcessor.load_and_split(file_path, doc_id)
     → if PARSE_MODE == "docling":
-        → DoclingDocumentProcessor.process(file_path, doc_id)
-          → docling.DocumentConverter.convert(file_path)
+        → docling_processor.process(file_path, doc_id, settings, source_name)
+          → DocumentConverter.convert(file_path)  [cached converter, GPU if available]
             → Heron layout model (text, tables, figures, headings)
-            → TableFormer (cell-level table structure)
-            → RapidOCR (scanned pages)
+            → TableFormer fast mode (cell-level table structure)
+            → RapidOCR (optional, off by default)
             → Optional: SmolVLM picture descriptions
           → DoclingDocument (unified representation)
-          → HybridChunker → docling chunks
+          → Split strategy:
+              Text elements  → HybridChunker (structure-aware splitting)
+              Table elements → Direct markdown export via table.export_to_markdown()
+              Image elements → Direct extraction via element.get_image() + caption_text()
           → map_to_langchain_documents()
             → List[LangChain Document] with standard metadata
     → else: existing modes (default / enhanced / vision)
@@ -40,14 +58,17 @@ Upload request
 
 #### New Files
 
-**`app/services/docling_processor.py`** (~200 lines)
+**`app/services/docling_processor.py`** (~250 lines)
 
 Core wrapper around docling. Responsibilities:
-- Configure `DocumentConverter` with pipeline options
+- Configure `DocumentConverter` with optimized pipeline options
+- Cache converter instance (singleton — don't reload models per document)
+- Auto-detect GPU via `AcceleratorOptions(device="auto")`
 - Run conversion: `converter.convert(file_path)` → `DoclingDocument`
-- Iterate over document elements (`PictureItem`, `TableItem`, `TextItem`)
-- Extract and save figure images to `data/uploads/{doc_id}/images/`
-- Use `HybridChunker` for structure-aware chunking
+- Iterate over document elements:
+  - `TextItem` → HybridChunker for structure-aware text splitting
+  - `TableItem` → `table.export_to_markdown(doc=doc)` as single chunk (no triplet format)
+  - `PictureItem` → `element.get_image(doc)` saved as PNG + `caption_text(doc)` as content
 - Map each chunk to a LangChain `Document` with our metadata schema
 
 Key function:
@@ -58,6 +79,27 @@ def process(file_path: Path, doc_id: str, settings: Settings, source_name: str) 
     source_name: clean filename for citations (doc_id prefix stripped).
     Sets chunk_index and parse_mode on every chunk before returning.
     """
+```
+
+Converter caching (module-level singleton):
+```python
+_converter: DocumentConverter | None = None
+
+def _get_converter(settings: Settings) -> DocumentConverter:
+    global _converter
+    if _converter is None:
+        pipeline_options = PdfPipelineOptions()
+        pipeline_options.generate_picture_images = True
+        pipeline_options.do_ocr = settings.docling_ocr
+        pipeline_options.do_code_enrichment = False  # not needed for RAG
+        pipeline_options.table_structure_options = TableStructureOptions(mode="fast")
+        pipeline_options.accelerator_options = AcceleratorOptions(device="auto")  # GPU if available
+        if settings.docling_picture_description:
+            pipeline_options.do_picture_description = True
+        _converter = DocumentConverter(
+            format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
+        )
+    return _converter
 ```
 
 Availability check:
@@ -83,7 +125,8 @@ def has_docling() -> bool:
 - Add `DOCLING = "docling"` to `ParseMode` enum
 - Add settings:
   - `docling_picture_description: bool = False` — enable SmolVLM image descriptions
-  - `docling_ocr: bool = True` — enable OCR for scanned pages
+  - `docling_ocr: bool = False` — enable OCR for scanned pages (off by default — most PDFs are native text)
+  - `docling_device: str = "auto"` — accelerator device: "auto", "cpu", "cuda", "mps"
 
 **`app/services/document_processor.py`**
 - Add docling branch in `load_and_split()` between vision and enhanced (no suffix restriction — docling handles all file types):
@@ -141,29 +184,53 @@ def _convert_docling_bbox(prov, page_height: float) -> list[float]:
 
 This needs verification during implementation — docling may already use top-left origin in newer versions.
 
-### Chunking Strategy
+### Chunking Strategy (Hybrid Approach)
 
-Use docling's `HybridChunker` instead of our `RecursiveCharacterTextSplitter`:
+**Text elements:** Use docling's `HybridChunker` for structure-aware splitting. Benefits:
+- Headings preserved as context in each chunk
+- Reading order respected
+- Undersized paragraphs merged with peers
 
+**Table elements:** Skip HybridChunker. Export directly via `table.export_to_markdown(doc=doc)` as a single chunk. This preserves markdown table format (which works well for our retrieval) instead of HybridChunker's triplet format (`row, col = value`) which is harder to read and may hurt retrieval quality. Large tables split using our existing `_split_large_table()` helper (preserves header rows).
+
+**Image elements:** Skip HybridChunker. Extract directly:
+- `page_content` = `element.caption_text(doc)` (or `"Figure on page N"` fallback)
+- Save `element.get_image(doc)` as PNG to `data/uploads/{doc_id}/images/`
+- Include bbox from provenance data
+
+HybridChunker tokenizer configuration:
 ```python
-from docling.chunking import HybridChunker
+from docling_core.transforms.chunker.tokenizer.openai import OpenAITokenizer
+import tiktoken
 
-chunker = HybridChunker(
-    tokenizer="Xenova/gpt-4o",  # GPT tokenizer — matches OpenAI embedding model's tokenization
+tokenizer = OpenAITokenizer(
+    tokenizer=tiktoken.encoding_for_model("gpt-4o"),
     max_tokens=settings.chunk_size // 4,  # ~250 tokens for chunk_size=1000
 )
-chunks = list(chunker.chunk(doc))
+chunker = HybridChunker(tokenizer=tokenizer)
 ```
 
-Note: The tokenizer must approximate OpenAI's `text-embedding-3-small` tokenization. A GPT-family tokenizer is the closest match. The exact tokenizer ID will be verified during implementation — docling may accept `"cl100k_base"` or a tiktoken-compatible name. The `max_tokens` ratio (chars / 4) is a rough approximation; we'll calibrate against actual chunk sizes during testing.
+Note: Requires `docling-core[chunking-openai]` extra. There is a known import bug (#459) where HybridChunker unconditionally imports `transformers`. If this is not fixed in our version, fallback to `HuggingFaceTokenizer` with explicit `max_tokens`.
 
-Benefits:
-- Tables stay as single chunks (not split mid-row)
-- Figures keep their captions
-- Headings are preserved as context in each chunk
-- Reading order is respected
+### Speed Optimizations
 
-Each docling chunk contains references back to the original `DocItem` elements, allowing us to extract the `chunk_type`, `page`, `bbox`, and `image_path` for our metadata.
+Tested configurations on `attention_is_all_you_need.pdf` (15 pages):
+
+| Config | CPU Time | Notes |
+|---|---|---|
+| Default (all models) | 50.6s | Baseline |
+| No OCR | 40.3s | Same quality on native-text PDFs |
+| No OCR + no code enrichment | 41.3s | Same quality (no code in paper) |
+| No OCR + no code + fast tables | 31.4s | Same element count, 1.6x faster |
+
+Applied optimizations:
+1. **`do_ocr = False`** by default (config flag to enable for scanned PDFs)
+2. **`do_code_enrichment = False`** always (not needed for RAG)
+3. **`TableStructureOptions(mode="fast")`** — minor accuracy tradeoff, meaningful speed gain
+4. **`AcceleratorOptions(device="auto")`** — auto-detect GPU (CUDA/MPS), fall back to CPU
+5. **Cached converter instance** — models loaded once at first use, reused for all subsequent documents
+
+Expected with GPU: ~5-10s per paper (5-6x speedup over CPU).
 
 ### Picture Description (Optional)
 
@@ -171,18 +238,15 @@ When `DOCLING_PICTURE_DESCRIPTION=true`:
 
 ```python
 pipeline_options.do_picture_description = True
-pipeline_options.picture_description_options = PictureDescriptionVlmOptions(
-    repo_id="HuggingFaceTB/SmolVLM-256M-Instruct",
-)
 ```
 
-SmolVLM-256M runs locally on CPU (~500MB model download on first run). Descriptions are stored in the figure's metadata and used as the chunk's `page_content`.
+SmolVLM-256M runs locally on CPU/GPU (~500MB model download on first run). Descriptions are stored in the figure's metadata and used as the chunk's `page_content`.
 
 When disabled (default): the chunk's `page_content` uses `element.caption_text(doc)` — the caption extracted from document structure.
 
 ### OCR
 
-Enabled by default (`DOCLING_OCR=true`). Uses RapidOCR (bundled with docling, no extra install). Automatically activates on pages with bitmap regions.
+Disabled by default (`DOCLING_OCR=false`). Most PDFs have native text — OCR adds ~10s overhead with no benefit. Enable for scanned documents via config flag. Uses RapidOCR (bundled with docling, no extra install).
 
 ### Fallback Chain
 
@@ -205,16 +269,17 @@ uv sync --extra docling
 
 ### Model Pre-Download
 
-First run with docling downloads neural models from HuggingFace (~500MB-1GB). This is too slow for an HTTP upload request. The docling processor must handle this:
+First run with docling downloads neural models from HuggingFace (~1.2GB). This is too slow for an HTTP upload request. Solutions:
 
-1. **Startup check:** During `has_docling()` or app lifespan, log a warning if models are not cached:
-   `"Docling models not yet downloaded. First document processing will take several minutes."`
-2. **Pre-download command** (recommended): Add a CLI helper or document a one-liner:
+1. **Pre-download command** (recommended):
    ```bash
    uv run python -c "from docling.document_converter import DocumentConverter; DocumentConverter()"
    ```
-   This triggers the model download without processing a document.
-3. **Timeout handling:** The `process()` function should not have an artificial timeout — let docling download and process. The FastAPI upload endpoint already has no timeout by default. If a reverse proxy is in front, the user must configure its timeout.
+   Or: `docling-tools models download`
+
+2. **Startup log:** On first `process()` call, log: `"Docling: downloading models (~1.2GB), this may take several minutes..."`
+
+3. **Cached converter:** After first load, the singleton converter is reused — subsequent uploads are fast.
 
 ### Compatibility
 
@@ -233,6 +298,7 @@ First run with docling downloads neural models from HuggingFace (~500MB-1GB). Th
 - No custom layout analysis (docling handles it)
 - No caption matching heuristics (docling has `caption_text()`)
 - No LibreOffice conversion for non-PDF (docling handles DOCX/PPTX/XLSX/HTML natively)
+- No `langchain-docling` dependency — use direct docling API (langchain-docling loses image data and bbox info)
 
 ### Testing Plan
 
@@ -249,18 +315,20 @@ First run with docling downloads neural models from HuggingFace (~500MB-1GB). Th
 **Integration tests (requires docling installed):**
 - Process a real PDF and verify chunk count, types, metadata
 - Verify figure images are saved to correct paths
-- Verify table content is preserved (not split mid-table)
+- Verify table content is preserved as markdown (not triplet format)
 - Compare quality: same PDF through enhanced vs docling mode
 - Test with/without picture descriptions
 - Test OCR on a scanned PDF
 - Test non-PDF formats: DOCX, PPTX, XLSX
 
+### Resolved Questions
+
+1. ~~Whether `langchain-docling` package is needed~~ → **No.** Use direct docling API. langchain-docling loses image data, bbox info, and structured table data. Our project doesn't use LangChain loaders for enhanced or vision mode.
+2. ~~First-run model download UX~~ → **Solved:** pre-download command + startup log + cached converter singleton.
+3. ~~HybridChunker for tables~~ → **No.** HybridChunker uses triplet format for tables which loses structure. Tables exported directly via `table.export_to_markdown()`.
+4. ~~Disk usage~~ → ~2.2-2.7GB total (packages + models) on Windows with CPU PyTorch. GPU users need CUDA PyTorch (~2.5GB extra).
+
 ### Open Questions (to resolve during implementation)
 
 1. Exact bbox coordinate system in docling 2.80+ — verify origin and axis direction
-2. `HybridChunker` tokenizer: verify that `"Xenova/gpt-4o"` or `"cl100k_base"` is accepted. Calibrate `max_tokens` against actual chunk sizes.
-
-### Resolved Questions
-
-3. ~~Whether `langchain-docling` package is needed~~ → **No.** Use direct docling API. The project doesn't use LangChain loaders for enhanced or vision mode — keeping it consistent. Avoids an extra dependency.
-4. ~~First-run model download UX~~ → **Solved:** startup warning log + documented pre-download command (see Installation section).
+2. `OpenAITokenizer` import bug (#459) — may need fallback to HuggingFaceTokenizer with explicit max_tokens

@@ -48,6 +48,9 @@ dependencies = [
     "sse-starlette>=2.0.0",
 ]
 
+[project.optional-dependencies]
+docling = ["docling>=2.80.0"]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",
