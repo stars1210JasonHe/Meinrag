@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Sequence
 
 from langchain_core.documents import Document
@@ -35,22 +36,31 @@ def format_docs(docs: list[Document]) -> str:
     return "\n\n---\n\n".join(formatted)
 
 
-def _is_reference_entry(text: str) -> bool:
-    """Detect if text is a bibliography/reference list entry."""
-    import re
+_REF_LINE_RE = re.compile(r"^-?\s*\[\d+\]\s+[A-Z]")
+
+
+def is_reference_entry(text: str) -> bool:
+    """Detect if text is a bibliography/reference list entry.
+
+    Matches patterns like:
+      - [1] Author, Title...
+      - [58] R. Gupta, ...
+      [1] Author, Title...
+    Returns True if >= 50% of lines match the reference pattern.
+    """
     lines = text.strip().split("\n")
     if not lines:
         return False
-    ref_lines = sum(1 for line in lines if re.match(r"^-?\s*\[\d+\]\s+[A-Z]", line.strip()))
+    ref_lines = sum(1 for line in lines if _REF_LINE_RE.match(line.strip()))
     return ref_lines > 0 and ref_lines >= len(lines) * 0.5
 
 
-def _demote_reference_chunks(docs: list[Document], top_k: int) -> list[Document]:
-    """Move reference-list chunks to the end so real content fills top_k first."""
-    content = [d for d in docs if not _is_reference_entry(d.page_content)]
-    refs = [d for d in docs if _is_reference_entry(d.page_content)]
-    combined = content + refs
-    return combined[:top_k]
+def _demote_reference_chunks(docs: list[Document], limit: int) -> list[Document]:
+    """Move reference-list chunks to the end so real content fills top slots first."""
+    content, refs = [], []
+    for d in docs:
+        (refs if is_reference_entry(d.page_content) else content).append(d)
+    return (content + refs)[:limit]
 
 
 def _build_filtered_retriever(
@@ -160,10 +170,14 @@ def build_rag_chain(
             search_type="similarity", search_kwargs={"k": fetch_k}
         )
 
-    # Step 2: Demote reference-section chunks (push to end, keep top_k content)
+    # Step 2: Demote reference-section chunks (push to end)
+    # When reranking, keep full fetch_k so reranker has enough candidates
+    demote_limit = fetch_k if rerank_enabled else top_k
     base_retriever = retriever
     retriever = RunnableLambda(
-        lambda query: _demote_reference_chunks(base_retriever.invoke(query), top_k)
+        lambda query, lim=demote_limit: _demote_reference_chunks(
+            base_retriever.invoke(query), lim
+        )
     )
 
     # Step 3: Wrap with re-ranker if enabled

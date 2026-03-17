@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from sse_starlette.sse import EventSourceResponse
@@ -14,7 +13,7 @@ from app.dependencies import (
 from app.db.repositories import DocumentRepository, ChatSessionRepository
 from app.models.schemas import QueryRequest, QueryResponse, SourceChunk, ChunkContextRequest, AskAIRequest, AskAIResponse
 from langchain_core.output_parsers import StrOutputParser
-from app.rag.chain import build_rag_chain
+from app.rag.chain import build_rag_chain, is_reference_entry
 from app.rag.prompts import WEB_SEARCH_PROMPT, CHUNK_CONTEXT_PROMPT, QUERY_REWRITE_PROMPT, ASK_AI_PROMPT
 from app.routers.stream_helpers import sse_event, stream_chain_response
 from app.vectorstore.base import VectorStoreManager
@@ -26,22 +25,15 @@ router = APIRouter()
 _RETRYABLE_KEYWORDS = ("500", "503", "rate", "overloaded", "internal server error")
 
 
-def _is_reference_entry(text: str) -> bool:
-    """Detect if text is a bibliography/reference list entry (e.g., '- [1] Author...')."""
-    lines = text.strip().split("\n")
-    if not lines:
-        return False
-    ref_lines = sum(1 for line in lines if re.match(r"^-?\s*\[\d+\]\s+[A-Z]", line.strip()))
-    return ref_lines > 0 and ref_lines >= len(lines) * 0.5
-
-
 def _demote_reference_results(
     results: list[tuple], top_k: int
 ) -> list[tuple]:
     """Move reference-list results to the end so real content fills top_k first."""
-    content = [r for r in results if not _is_reference_entry(r[0].page_content)]
-    refs = [r for r in results if _is_reference_entry(r[0].page_content)]
-    logger.info(f"Reference demotion: {len(refs)} ref chunks demoted out of {len(results)} results")
+    content, refs = [], []
+    for r in results:
+        (refs if is_reference_entry(r[0].page_content) else content).append(r)
+    if refs:
+        logger.info("Reference demotion: %d ref chunks demoted out of %d results", len(refs), len(results))
     return (content + refs)[:top_k]
 
 
