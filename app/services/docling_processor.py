@@ -49,6 +49,7 @@ def _make_text_chunk(text: str, page: int, source_name: str) -> Document:
             "page": page,
             "source_file": source_name,
             "parse_mode": "docling",
+            "section": "",
         },
     )
 
@@ -62,6 +63,7 @@ def _make_table_chunk(
         "page": page,
         "source_file": source_name,
         "parse_mode": "docling",
+        "section": "",
     }
     if bbox:
         meta["bbox"] = json.dumps(bbox)
@@ -78,6 +80,7 @@ def _make_image_chunk(
         "page": page,
         "source_file": source_name,
         "parse_mode": "docling",
+        "section": "",
     }
     if image_path:
         meta["image_path"] = image_path
@@ -141,6 +144,25 @@ def _get_element_bbox(element, page_height: float) -> list[float] | None:
     return _convert_bbox(bbox.l, bbox.t, bbox.r, bbox.b, page_height)
 
 
+def _is_reference_chunk(text: str) -> bool:
+    """Detect if a chunk is from a reference/bibliography section.
+
+    Matches patterns like:
+      - [1] Author, Title...
+      - [58] R. Gupta, ...
+      [1] Author, Title...
+    """
+    import re
+    lines = text.strip().split("\n")
+    ref_lines = 0
+    for line in lines:
+        stripped = line.strip()
+        if re.match(r"^-?\s*\[\d+\]\s+[A-Z]", stripped):
+            ref_lines += 1
+    # If majority of lines are reference entries, it's a reference chunk
+    return ref_lines > 0 and ref_lines >= len(lines) * 0.5
+
+
 def _chunk_text_elements(doc, settings: Settings, source_name: str) -> list[Document]:
     """Use HybridChunker on the full document, extract only text chunks."""
     try:
@@ -173,9 +195,13 @@ def _chunk_text_elements(doc, settings: Settings, source_name: str) -> list[Docu
 
             text_chunk = _make_text_chunk(chunk.text, page, source_name)
 
-            # Add heading context if available
+            # Add heading context if available (store as string for FAISS compatibility)
             if chunk.meta and chunk.meta.headings:
-                text_chunk.metadata["headings"] = chunk.meta.headings
+                text_chunk.metadata["headings"] = " > ".join(chunk.meta.headings)
+
+            # Detect reference list entries (e.g., "- [1] Author, Title...")
+            if _is_reference_chunk(chunk.text):
+                text_chunk.metadata["section"] = "references"
 
             chunks.append(text_chunk)
     except Exception as e:

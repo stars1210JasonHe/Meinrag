@@ -35,6 +35,24 @@ def format_docs(docs: list[Document]) -> str:
     return "\n\n---\n\n".join(formatted)
 
 
+def _is_reference_entry(text: str) -> bool:
+    """Detect if text is a bibliography/reference list entry."""
+    import re
+    lines = text.strip().split("\n")
+    if not lines:
+        return False
+    ref_lines = sum(1 for line in lines if re.match(r"^-?\s*\[\d+\]\s+[A-Z]", line.strip()))
+    return ref_lines > 0 and ref_lines >= len(lines) * 0.5
+
+
+def _demote_reference_chunks(docs: list[Document], top_k: int) -> list[Document]:
+    """Move reference-list chunks to the end so real content fills top_k first."""
+    content = [d for d in docs if not _is_reference_entry(d.page_content)]
+    refs = [d for d in docs if _is_reference_entry(d.page_content)]
+    combined = content + refs
+    return combined[:top_k]
+
+
 def _build_filtered_retriever(
     vector_store: VectorStoreManager,
     doc_ids: list[str] | None,
@@ -127,7 +145,8 @@ def build_rag_chain(
     hybrid_enabled = settings.hybrid_search_enabled if settings else False
     bm25_weight = settings.hybrid_bm25_weight if settings else 0.5
 
-    fetch_k = top_k * 3 if rerank_enabled else top_k
+    # Over-fetch to allow reference demotion (fetch extra, then filter down)
+    fetch_k = top_k * 3 if rerank_enabled else int(top_k * 1.5)
 
     # Step 1: Build base retriever
     if hybrid_enabled:
@@ -141,11 +160,17 @@ def build_rag_chain(
             search_type="similarity", search_kwargs={"k": fetch_k}
         )
 
-    # Step 2: Wrap with re-ranker if enabled
+    # Step 2: Demote reference-section chunks (push to end, keep top_k content)
+    base_retriever = retriever
+    retriever = RunnableLambda(
+        lambda query: _demote_reference_chunks(base_retriever.invoke(query), top_k)
+    )
+
+    # Step 3: Wrap with re-ranker if enabled
     if rerank_enabled:
         retriever = _build_reranked_retriever(retriever, llm, rerank_top_n)
 
-    # Step 3: Choose prompt based on chat history
+    # Step 4: Choose prompt based on chat history
     if chat_history:
         prompt = RAG_CHAT_PROMPT
         chain = (

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from sse_starlette.sse import EventSourceResponse
@@ -23,6 +24,25 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _RETRYABLE_KEYWORDS = ("500", "503", "rate", "overloaded", "internal server error")
+
+
+def _is_reference_entry(text: str) -> bool:
+    """Detect if text is a bibliography/reference list entry (e.g., '- [1] Author...')."""
+    lines = text.strip().split("\n")
+    if not lines:
+        return False
+    ref_lines = sum(1 for line in lines if re.match(r"^-?\s*\[\d+\]\s+[A-Z]", line.strip()))
+    return ref_lines > 0 and ref_lines >= len(lines) * 0.5
+
+
+def _demote_reference_results(
+    results: list[tuple], top_k: int
+) -> list[tuple]:
+    """Move reference-list results to the end so real content fills top_k first."""
+    content = [r for r in results if not _is_reference_entry(r[0].page_content)]
+    refs = [r for r in results if _is_reference_entry(r[0].page_content)]
+    logger.info(f"Reference demotion: {len(refs)} ref chunks demoted out of {len(results)} results")
+    return (content + refs)[:top_k]
 
 
 def _smart_truncate(text: str, max_len: int = 500) -> str:
@@ -358,10 +378,13 @@ async def query_documents(
                 request, llm, memory_manager, settings, current_user=current_user,
             )
 
-        # Get source docs with similarity scores
+        # Get source docs with similarity scores (over-fetch to allow reference demotion)
         retrieved = vector_store.similarity_search_with_scores(
-            request.question, k=request.top_k, doc_ids=doc_ids,
+            request.question, k=int(request.top_k * 1.5), doc_ids=doc_ids,
         )
+
+        # Demote reference-list entries so real content fills top_k
+        retrieved = _demote_reference_results(retrieved, request.top_k)
 
         # Web search fallback if needed
         if _should_web_search(request, settings, user_scoped, retrieved):
@@ -522,8 +545,9 @@ async def query_documents_stream(
         needs_web_search = True
     else:
         retrieved = vector_store.similarity_search_with_scores(
-            request.question, k=request.top_k, doc_ids=doc_ids,
+            request.question, k=int(request.top_k * 1.5), doc_ids=doc_ids,
         )
+        retrieved = _demote_reference_results(retrieved, request.top_k)
         needs_web_search = _should_web_search(request, settings, user_scoped, retrieved)
         if not needs_web_search:
             retrieved = _supplement_visual_chunks(retrieved, vector_store, doc_ids)
