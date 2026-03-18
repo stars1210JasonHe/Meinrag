@@ -46,6 +46,9 @@ dependencies = [
 
     # Streaming
     "sse-starlette>=2.0.0",
+
+    # Re-ranking
+    "flashrank>=0.2",
 ]
 
 [project.optional-dependencies]

@@ -115,23 +115,82 @@ def _build_hybrid_retriever(
     return RunnableLambda(_search)
 
 
+def _get_reranker(settings: Settings, llm: BaseChatModel | None = None):
+    """Create a document compressor based on the configured rerank provider.
+
+    Supported providers: flashrank (default, local CPU), cross-encoder (local GPU),
+    jina (API), cohere (API), llm (uses chat model).
+    """
+    provider = settings.rerank_provider
+    top_n = settings.rerank_top_n
+    model = settings.rerank_model
+
+    try:
+        if provider == "flashrank":
+            from langchain_community.document_compressors.flashrank_rerank import FlashrankRerank
+            return FlashrankRerank(
+                model=model or "ms-marco-MiniLM-L-12-v2",
+                top_n=top_n,
+            )
+
+        elif provider == "cross-encoder":
+            from langchain_community.cross_encoders import HuggingFaceCrossEncoder
+            from langchain_classic.retrievers.document_compressors.cross_encoder_rerank import CrossEncoderReranker
+            encoder = HuggingFaceCrossEncoder(
+                model_name=model or "BAAI/bge-reranker-v2-m3",
+            )
+            return CrossEncoderReranker(model=encoder, top_n=top_n)
+
+        elif provider == "jina":
+            from langchain_community.document_compressors.jina_rerank import JinaRerank
+            return JinaRerank(
+                model=model or "jina-reranker-v2-base-multilingual",
+                top_n=top_n,
+            )
+
+        elif provider == "cohere":
+            from langchain_cohere import CohereRerank
+            return CohereRerank(
+                model=model or "rerank-english-v3.0",
+                top_n=top_n,
+            )
+
+        elif provider == "llm":
+            from langchain_classic.retrievers.document_compressors.listwise_rerank import LLMListwiseRerank
+            if llm is None:
+                raise ValueError("LLM reranker requires an LLM instance")
+            return LLMListwiseRerank.from_llm(llm, top_n=top_n)
+
+        else:
+            raise ValueError(f"Unknown rerank_provider: {provider}")
+
+    except (ImportError, ModuleNotFoundError) as e:
+        raise ImportError(
+            f"Rerank provider '{provider}' requires a package that is not installed. "
+            f"Install with: uv pip install <package>. Original error: {e}"
+        ) from e
+
+
 def _build_reranked_retriever(
     base_retriever,
-    llm: BaseChatModel,
-    top_n: int,
+    settings: Settings,
+    llm: BaseChatModel | None = None,
 ) -> RunnableLambda:
-    """Wraps a retriever with LLM listwise re-ranking."""
-    from langchain.retrievers import ContextualCompressionRetriever
-    from langchain.retrievers.document_compressors import LLMListwiseRerank
+    """Wraps a retriever with a configurable re-ranker."""
+    from langchain_classic.retrievers.contextual_compression import ContextualCompressionRetriever
 
-    compressor = LLMListwiseRerank.from_llm(llm, top_n=top_n)
+    compressor = _get_reranker(settings, llm)
     compression_retriever = ContextualCompressionRetriever(
         base_compressor=compressor,
         base_retriever=base_retriever,
     )
 
     def _search(query: str) -> list[Document]:
-        return compression_retriever.invoke(query)
+        try:
+            return compression_retriever.invoke(query)
+        except Exception as e:
+            logger.warning("Reranker failed, returning unranked results: %s", e)
+            return base_retriever.invoke(query)
 
     return RunnableLambda(_search)
 
@@ -182,7 +241,7 @@ def build_rag_chain(
 
     # Step 3: Wrap with re-ranker if enabled
     if rerank_enabled:
-        retriever = _build_reranked_retriever(retriever, llm, rerank_top_n)
+        retriever = _build_reranked_retriever(retriever, settings, llm)
 
     # Step 4: Choose prompt based on chat history
     if chat_history:

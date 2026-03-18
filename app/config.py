@@ -23,6 +23,14 @@ class ParseMode(str, Enum):
     DOCLING = "docling"
 
 
+class RerankProvider(str, Enum):
+    FLASHRANK = "flashrank"
+    CROSS_ENCODER = "cross-encoder"
+    JINA = "jina"
+    COHERE = "cohere"
+    LLM = "llm"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -79,6 +87,8 @@ class Settings(BaseSettings):
     # Re-ranking
     rerank_enabled: bool = False
     rerank_top_n: int = 4
+    rerank_provider: RerankProvider = RerankProvider.FLASHRANK
+    rerank_model: str = ""  # empty = auto-select default per provider
 
     # Hybrid search
     hybrid_search_enabled: bool = False
