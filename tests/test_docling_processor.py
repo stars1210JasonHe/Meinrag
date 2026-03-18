@@ -132,7 +132,7 @@ class TestDoclingIntegration:
 
         for chunk in chunks:
             assert "chunk_type" in chunk.metadata
-            assert chunk.metadata["chunk_type"] in ("text", "table", "image")
+            assert chunk.metadata["chunk_type"] in ("text", "table", "image", "formula")
             assert "page" in chunk.metadata
             assert chunk.metadata["source_file"] == "attention.pdf"
             assert chunk.metadata["parse_mode"] == "docling"

@@ -86,6 +86,75 @@ def _make_image_chunk(
     return Document(page_content=caption, metadata=meta)
 
 
+def _make_formula_chunk(
+    text: str, page: int, source_name: str,
+    image_path: str | None = None, bbox: list[float] | None = None
+) -> Document:
+    """Create a formula/equation chunk with standard metadata."""
+    meta = {
+        "chunk_type": "formula",
+        "page": page,
+        "source_file": source_name,
+        "parse_mode": "docling",
+    }
+    if image_path:
+        meta["image_path"] = image_path
+    if bbox:
+        meta["bbox"] = json.dumps(bbox)
+    return Document(page_content=text, metadata=meta)
+
+
+def _crop_formula_image(
+    pdf_path: Path, page_num: int, bbox: list[float], images_dir: Path,
+    doc_id: str, formula_idx: int
+) -> str | None:
+    """Crop a formula region from the PDF page and save as PNG."""
+    try:
+        import fitz
+        pdf = fitz.open(str(pdf_path))
+        page = pdf[page_num]
+        x0, y0, x1, y1 = bbox
+        rect = fitz.Rect(x0, y0, x1, y1) + fitz.Rect(-5, -5, 5, 5)  # padding
+        mat = fitz.Matrix(3, 3)  # 3x zoom for readable equations
+        clip = page.get_pixmap(matrix=mat, clip=rect)
+        filename = f"page{page_num}_eq{formula_idx}.png"
+        clip.save(str(images_dir / filename))
+        pdf.close()
+        return f"{doc_id}/{filename}"
+    except Exception as e:
+        logger.debug(f"Failed to crop formula image: {e}")
+        return None
+
+
+def _ocr_formula(image_path: Path) -> str | None:
+    """Run pix2tex LaTeX OCR on a formula image. Returns LaTeX string or None."""
+    try:
+        from pix2tex.cli import LatexOCR
+        from PIL import Image
+        model = _get_latex_ocr()
+        img = Image.open(image_path)
+        result = model(img)
+        if result and len(result) < 2000:  # sanity check against hallucination
+            return result
+        return None
+    except Exception as e:
+        logger.debug(f"pix2tex OCR failed: {e}")
+        return None
+
+
+_latex_ocr = None
+
+
+def _get_latex_ocr():
+    """Cached pix2tex model singleton."""
+    global _latex_ocr
+    if _latex_ocr is None:
+        from pix2tex.cli import LatexOCR
+        logger.info("Loading pix2tex LaTeX OCR model...")
+        _latex_ocr = LatexOCR()
+    return _latex_ocr
+
+
 # ── Cached converter singleton ───────────────────────────────────────────
 
 _converter = None
@@ -217,7 +286,7 @@ def process(
     Returns:
         List of LangChain Documents with consistent metadata.
     """
-    from docling_core.types.doc import PictureItem, TableItem
+    from docling_core.types.doc import PictureItem, TableItem, DocItemLabel
 
     converter = _get_converter(settings)
     result = converter.convert(str(file_path))
@@ -274,6 +343,27 @@ def process(
             chunk = _make_image_chunk(caption, page, source_name, image_path, bbox)
             all_chunks.append(chunk)
 
+        elif hasattr(element, "label") and element.label == DocItemLabel.FORMULA:
+            # Crop formula region from PDF as image
+            formula_image_path = None
+            if bbox:
+                formula_image_path = _crop_formula_image(
+                    file_path, page, bbox, images_dir, doc_id, img_idx
+                )
+                if formula_image_path:
+                    img_idx += 1
+
+            # Optional: OCR to LaTeX
+            content = f"Equation on page {page + 1}"
+            if settings.docling_equation_ocr and formula_image_path:
+                full_img_path = images_dir / formula_image_path.split("/")[-1]
+                latex = _ocr_formula(full_img_path)
+                if latex:
+                    content = f"${latex}$"
+
+            chunk = _make_formula_chunk(content, page, source_name, formula_image_path, bbox)
+            all_chunks.append(chunk)
+
     # Chunk text elements with HybridChunker
     text_chunks = _chunk_text_elements(doc, settings, source_name)
     all_chunks.extend(text_chunks)
@@ -285,9 +375,10 @@ def process(
     text_count = sum(1 for c in all_chunks if c.metadata.get("chunk_type") == "text")
     table_count = sum(1 for c in all_chunks if c.metadata.get("chunk_type") == "table")
     image_count = sum(1 for c in all_chunks if c.metadata.get("chunk_type") == "image")
+    formula_count = sum(1 for c in all_chunks if c.metadata.get("chunk_type") == "formula")
     logger.info(
         f"Docling: {len(all_chunks)} chunks "
-        f"({text_count} text, {table_count} table, {image_count} image) "
+        f"({text_count} text, {table_count} table, {image_count} image, {formula_count} formula) "
         f"from {file_path.name}"
     )
     return all_chunks

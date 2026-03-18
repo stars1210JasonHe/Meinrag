@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     # Docling mode settings (requires: uv sync --extra docling)
     docling_ocr: bool = False
     docling_picture_description: bool = False
+    docling_equation_ocr: bool = False  # pix2tex LaTeX OCR for formulas (optional)
     docling_device: str = "auto"  # "auto", "cpu", "cuda", "mps"
 
     # Vision mode settings

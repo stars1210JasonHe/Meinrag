@@ -184,10 +184,10 @@ def _supplement_visual_chunks(
         for chunk in chunks:
             meta = chunk.metadata
             ct = meta.get("chunk_type")
-            # Supplement images (with image_path) and tables
+            # Supplement images (with image_path), tables, and formulas
             if ct == "image" and not meta.get("image_path"):
                 continue
-            if ct not in ("image", "table"):
+            if ct not in ("image", "table", "formula"):
                 continue
             key = (meta.get("doc_id"), meta.get("chunk_index"))
             if key not in retrieved_keys:
