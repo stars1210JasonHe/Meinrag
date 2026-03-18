@@ -1,10 +1,20 @@
 """Hierarchical document classification taxonomy.
 
 Three levels: Primary Category -> Domain -> Sub-Domain.
-Based on CLASSIFICATION.md - covers 11 primary categories.
-"""
 
-TAXONOMY: dict[str, dict[str, list[str]]] = {
+Taxonomy is loaded from data/taxonomy.json on first access.
+If the file does not exist, a default taxonomy is written and used.
+Users can edit data/taxonomy.json and restart the server to apply changes.
+"""
+import json
+import logging
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+TAXONOMY_PATH = Path("data/taxonomy.json")
+
+_DEFAULT_TAXONOMY: dict[str, dict[str, list[str]]] = {
     "legal-compliance": {
         "contracts-agreements": [
             "employment-contract", "sales-contract", "service-agreement",
@@ -169,6 +179,34 @@ TAXONOMY: dict[str, dict[str, list[str]]] = {
         ],
     },
 }
+
+
+def _load_taxonomy() -> dict[str, dict[str, list[str]]]:
+    """Load taxonomy from JSON file, creating default if missing."""
+    if TAXONOMY_PATH.exists():
+        try:
+            with open(TAXONOMY_PATH, encoding="utf-8") as f:
+                taxonomy = json.load(f)
+            logger.info("Taxonomy loaded from %s (%d categories)", TAXONOMY_PATH, len(taxonomy))
+            return taxonomy
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Failed to load %s: %s — using default taxonomy", TAXONOMY_PATH, e)
+            return _DEFAULT_TAXONOMY
+
+    # Write default taxonomy for user to customize
+    try:
+        TAXONOMY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(TAXONOMY_PATH, "w", encoding="utf-8") as f:
+            json.dump(_DEFAULT_TAXONOMY, f, indent=2, ensure_ascii=False)
+        logger.info("Default taxonomy written to %s", TAXONOMY_PATH)
+    except OSError as e:
+        logger.warning("Could not write default taxonomy: %s", e)
+
+    return _DEFAULT_TAXONOMY
+
+
+# Loaded once at import time. Restart server to pick up changes.
+TAXONOMY: dict[str, dict[str, list[str]]] = _load_taxonomy()
 
 PRIMARY_CATEGORIES: list[str] = list(TAXONOMY.keys())
 ALL_DOMAINS: list[str] = [
