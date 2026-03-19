@@ -335,6 +335,72 @@ def _highlight_text_on_page(pg, text: str) -> None:
         annot.update()
 
 
+@router.get("/{doc_id}/pdf")
+async def get_document_pdf(
+    doc_id: str,
+    settings: Settings = Depends(get_settings),
+    registry: DocumentRepository = Depends(get_registry),
+    current_user: str = Depends(get_current_user),
+):
+    """Serve original PDF for in-browser viewing (PDF.js)."""
+    doc = await registry.get(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
+
+    user_filter = _get_user_filter(settings, current_user)
+    if user_filter and doc.get("user_id") != user_filter:
+        raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
+
+    for f in settings.upload_dir.iterdir():
+        if f.name.startswith(doc_id) and f.suffix.lower() == ".pdf" and f.is_file():
+            return FileResponse(
+                path=str(f),
+                media_type="application/pdf",
+                headers={
+                    "Cache-Control": "private, max-age=86400",
+                    "Content-Disposition": "inline",
+                    "Access-Control-Expose-Headers": "Content-Length",
+                },
+            )
+
+    raise HTTPException(status_code=404, detail="PDF file not found on disk")
+
+
+@router.get("/{doc_id}/info")
+async def get_document_info(
+    doc_id: str,
+    settings: Settings = Depends(get_settings),
+    registry: DocumentRepository = Depends(get_registry),
+    current_user: str = Depends(get_current_user),
+):
+    """Return document metadata including total page count."""
+    doc = await registry.get(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
+
+    user_filter = _get_user_filter(settings, current_user)
+    if user_filter and doc.get("user_id") != user_filter:
+        raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
+
+    total_pages = None
+    for f in settings.upload_dir.iterdir():
+        if f.name.startswith(doc_id) and f.suffix.lower() == ".pdf" and f.is_file():
+            try:
+                import fitz
+                pdf = fitz.open(str(f))
+                total_pages = pdf.page_count
+                pdf.close()
+            except Exception:
+                pass
+            break
+
+    return {
+        "doc_id": doc_id,
+        "filename": doc.get("filename", ""),
+        "total_pages": total_pages,
+    }
+
+
 @router.get("/{doc_id}/download")
 async def download_document(
     doc_id: str,

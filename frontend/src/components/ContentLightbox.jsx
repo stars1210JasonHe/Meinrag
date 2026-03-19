@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react'
 import { API_BASE } from '../api/client'
 import MarkdownRenderer from './MarkdownRenderer'
+import PdfViewer from './PdfViewer'
 
 export default function ContentLightbox({ sources, currentIndex, onClose, onNavigate, type }) {
   const isOpen = currentIndex !== null && !!sources && sources.length > 0
@@ -167,7 +168,7 @@ export default function ContentLightbox({ sources, currentIndex, onClose, onNavi
         </button>
 
         {/* View toggle — show when PDF view is available */}
-        {hasPdfView && pdfHighlightUrl && (
+        {hasPdfView && (
           <div className="lightbox-view-toggle">
             <button
               className={viewMode === 'content' ? 'active' : ''}
@@ -203,17 +204,15 @@ export default function ContentLightbox({ sources, currentIndex, onClose, onNavi
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
           >
-            {viewMode === 'pdf' && pdfHighlightUrl ? (
-              <img
-                src={pdfHighlightUrl}
-                alt={`PDF page ${source.page + 1} with highlight`}
-                className="lightbox-image"
+            {viewMode === 'pdf' && hasPdfView ? (
+              <PdfViewer
+                docId={source.doc_id}
+                page={source.page}
+                bbox={source.bbox}
+                zoom={zoom}
+                pan={pan}
+                dragging={dragging}
                 onClick={handleContentClick}
-                style={{
-                  transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
-                  cursor: isZoomed ? (dragging ? 'grabbing' : 'grab') : 'zoom-in',
-                }}
-                draggable={false}
               />
             ) : isImage && imageUrl ? (
               <img
