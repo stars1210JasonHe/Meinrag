@@ -712,27 +712,9 @@ body {
   font-weight: 500;
 }
 
-.source-view-pdf-btn {
-  background: #fff3e0;
-  border: 1px solid #ffb74d;
+.source-pdf-icon {
   color: #e65100;
-  cursor: pointer;
-  padding: 0.15rem 0.45rem;
-  margin-left: 0.4rem;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.2rem;
-  border-radius: 10px;
-  font-size: 0.7rem;
-  font-weight: 600;
-  transition: all 0.15s;
-  white-space: nowrap;
-}
-
-.source-view-pdf-btn:hover {
-  background: #ffe0b2;
-  border-color: #ff9800;
-  color: #bf360c;
+  flex-shrink: 0;
 }
 
 .source-download {
@@ -1417,12 +1399,92 @@ body {
 .lightbox-description::-webkit-scrollbar { width: 3px; }
 .lightbox-description::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.3); border-radius: 2px; }
 
-.lightbox-zoom-controls {
+.lightbox-toolbar {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
+  gap: 16px;
   margin-top: 0.75rem;
+  width: 100%;
+  max-width: 800px;
+}
+
+.lightbox-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.lightbox-actions button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.7);
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.lightbox-actions button:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: white;
+}
+
+.lightbox-ask-input {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  max-width: 500px;
+  margin-top: 6px;
+}
+
+.lightbox-ask-input input {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  color: white;
+  padding: 6px 10px;
+  font-size: 0.8rem;
+  outline: none;
+}
+
+.lightbox-ask-input input:focus {
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.lightbox-ask-input input::placeholder {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.lightbox-ask-input button {
+  background: rgba(59, 130, 246, 0.4);
+  border: 1px solid rgba(59, 130, 246, 0.6);
+  color: white;
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: background 0.15s;
+}
+
+.lightbox-ask-input button:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.6);
+}
+
+.lightbox-ask-input button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.lightbox-zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .lightbox-zoom-controls button {
@@ -1800,11 +1862,6 @@ body {
   .source-download {
     margin-left: 0;
     padding: 0.12rem;
-  }
-  .source-view-pdf-btn {
-    margin-left: 0.2rem;
-    padding: 0.1rem 0.35rem;
-    font-size: 0.65rem;
   }
 
   .message-text { max-width: 85%; }

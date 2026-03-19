@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { X, ChevronLeft, ChevronRight, ChevronDown, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight, ChevronDown, ZoomIn, ZoomOut, RotateCcw, Copy, Quote, MessageCircleQuestion } from 'lucide-react'
 import { API_BASE } from '../api/client'
 import MarkdownRenderer from './MarkdownRenderer'
 import PdfViewer from './PdfViewer'
 
-export default function ContentLightbox({ sources, currentIndex, onClose, onNavigate, type }) {
+export default function ContentLightbox({ sources, currentIndex, onClose, onNavigate, type, onQuote, onAskAbout }) {
   const isOpen = currentIndex !== null && !!sources && sources.length > 0
   const source = isOpen ? sources[currentIndex] : null
   const hasPrev = isOpen && currentIndex > 0
@@ -16,6 +16,9 @@ export default function ContentLightbox({ sources, currentIndex, onClose, onNavi
   const [dragging, setDragging] = useState(false)
   const [chunkPanelOpen, setChunkPanelOpen] = useState(false)
   const [pdfFailed, setPdfFailed] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [showAsk, setShowAsk] = useState(false)
+  const [askInput, setAskInput] = useState('')
   const dragStart = useRef({ x: 0, y: 0 })
   const panStart = useRef({ x: 0, y: 0 })
   const contentAreaRef = useRef(null)
@@ -30,6 +33,9 @@ export default function ContentLightbox({ sources, currentIndex, onClose, onNavi
     setPan({ x: 0, y: 0 })
     setChunkPanelOpen(false)
     setPdfFailed(false)
+    setCopied(false)
+    setShowAsk(false)
+    setAskInput('')
   }, [currentIndex])
 
   const zoomIn = useCallback(() => {
@@ -136,6 +142,32 @@ export default function ContentLightbox({ sources, currentIndex, onClose, onNavi
 
   const typeLabel = type === 'text' ? 'Source' : isImage ? 'Figure' : 'Table'
 
+  // Action handlers
+  const handleCopy = () => {
+    if (!source?.content) return
+    navigator.clipboard.writeText(source.content).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+
+  const handleQuote = () => {
+    if (!source?.content || !onQuote) return
+    const excerpt = source.content.length > 200
+      ? source.content.slice(0, 200) + '...'
+      : source.content
+    onQuote(`"${excerpt}" — `)
+    onClose()
+  }
+
+  const handleAskSubmit = () => {
+    if (!askInput.trim() || !onAskAbout) return
+    onAskAbout(source, askInput.trim())
+    setAskInput('')
+    setShowAsk(false)
+    onClose()
+  }
+
   // Fallback rendering for non-PDF sources
   const renderFallback = () => {
     const transformStyle = {
@@ -226,15 +258,52 @@ export default function ContentLightbox({ sources, currentIndex, onClose, onNavi
           )}
         </div>
 
-        {/* Zoom controls */}
-        <div className="lightbox-zoom-controls">
-          <button onClick={zoomOut} title="Zoom out (-)"><ZoomOut size={18} /></button>
-          <span className="lightbox-zoom-level">{Math.round(zoom * 100)}%</span>
-          <button onClick={zoomIn} title="Zoom in (+)"><ZoomIn size={18} /></button>
-          {isZoomed && (
-            <button onClick={resetZoom} title="Reset (0)"><RotateCcw size={16} /></button>
+        {/* Toolbar: zoom + actions */}
+        <div className="lightbox-toolbar">
+          <div className="lightbox-zoom-controls">
+            <button onClick={zoomOut} title="Zoom out (-)"><ZoomOut size={18} /></button>
+            <span className="lightbox-zoom-level">{Math.round(zoom * 100)}%</span>
+            <button onClick={zoomIn} title="Zoom in (+)"><ZoomIn size={18} /></button>
+            {isZoomed && (
+              <button onClick={resetZoom} title="Reset (0)"><RotateCcw size={16} /></button>
+            )}
+          </div>
+          {source?.content && (
+            <div className="lightbox-actions">
+              <button onClick={handleCopy} title="Copy chunk text">
+                <Copy size={14} />
+                <span>{copied ? 'Copied!' : 'Copy'}</span>
+              </button>
+              {onQuote && (
+                <button onClick={handleQuote} title="Quote in input">
+                  <Quote size={14} />
+                  <span>Quote</span>
+                </button>
+              )}
+              {onAskAbout && (
+                <button onClick={() => setShowAsk(!showAsk)} title="Ask about this chunk">
+                  <MessageCircleQuestion size={14} />
+                  <span>Ask</span>
+                </button>
+              )}
+            </div>
           )}
         </div>
+
+        {/* Inline ask input */}
+        {showAsk && (
+          <div className="lightbox-ask-input" onClick={e => e.stopPropagation()}>
+            <input
+              type="text"
+              value={askInput}
+              onChange={e => setAskInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleAskSubmit()}
+              placeholder="Ask about this source..."
+              autoFocus
+            />
+            <button onClick={handleAskSubmit} disabled={!askInput.trim()}>Ask</button>
+          </div>
+        )}
 
         {/* Collapsible chunk text panel */}
         {source.content && hasPdfView && (

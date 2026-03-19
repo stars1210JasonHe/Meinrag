@@ -146,6 +146,8 @@ export default function MessageBubble({ msg, msgIdx, onDownloadDoc, onAskAboutCh
         onClose={() => setLightboxState({ type: null, index: null })}
         onNavigate={(i) => setLightboxState(prev => ({ ...prev, index: i }))}
         type={lightboxState.type}
+        onQuote={onQuote}
+        onAskAbout={onAskAboutChunk}
       />
     </div>
   )

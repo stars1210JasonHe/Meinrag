@@ -34,6 +34,15 @@ export default function SourceCitation({ source, msgIdx, sourceIdx, onDownload, 
   const isWeb = source.source_type === 'web'
   const isTable = source.chunk_type === 'table'
   const isImage = source.chunk_type === 'image'
+  const hasPdf = source.doc_id && source.page != null && !isWeb && onViewPdf
+
+  const handleHeaderClick = () => {
+    if (hasPdf) {
+      onViewPdf(sourceIdx)
+    } else {
+      setExpanded(!expanded)
+    }
+  }
 
   const handleAskSubmit = () => {
     if (!askInput.trim()) return
@@ -52,7 +61,6 @@ export default function SourceCitation({ source, msgIdx, sourceIdx, onDownload, 
 
   const handleQuote = (e) => {
     e.stopPropagation()
-    // Truncate long content for the quote
     const excerpt = source.content.length > 200
       ? source.content.slice(0, 200) + '...'
       : source.content
@@ -88,10 +96,12 @@ export default function SourceCitation({ source, msgIdx, sourceIdx, onDownload, 
 
   return (
     <div className={`source-item ${isWeb ? 'source-web' : ''}`}>
-      <div className="source-header" onClick={() => setExpanded(!expanded)}>
+      <div className="source-header" onClick={handleHeaderClick}>
         {isWeb
           ? <Globe size={14} className="source-web-icon" />
-          : expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />
+          : hasPdf
+            ? <FileText size={14} className="source-pdf-icon" />
+            : expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />
         }
         <span className="source-file">{source.source_file}</span>
         <ChunkTypeBadge chunkType={source.chunk_type} />
@@ -112,37 +122,32 @@ export default function SourceCitation({ source, msgIdx, sourceIdx, onDownload, 
         {source.chunk_index != null && (
           <span className="source-chunk-idx">#{source.chunk_index + 1}</span>
         )}
-        <button
-          className="source-ask-btn"
-          onClick={e => { e.stopPropagation(); setShowAskInput(!showAskInput) }}
-          title="Ask about this source"
-        >
-          <MessageCircleQuestion size={13} />
-        </button>
-        <button
-          className="source-copy-btn"
-          onClick={handleCopy}
-          title={copied ? 'Copied!' : 'Copy source text'}
-        >
-          <Copy size={12} />
-          {copied && <span className="copied-badge">Copied</span>}
-        </button>
-        <button
-          className="source-quote-btn"
-          onClick={handleQuote}
-          title="Quote in input"
-        >
-          <Quote size={12} />
-        </button>
-        {source.doc_id && source.page != null && !isWeb && onViewPdf && (
-          <button
-            className="source-view-pdf-btn"
-            onClick={e => { e.stopPropagation(); onViewPdf(sourceIdx) }}
-            title="View in PDF"
-          >
-            <FileText size={13} />
-            <span>View</span>
-          </button>
+        {/* Copy/Quote/Ask only for non-PDF sources — PDF sources have these in the viewer */}
+        {!hasPdf && (
+          <>
+            <button
+              className="source-ask-btn"
+              onClick={e => { e.stopPropagation(); setShowAskInput(!showAskInput) }}
+              title="Ask about this source"
+            >
+              <MessageCircleQuestion size={13} />
+            </button>
+            <button
+              className="source-copy-btn"
+              onClick={handleCopy}
+              title={copied ? 'Copied!' : 'Copy source text'}
+            >
+              <Copy size={12} />
+              {copied && <span className="copied-badge">Copied</span>}
+            </button>
+            <button
+              className="source-quote-btn"
+              onClick={handleQuote}
+              title="Quote in input"
+            >
+              <Quote size={12} />
+            </button>
+          </>
         )}
         {source.doc_id && (
           <button
@@ -154,7 +159,8 @@ export default function SourceCitation({ source, msgIdx, sourceIdx, onDownload, 
           </button>
         )}
       </div>
-      {expanded && renderExpandedContent()}
+      {/* Expand only for non-PDF sources */}
+      {!hasPdf && expanded && renderExpandedContent()}
       {showAskInput && (
         <div className="source-ask-input">
           <input
