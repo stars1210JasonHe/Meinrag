@@ -210,6 +210,9 @@ def _get_element_bbox(element, page_height: float) -> list[float] | None:
     return _convert_bbox(bbox.l, bbox.t, bbox.r, bbox.b, page_height)
 
 
+_MIN_CHUNK_LENGTH = 50  # Skip junk chunks (code fences, bare headings, etc.)
+
+
 def _chunk_text_elements(doc, settings: Settings, source_name: str) -> list[Document]:
     """Use HybridChunker on the full document, extract only text chunks."""
     try:
@@ -231,6 +234,10 @@ def _chunk_text_elements(doc, settings: Settings, source_name: str) -> list[Docu
                         is_visual = True
                         break
             if is_visual:
+                continue
+
+            # Skip junk chunks (code fences, bare headings, formatting artifacts)
+            if len(chunk.text.strip()) < _MIN_CHUNK_LENGTH:
                 continue
 
             # Get page from first doc_item provenance

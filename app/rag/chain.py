@@ -37,20 +37,31 @@ def format_docs(docs: list[Document]) -> str:
 
 
 _REF_LINE_RE = re.compile(r"^-?\s*\[\d+\]\s+[A-Z]")
+_REF_HEADING_RE = re.compile(
+    r"^[`\s]*#{1,3}\s*(?:References|Bibliography|Works\s+Cited)\s*$",
+    re.MULTILINE | re.IGNORECASE,
+)
 
 
 def is_reference_entry(text: str) -> bool:
     """Detect if text is a bibliography/reference list entry.
 
-    Matches patterns like:
-      - [1] Author, Title...
-      - [58] R. Gupta, ...
-      [1] Author, Title...
-    Returns True if >= 50% of lines match the reference pattern.
+    Matches:
+      - [1] Author, Title...          (numbered reference lines)
+      - # References                   (heading, including markdown fenced)
+      - ## Bibliography
+    Returns True if heading matches or >= 50% of lines are reference entries.
     """
-    lines = text.strip().split("\n")
-    if not lines:
+    stripped = text.strip().strip('`').strip()
+    if not stripped:
         return False
+
+    # Check for reference section heading
+    if _REF_HEADING_RE.search(text):
+        return True
+
+    # Check for numbered reference lines
+    lines = stripped.split("\n")
     ref_lines = sum(1 for line in lines if _REF_LINE_RE.match(line.strip()))
     return ref_lines > 0 and ref_lines >= len(lines) * 0.5
 
