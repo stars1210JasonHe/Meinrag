@@ -13,7 +13,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 /**
  * In-browser PDF viewer with text selection, page navigation, and bbox highlight.
  */
-export default function PdfViewer({ docId, page, bbox, zoom, pan, dragging, onClick, onError }) {
+export default function PdfViewer({ docId, page, bbox, chunkText, zoom, pan, dragging, onClick, onError }) {
   const canvasRef = useRef(null)
   const overlayRef = useRef(null)
   const textLayerRef = useRef(null)
@@ -78,6 +78,77 @@ export default function PdfViewer({ docId, page, bbox, zoom, pan, dragging, onCl
     }
   }, [docId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Highlight chunk text by searching the page's text content and drawing on overlay
+  const highlightChunkText = useCallback(async (pdfDoc, pageNum, text, overlay, viewport) => {
+    if (!pdfDoc || !text || !overlay || !viewport) return
+
+    overlay.width = viewport.width
+    overlay.height = viewport.height
+
+    const normalize = (s) => s.replace(/\s+/g, ' ').trim().toLowerCase()
+    const normalized = normalize(text)
+    if (normalized.length < 10) return
+
+    // Build search fragments (~60 chars with overlap)
+    const fragments = []
+    for (let i = 0; i < normalized.length; i += 40) {
+      const frag = normalized.slice(i, i + 60).trim()
+      if (frag.length >= 15) fragments.push(frag)
+    }
+    if (fragments.length === 0) return
+
+    // Get text content items with their positions (PDF coordinate space)
+    const pageObj = await pdfDoc.getPage(pageNum + 1)
+    const textContent = await pageObj.getTextContent()
+
+    const ctx = overlay.getContext('2d')
+    let minX = Infinity, minY = Infinity, maxX = 0, maxY = 0
+    let matchCount = 0
+
+    for (const item of textContent.items) {
+      if (!item.str || item.str.trim().length < 2) continue
+      const itemText = normalize(item.str)
+
+      const matched = fragments.some(frag =>
+        frag.includes(itemText) || itemText.includes(frag)
+      )
+      if (!matched) continue
+
+      // item.transform = [scaleX, skewX, skewY, scaleY, translateX, translateY]
+      // These are in PDF coordinate space (origin bottom-left)
+      const tx = item.transform[4]
+      const ty = item.transform[5]
+      const itemWidth = item.width
+      const itemHeight = item.height
+
+      // Convert to viewport (canvas) coordinates
+      const [vx0, vy0] = viewport.convertToViewportPoint(tx, ty)
+      const [vx1, vy1] = viewport.convertToViewportPoint(tx + itemWidth, ty + itemHeight)
+
+      const x = Math.min(vx0, vx1)
+      const y = Math.min(vy0, vy1)
+      const w = Math.abs(vx1 - vx0)
+      const h = Math.abs(vy1 - vy0) || 14 * viewport.scale  // fallback height
+
+      ctx.fillStyle = 'rgba(250, 204, 21, 0.3)'
+      ctx.fillRect(x, y, w, h)
+
+      minX = Math.min(minX, x)
+      minY = Math.min(minY, y)
+      maxX = Math.max(maxX, x + w)
+      maxY = Math.max(maxY, y + h)
+      matchCount++
+    }
+
+    // Draw bounding border
+    if (matchCount > 0) {
+      ctx.strokeStyle = 'rgba(250, 180, 0, 0.6)'
+      ctx.lineWidth = 2
+      ctx.setLineDash([4, 2])
+      ctx.strokeRect(minX - 6, minY - 6, maxX - minX + 12, maxY - minY + 12)
+    }
+  }, [])
+
   // Render current page + text layer
   useEffect(() => {
     if (!pdfDoc || !canvasRef.current) return
@@ -127,6 +198,11 @@ export default function PdfViewer({ docId, page, bbox, zoom, pan, dragging, onCl
           })
           textLayerInstanceRef.current = tl
           await tl.render()
+
+          // Highlight chunk text on the source page (skip if bbox exists)
+          if (currentPage === initialPageRef.current && !bbox && chunkText) {
+            highlightChunkText(pdfDoc, currentPage, chunkText, overlayRef.current, viewport)
+          }
         }
       } catch (e) {
         if (e?.name !== 'RenderingCancelledException') {
@@ -136,7 +212,7 @@ export default function PdfViewer({ docId, page, bbox, zoom, pan, dragging, onCl
     }
 
     renderPage()
-  }, [pdfDoc, currentPage])
+  }, [pdfDoc, currentPage, bbox, chunkText, highlightChunkText])
 
   // Draw bbox highlight — triggers only after canvas render completes (via renderedViewport state)
   useEffect(() => {

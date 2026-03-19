@@ -236,6 +236,7 @@ export default function ContentLightbox({ sources, currentIndex, onClose, onNavi
                 docId={source.doc_id}
                 page={source.page}
                 bbox={source.bbox}
+                chunkText={source.content}
                 zoom={zoom}
                 pan={pan}
                 dragging={dragging}

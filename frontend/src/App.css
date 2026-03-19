@@ -1971,6 +1971,12 @@ body {
   background: rgba(59, 130, 246, 0.4);
 }
 
+.pdf-viewer-canvas-container .textLayer span.pdf-text-highlight {
+  background: rgba(250, 204, 21, 0.6);
+  border-radius: 2px;
+  opacity: 1 !important;
+}
+
 .pdf-viewer-loading,
 .pdf-viewer-error {
   color: #ccc;
