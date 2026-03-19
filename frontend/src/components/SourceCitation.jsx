@@ -138,10 +138,10 @@ export default function SourceCitation({ source, msgIdx, sourceIdx, onDownload, 
           <button
             className="source-view-pdf-btn"
             onClick={e => { e.stopPropagation(); onViewPdf(sourceIdx) }}
-            title="View highlighted in PDF"
+            title="View in PDF"
           >
             <FileText size={13} />
-            <span>PDF</span>
+            <span>View</span>
           </button>
         )}
         {source.doc_id && (

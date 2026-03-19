@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight, ChevronDown, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react'
 import { API_BASE } from '../api/client'
 import MarkdownRenderer from './MarkdownRenderer'
 import PdfViewer from './PdfViewer'
@@ -11,24 +11,26 @@ export default function ContentLightbox({ sources, currentIndex, onClose, onNavi
   const hasPrev = isOpen && currentIndex > 0
   const hasNext = isOpen && currentIndex < sources.length - 1
 
-  const [viewMode, setViewMode] = useState('content') // 'content' | 'pdf'
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [dragging, setDragging] = useState(false)
+  const [chunkPanelOpen, setChunkPanelOpen] = useState(false)
+  const [pdfFailed, setPdfFailed] = useState(false)
   const dragStart = useRef({ x: 0, y: 0 })
   const panStart = useRef({ x: 0, y: 0 })
   const contentAreaRef = useRef(null)
 
-  const hasBbox = source?.bbox && source?.doc_id != null && source?.page != null
-  const hasPdfView = source?.doc_id != null && source?.page != null
-  const isText = type === 'text'
+  const hasPdfView = source?.doc_id != null && source?.page != null && !pdfFailed
+  const isImage = type === 'image'
+  const isTable = type === 'table'
 
-  // Reset state when navigating — default to 'pdf' for text sources
+  // Reset state when navigating
   useEffect(() => {
     setZoom(1)
     setPan({ x: 0, y: 0 })
-    setViewMode(type === 'text' ? 'pdf' : 'content')
-  }, [currentIndex, type])
+    setChunkPanelOpen(false)
+    setPdfFailed(false)
+  }, [currentIndex])
 
   const zoomIn = useCallback(() => {
     setZoom(z => Math.min(z * 1.5, 8))
@@ -124,41 +126,52 @@ export default function ContentLightbox({ sources, currentIndex, onClose, onNavi
     return () => el.removeEventListener('wheel', handleWheel)
   }, [isOpen, handleWheel])
 
-  // Reset zoom when switching views
-  useEffect(() => {
-    setZoom(1)
-    setPan({ x: 0, y: 0 })
-  }, [viewMode])
-
   if (!isOpen) return null
 
   const isZoomed = zoom > 1
-  const isImage = type === 'image'
-  const isTable = type === 'table'
 
   const imageUrl = isImage && source?.image_path
     ? `${API_BASE}/documents/images/${source.image_path}`
     : null
 
-  // Build PDF highlight URL: bbox → red rect, text → yellow highlight, or plain page
-  // Truncate text to avoid URL length limits (~2000 chars encoded is safe)
-  const MAX_TEXT_FOR_URL = 1500
-  let pdfHighlightUrl = null
-  if (hasPdfView) {
-    const base = `${API_BASE}/documents/${source.doc_id}/page-highlight?page=${source.page}`
-    if (hasBbox) {
-      pdfHighlightUrl = `${base}&bbox=${source.bbox.join(',')}`
-    } else if (source.content && source.content.trim()) {
-      const textSnippet = source.content.length > MAX_TEXT_FOR_URL
-        ? source.content.slice(0, MAX_TEXT_FOR_URL)
-        : source.content
-      pdfHighlightUrl = `${base}&text=${encodeURIComponent(textSnippet)}`
-    } else {
-      pdfHighlightUrl = base
-    }
-  }
+  const typeLabel = type === 'text' ? 'Source' : isImage ? 'Figure' : 'Table'
 
-  const typeLabel = isText ? 'Source' : isImage ? 'Figure' : 'Table'
+  // Fallback rendering for non-PDF sources
+  const renderFallback = () => {
+    const transformStyle = {
+      transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
+      cursor: isZoomed ? (dragging ? 'grabbing' : 'grab') : 'zoom-in',
+      transformOrigin: 'center center',
+    }
+
+    if (isImage && imageUrl) {
+      return (
+        <img
+          src={imageUrl}
+          alt={source.content || `Figure ${currentIndex + 1}`}
+          className="lightbox-image"
+          onClick={handleContentClick}
+          style={transformStyle}
+          draggable={false}
+        />
+      )
+    }
+    if (isTable && source?.content) {
+      return (
+        <div className="lightbox-table-content" onClick={handleContentClick} style={transformStyle}>
+          <MarkdownRenderer content={source.content} />
+        </div>
+      )
+    }
+    if (source?.content) {
+      return (
+        <div className="lightbox-text-content" onClick={handleContentClick} style={transformStyle}>
+          <div className="lightbox-text-body">{source.content}</div>
+        </div>
+      )
+    }
+    return <div className="lightbox-no-image">Content not available</div>
+  }
 
   return createPortal(
     <div className="lightbox-overlay" onClick={onClose}>
@@ -166,24 +179,6 @@ export default function ContentLightbox({ sources, currentIndex, onClose, onNavi
         <button className="lightbox-close" onClick={onClose} aria-label="Close">
           <X size={24} />
         </button>
-
-        {/* View toggle — show when PDF view is available */}
-        {hasPdfView && (
-          <div className="lightbox-view-toggle">
-            <button
-              className={viewMode === 'content' ? 'active' : ''}
-              onClick={() => setViewMode('content')}
-            >
-              Content
-            </button>
-            <button
-              className={viewMode === 'pdf' ? 'active' : ''}
-              onClick={() => setViewMode('pdf')}
-            >
-              PDF Page
-            </button>
-          </div>
-        )}
 
         <div className="lightbox-body">
           {hasPrev && (
@@ -204,7 +199,7 @@ export default function ContentLightbox({ sources, currentIndex, onClose, onNavi
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
           >
-            {viewMode === 'pdf' && hasPdfView ? (
+            {hasPdfView ? (
               <PdfViewer
                 docId={source.doc_id}
                 page={source.page}
@@ -213,45 +208,10 @@ export default function ContentLightbox({ sources, currentIndex, onClose, onNavi
                 pan={pan}
                 dragging={dragging}
                 onClick={handleContentClick}
+                onError={() => setPdfFailed(true)}
               />
-            ) : isImage && imageUrl ? (
-              <img
-                src={imageUrl}
-                alt={source.content || `Figure ${currentIndex + 1}`}
-                className="lightbox-image"
-                onClick={handleContentClick}
-                style={{
-                  transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
-                  cursor: isZoomed ? (dragging ? 'grabbing' : 'grab') : 'zoom-in',
-                }}
-                draggable={false}
-              />
-            ) : isTable ? (
-              <div
-                className="lightbox-table-content"
-                onClick={handleContentClick}
-                style={{
-                  transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
-                  cursor: isZoomed ? (dragging ? 'grabbing' : 'grab') : 'zoom-in',
-                  transformOrigin: 'center center',
-                }}
-              >
-                <MarkdownRenderer content={source.content || ''} />
-              </div>
-            ) : isText && source?.content ? (
-              <div
-                className="lightbox-text-content"
-                onClick={handleContentClick}
-                style={{
-                  transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
-                  cursor: isZoomed ? (dragging ? 'grabbing' : 'grab') : 'zoom-in',
-                  transformOrigin: 'center center',
-                }}
-              >
-                <div className="lightbox-text-body">{source.content}</div>
-              </div>
             ) : (
-              <div className="lightbox-no-image">Content not available</div>
+              renderFallback()
             )}
           </div>
 
@@ -276,23 +236,41 @@ export default function ContentLightbox({ sources, currentIndex, onClose, onNavi
           )}
         </div>
 
+        {/* Collapsible chunk text panel */}
+        {source.content && hasPdfView && (
+          <div className="lightbox-chunk-panel">
+            <button
+              className="lightbox-chunk-toggle"
+              onClick={() => setChunkPanelOpen(!chunkPanelOpen)}
+            >
+              <ChevronDown
+                size={14}
+                style={{ transform: chunkPanelOpen ? 'rotate(0)' : 'rotate(-90deg)', transition: 'transform 0.15s' }}
+              />
+              Chunk Text
+            </button>
+            {chunkPanelOpen && (
+              <div className="lightbox-chunk-content">
+                {isTable
+                  ? <MarkdownRenderer content={source.content} />
+                  : <pre>{source.content}</pre>
+                }
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="lightbox-info">
           <div className="lightbox-counter">
             {typeLabel} {currentIndex + 1} of {sources.length}
             {source.source_file && ` \u00b7 ${source.source_file}`}
             {source.page != null && ` p.${source.page + 1}`}
           </div>
-          {source.content && (
-            <div className="lightbox-description">
-              {isTable
-                ? source.content.split('\n')[0].replace(/\|/g, ' ').trim()
-                : source.content
-              }
-            </div>
-          )}
           <div className="lightbox-hint">
-            Scroll to zoom · Double-click to toggle · Drag to pan
-            {hasPdfView && viewMode === 'content' && ' · Toggle to PDF Page for original context'}
+            {hasPdfView
+              ? 'Select text on page \u00b7 Scroll to zoom \u00b7 Double-click to toggle zoom \u00b7 PageUp/PageDown for pages'
+              : 'Scroll to zoom \u00b7 Double-click to toggle \u00b7 Drag to pan'
+            }
           </div>
         </div>
       </div>
