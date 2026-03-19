@@ -9,7 +9,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          'pdfjs': ['pdfjs-dist'],
+          'pdf-vendor': ['react-pdf'],
         },
       },
     },

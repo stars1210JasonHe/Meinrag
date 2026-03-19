@@ -1927,22 +1927,29 @@ body {
   position: relative;
   display: inline-block;
   transform-origin: center center;
-  max-height: 72vh;
+}
+
+/* react-pdf page container */
+.pdf-viewer-canvas-container .react-pdf__Page {
+  border-radius: 4px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
   overflow: hidden;
 }
 
-.pdf-viewer-canvas {
-  width: auto;
-  height: auto;
-  max-width: 80vw;
-  max-height: 72vh;
-  display: block;
-  border-radius: 4px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
-  object-fit: contain;
+/* Text selection highlight color */
+.pdf-viewer-canvas-container .textLayer ::selection {
+  background: rgba(59, 130, 246, 0.4);
 }
 
-.pdf-viewer-overlay {
+/* Yellow highlight for matched chunk text via customTextRenderer */
+.pdf-viewer-canvas-container .textLayer mark {
+  background: rgba(250, 204, 21, 0.4);
+  color: transparent;
+  border-radius: 2px;
+}
+
+/* Bbox highlight overlay (positioned inside <Page> children) */
+.pdf-highlight-overlay {
   position: absolute;
   top: 0;
   left: 0;
@@ -1951,30 +1958,11 @@ body {
   pointer-events: none;
 }
 
-/* PDF.js text selection layer */
-.pdf-viewer-canvas-container .textLayer {
+.pdf-highlight-bbox {
   position: absolute;
-  top: 0;
-  left: 0;
-  overflow: hidden;
-  line-height: 1;
-  opacity: 0.25;
-}
-
-.pdf-viewer-canvas-container .textLayer span {
-  position: absolute;
-  white-space: pre;
-  color: transparent;
-}
-
-.pdf-viewer-canvas-container .textLayer ::selection {
-  background: rgba(59, 130, 246, 0.4);
-}
-
-.pdf-viewer-canvas-container .textLayer span.pdf-text-highlight {
-  background: rgba(250, 204, 21, 0.6);
+  border: 3px dashed rgba(220, 38, 38, 0.8);
+  background: rgba(220, 38, 38, 0.08);
   border-radius: 2px;
-  opacity: 1 !important;
 }
 
 .pdf-viewer-loading,
@@ -2073,14 +2061,6 @@ body {
 }
 
 @media (max-width: 768px) {
-  .pdf-viewer-canvas-container {
-    max-height: 58vh;
-  }
-
-  .pdf-viewer-canvas {
-    max-height: 58vh;
-  }
-
   .pdf-viewer-page-nav {
     padding: 3px 8px;
     gap: 4px;
