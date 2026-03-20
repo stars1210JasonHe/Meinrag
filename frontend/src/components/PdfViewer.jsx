@@ -65,11 +65,18 @@ export default function PdfViewer({
   }, [docId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Extract text from all pages on PDF load for search
+  const cancelledRef = useRef(false)
+  useEffect(() => {
+    cancelledRef.current = false
+    return () => { cancelledRef.current = true }
+  }, [docId])
+
   const handleDocLoad = useCallback(async (pdf) => {
     setNumPages(pdf.numPages)
 
     const texts = []
     for (let i = 1; i <= pdf.numPages; i++) {
+      if (cancelledRef.current) return
       try {
         const pg = await pdf.getPage(i)
         const content = await pg.getTextContent()
@@ -79,7 +86,7 @@ export default function PdfViewer({
         texts.push({ pageNum: i, text: '' })
       }
     }
-    setPageTexts(texts)
+    if (!cancelledRef.current) setPageTexts(texts)
   }, [])
 
   // Custom text renderer: source highlights + search highlights
@@ -250,7 +257,7 @@ export default function PdfViewer({
     const handler = (e) => {
       if (document.activeElement?.tagName === 'INPUT') {
         if (searchOpen) {
-          if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeSearch() }
+          if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); closeSearch() }
           else if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); goToPrevMatch() }
           else if (e.key === 'Enter') { e.preventDefault(); goToNextMatch() }
         }
@@ -260,16 +267,17 @@ export default function PdfViewer({
       else if (e.key === 'PageDown') { e.preventDefault(); goToNext() }
       else if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
         e.preventDefault()
-        e.stopPropagation()
+        e.stopImmediatePropagation()
         setSearchOpen(true)
       }
       else if (e.key === 'Escape' && searchOpen) {
-        e.stopPropagation()
+        e.stopImmediatePropagation()
         closeSearch()
       }
     }
-    document.addEventListener('keydown', handler)
-    return () => document.removeEventListener('keydown', handler)
+    // Use capture phase so this handler fires BEFORE ContentLightbox's handler
+    document.addEventListener('keydown', handler, true)
+    return () => document.removeEventListener('keydown', handler, true)
   }, [goToPrev, goToNext, searchOpen, closeSearch, goToNextMatch, goToPrevMatch])
 
   // Cleanup timer on unmount
