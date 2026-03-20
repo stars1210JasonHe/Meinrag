@@ -1958,11 +1958,38 @@ body {
   pointer-events: none;
 }
 
+/* --- Multi-highlight bbox overlays --- */
 .pdf-highlight-bbox {
   position: absolute;
-  border: 3px dashed rgba(220, 38, 38, 0.8);
-  background: rgba(220, 38, 38, 0.08);
+  border-width: 2px;
+  border-style: solid;
   border-radius: 2px;
+  transition: opacity 0.15s;
+}
+.pdf-highlight-bbox.active {
+  border-width: 3px;
+  z-index: 2;
+}
+.pdf-highlight-bbox.inactive {
+  z-index: 1;
+}
+.pdf-highlight-bbox.inactive:hover {
+  opacity: 0.85 !important;
+  filter: brightness(1.1);
+}
+
+/* Small label on inactive bbox (e.g. "S2") */
+.pdf-highlight-label {
+  position: absolute;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 2px;
+  transform: translate(-1px, -100%);
+  pointer-events: none;
+  z-index: 3;
+  white-space: nowrap;
 }
 
 .pdf-viewer-loading,
