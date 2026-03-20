@@ -2086,6 +2086,58 @@ body {
   background: rgba(59, 130, 246, 0.5) !important;
 }
 
+/* --- PDF Search Bar --- */
+.pdf-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.75);
+  border-radius: 6px;
+  margin: 4px 0;
+}
+.pdf-search-input {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  color: #fff;
+  padding: 4px 8px;
+  font-size: 13px;
+  width: 180px;
+  outline: none;
+}
+.pdf-search-input:focus {
+  border-color: rgba(255, 255, 255, 0.4);
+}
+.pdf-search-input::placeholder {
+  color: rgba(255, 255, 255, 0.4);
+}
+.pdf-search-count {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+  min-width: 60px;
+  text-align: center;
+}
+.pdf-search-bar button {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 3px;
+}
+.pdf-search-bar button:hover:not(:disabled) {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+.pdf-search-bar button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.pdf-viewer-search-btn {
+  margin-left: 8px;
+}
+
 @media (max-width: 768px) {
   .pdf-viewer-page-nav {
     padding: 3px 8px;

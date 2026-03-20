@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Search, X } from 'lucide-react'
 import { Document, Page, pdfjs } from 'react-pdf'
 import 'react-pdf/dist/Page/TextLayer.css'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
@@ -35,6 +35,8 @@ const HIGHLIGHT_COLORS = [
   { bg: 'rgba(251, 146, 60, 0.25)',  border: 'rgba(249, 115, 22, 0.7)', mark: 'rgba(251, 146, 60, 0.35)' },
 ]
 
+const SEARCH_MATCH_BG = 'rgba(34, 197, 94, 0.35)'
+
 /**
  * In-browser PDF viewer using react-pdf.
  * Text selection, page navigation, bbox + text highlighting.
@@ -45,6 +47,11 @@ export default function PdfViewer({
   const [numPages, setNumPages] = useState(null)
   const [currentPage, setCurrentPage] = useState((page || 0) + 1) // react-pdf is 1-indexed
   const [pageSize, setPageSize] = useState(null)
+  const [pageTexts, setPageTexts] = useState([])       // [{pageNum, text}] for all pages
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchMatches, setSearchMatches] = useState([]) // [{pageNum, charIndex}] all matches
+  const [activeMatchIdx, setActiveMatchIdx] = useState(0)
   const pageInputTimer = useRef(null)
 
   const pdfUrl = useMemo(() => `${API_BASE}/documents/${docId}/pdf`, [docId])
@@ -57,36 +64,70 @@ export default function PdfViewer({
     setCurrentPage((page || 0) + 1)
   }, [docId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Custom text renderer for multi-color text highlights (only on source page, only for chunks without bbox)
+  // Extract text from all pages on PDF load for search
+  const handleDocLoad = useCallback(async (pdf) => {
+    setNumPages(pdf.numPages)
+
+    const texts = []
+    for (let i = 1; i <= pdf.numPages; i++) {
+      try {
+        const pg = await pdf.getPage(i)
+        const content = await pg.getTextContent()
+        const text = content.items.map(item => item.str).join(' ')
+        texts.push({ pageNum: i, text })
+      } catch {
+        texts.push({ pageNum: i, text: '' })
+      }
+    }
+    setPageTexts(texts)
+  }, [])
+
+  // Custom text renderer: source highlights + search highlights
   const textRenderer = useMemo(() => {
-    if (!isSourcePage) return undefined
-    const textHighlights = (highlights || [])
-      .filter(h => h.chunkText && (!h.bbox || h.bbox.length !== 4))
-      .map(h => ({
-        fragments: buildFragments(h.chunkText),
-        color: HIGHLIGHT_COLORS[h.colorIndex % HIGHLIGHT_COLORS.length],
-        isActive: h.isActive,
-      }))
-      .filter(h => h.fragments.length > 0)
+    // Source text highlights (no bbox)
+    const textHighlights = isSourcePage
+      ? (highlights || [])
+          .filter(h => h.chunkText && (!h.bbox || h.bbox.length !== 4))
+          .map(h => ({
+            fragments: buildFragments(h.chunkText),
+            color: HIGHLIGHT_COLORS[h.colorIndex % HIGHLIGHT_COLORS.length],
+            isActive: h.isActive,
+          }))
+          .filter(h => h.fragments.length > 0)
+      : []
 
-    if (textHighlights.length === 0) return undefined
+    const hasSearch = searchOpen && searchQuery.trim().length > 0
+    const searchLower = hasSearch ? searchQuery.toLowerCase() : ''
 
-    // Sort once: active highlights first so they win on overlap
-    const sorted = [...textHighlights].sort((a, b) => (b.isActive ? 1 : 0) - (a.isActive ? 1 : 0))
+    if (textHighlights.length === 0 && !hasSearch) return undefined
+
+    // Sort once: active highlights first
+    const sorted = textHighlights.length > 0
+      ? [...textHighlights].sort((a, b) => (b.isActive ? 1 : 0) - (a.isActive ? 1 : 0))
+      : []
 
     return ({ str }) => {
+      const escaped = escapeHtml(str)
       const norm = str.replace(/\s+/g, ' ').trim().toLowerCase()
-      if (norm.length < 4) return escapeHtml(str)
 
-      for (const hl of sorted) {
-        if (hl.fragments.some(f => f.includes(norm))) {
-          const bg = hl.isActive ? hl.color.mark : hl.color.mark.replace(/[\d.]+\)$/, '0.2)')
-          return `<mark style="background:${bg}">${escapeHtml(str)}</mark>`
+      // Search highlight takes visual priority
+      if (hasSearch && norm.length >= 2 && norm.includes(searchLower)) {
+        return `<mark style="background:${SEARCH_MATCH_BG}">${escaped}</mark>`
+      }
+
+      // Source highlights
+      if (norm.length >= 4 && sorted.length > 0) {
+        for (const hl of sorted) {
+          if (hl.fragments.some(f => f.includes(norm))) {
+            const bg = hl.isActive ? hl.color.mark : hl.color.mark.replace(/[\d.]+\)$/, '0.2)')
+            return `<mark style="background:${bg}">${escaped}</mark>`
+          }
         }
       }
-      return escapeHtml(str)
+
+      return escaped
     }
-  }, [isSourcePage, highlights])
+  }, [isSourcePage, highlights, searchOpen, searchQuery])
 
   // Render multiple bbox highlight overlays with per-source colors
   const renderBboxOverlays = () => {
@@ -158,16 +199,78 @@ export default function PdfViewer({
     setCurrentPage(Math.max(1, Math.min(numPages, p)))
   }, [numPages])
 
-  // PageUp/PageDown — only when no input focused
+  // Search match computation
+  useEffect(() => {
+    if (!searchQuery.trim() || pageTexts.length === 0) {
+      setSearchMatches([])
+      setActiveMatchIdx(0)
+      return
+    }
+    const q = searchQuery.toLowerCase()
+    const matches = []
+    for (const { pageNum, text } of pageTexts) {
+      const lower = text.toLowerCase()
+      let startIdx = 0
+      while (true) {
+        const idx = lower.indexOf(q, startIdx)
+        if (idx === -1) break
+        matches.push({ pageNum, charIndex: idx })
+        startIdx = idx + 1
+      }
+    }
+    setSearchMatches(matches)
+    setActiveMatchIdx(0)
+    if (matches.length > 0) {
+      setCurrentPage(matches[0].pageNum)
+    }
+  }, [searchQuery, pageTexts])
+
+  const goToNextMatch = useCallback(() => {
+    if (searchMatches.length === 0) return
+    const next = (activeMatchIdx + 1) % searchMatches.length
+    setActiveMatchIdx(next)
+    setCurrentPage(searchMatches[next].pageNum)
+  }, [searchMatches, activeMatchIdx])
+
+  const goToPrevMatch = useCallback(() => {
+    if (searchMatches.length === 0) return
+    const prev = (activeMatchIdx - 1 + searchMatches.length) % searchMatches.length
+    setActiveMatchIdx(prev)
+    setCurrentPage(searchMatches[prev].pageNum)
+  }, [searchMatches, activeMatchIdx])
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false)
+    setSearchQuery('')
+    setSearchMatches([])
+  }, [])
+
+  // Keyboard shortcuts: PageUp/PageDown, Ctrl+F, Escape, search navigation
   useEffect(() => {
     const handler = (e) => {
-      if (document.activeElement?.tagName === 'INPUT') return
+      if (document.activeElement?.tagName === 'INPUT') {
+        if (searchOpen) {
+          if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeSearch() }
+          else if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); goToPrevMatch() }
+          else if (e.key === 'Enter') { e.preventDefault(); goToNextMatch() }
+        }
+        return
+      }
       if (e.key === 'PageUp') { e.preventDefault(); goToPrev() }
       else if (e.key === 'PageDown') { e.preventDefault(); goToNext() }
+      else if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault()
+        e.stopPropagation()
+        setSearchOpen(true)
+      }
+      else if (e.key === 'Escape' && searchOpen) {
+        e.stopPropagation()
+        closeSearch()
+      }
     }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
-  }, [goToPrev, goToNext])
+  }, [goToPrev, goToNext, searchOpen, closeSearch, goToNextMatch, goToPrevMatch])
 
   // Cleanup timer on unmount
   useEffect(() => {
@@ -192,7 +295,7 @@ export default function PdfViewer({
       >
         <Document
           file={pdfUrl}
-          onLoadSuccess={({ numPages: n }) => setNumPages(n)}
+          onLoadSuccess={handleDocLoad}
           onLoadError={(err) => { console.error('[PdfViewer] load error:', err); onError?.() }}
           loading={<div className="pdf-viewer-loading">Loading PDF...</div>}
           error={<div className="pdf-viewer-error">Failed to load PDF</div>}
@@ -210,6 +313,35 @@ export default function PdfViewer({
           </Page>
         </Document>
       </div>
+
+      {searchOpen && (
+        <div className="pdf-search-bar" onClick={e => e.stopPropagation()}>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search in PDF..."
+            autoFocus
+            className="pdf-search-input"
+          />
+          {searchQuery && (
+            <span className="pdf-search-count">
+              {searchMatches.length > 0
+                ? `${activeMatchIdx + 1} / ${searchMatches.length}`
+                : 'No matches'}
+            </span>
+          )}
+          <button onClick={goToPrevMatch} disabled={searchMatches.length === 0} title="Previous (Shift+Enter)">
+            <ChevronLeft size={14} />
+          </button>
+          <button onClick={goToNextMatch} disabled={searchMatches.length === 0} title="Next (Enter)">
+            <ChevronRight size={14} />
+          </button>
+          <button onClick={closeSearch} title="Close (Esc)" className="pdf-search-close">
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {numPages && numPages > 1 && (
         <div className="pdf-viewer-page-nav" onClick={e => e.stopPropagation()}>
@@ -231,6 +363,9 @@ export default function PdfViewer({
           </span>
           <button onClick={goToNext} disabled={currentPage >= numPages} title="Next page (PageDown)">
             <ChevronRight size={16} />
+          </button>
+          <button onClick={() => setSearchOpen(o => !o)} title="Search (Ctrl+F)" className="pdf-viewer-search-btn">
+            <Search size={14} />
           </button>
           {currentPage !== initialPage && (
             <button
