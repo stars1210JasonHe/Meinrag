@@ -90,6 +90,10 @@ class Settings(BaseSettings):
     rerank_provider: RerankProvider = RerankProvider.FLASHRANK
     rerank_model: str = ""  # empty = auto-select default per provider
 
+    # Query expansion for vague queries (re-query with LLM-expanded terms)
+    query_expansion_enabled: bool = True
+    query_expansion_score_threshold: float = 0.3  # trigger when all scores below this
+
     # Hybrid search
     hybrid_search_enabled: bool = False
     hybrid_bm25_weight: float = 0.5

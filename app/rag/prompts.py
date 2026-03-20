@@ -51,6 +51,14 @@ QUERY_REWRITE_PROMPT = ChatPromptTemplate.from_messages([
     ("human", "{question}"),
 ])
 
+QUERY_EXPANSION_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", "The user's search query is too vague to find relevant document chunks. "
+     "Expand it into a single, more specific search query that would match technical "
+     "document content. Keep the same language as the original query. "
+     "Return ONLY the expanded query, nothing else."),
+    ("human", "{question}"),
+])
+
 WEB_SEARCH_SYSTEM_PROMPT = """\
 You are a helpful assistant. The user's question could not be answered from their uploaded documents,
 so web search results are provided below.

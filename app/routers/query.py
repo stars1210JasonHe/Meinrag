@@ -14,7 +14,7 @@ from app.db.repositories import DocumentRepository, ChatSessionRepository
 from app.models.schemas import QueryRequest, QueryResponse, SourceChunk, ChunkContextRequest, AskAIRequest, AskAIResponse
 from langchain_core.output_parsers import StrOutputParser
 from app.rag.chain import build_rag_chain, is_reference_entry
-from app.rag.prompts import WEB_SEARCH_PROMPT, CHUNK_CONTEXT_PROMPT, QUERY_REWRITE_PROMPT, ASK_AI_PROMPT
+from app.rag.prompts import WEB_SEARCH_PROMPT, CHUNK_CONTEXT_PROMPT, QUERY_REWRITE_PROMPT, QUERY_EXPANSION_PROMPT, ASK_AI_PROMPT
 from app.routers.stream_helpers import sse_event, stream_chain_response
 from app.vectorstore.base import VectorStoreManager
 from langchain_core.language_models import BaseChatModel
@@ -23,6 +23,48 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _RETRYABLE_KEYWORDS = ("500", "503", "rate", "overloaded", "internal server error")
+
+
+async def _maybe_expand_query(
+    question: str,
+    retrieved: list[tuple],
+    llm: BaseChatModel,
+    vector_store: VectorStoreManager,
+    settings: Settings,
+    doc_ids: list[str] | None,
+    top_k: int,
+) -> tuple[str, list[tuple]]:
+    """If all retrieval scores are below threshold, expand the query via LLM and re-query."""
+    if not settings.query_expansion_enabled or not retrieved:
+        return question, retrieved
+
+    max_score = max(score for _, score in retrieved) if retrieved else 0
+    if max_score >= settings.query_expansion_score_threshold:
+        return question, retrieved
+
+    # Scores are all low — expand the query
+    try:
+        expansion_chain = QUERY_EXPANSION_PROMPT | llm | StrOutputParser()
+        expanded = await expansion_chain.ainvoke({"question": question})
+        expanded = expanded.strip()
+        if not expanded or expanded == question:
+            return question, retrieved
+
+        logger.info("Query expanded: %r → %r", question, expanded)
+
+        # Re-query with expanded query
+        new_retrieved = vector_store.similarity_search_with_scores(
+            expanded, k=int(top_k * 1.5), doc_ids=doc_ids,
+        )
+        new_max = max(score for _, score in new_retrieved) if new_retrieved else 0
+
+        # Only use expanded results if they're actually better
+        if new_max > max_score:
+            return expanded, new_retrieved
+    except Exception as e:
+        logger.warning("Query expansion failed: %s", e)
+
+    return question, retrieved
 
 
 def _demote_reference_results(
@@ -375,6 +417,11 @@ async def query_documents(
             request.question, k=int(request.top_k * 1.5), doc_ids=doc_ids,
         )
 
+        # Expand vague queries (low scores → LLM rewrites → re-query)
+        search_query, retrieved = await _maybe_expand_query(
+            request.question, retrieved, llm, vector_store, settings, doc_ids, request.top_k,
+        )
+
         # Demote reference-list entries so real content fills top_k
         retrieved = _demote_reference_results(retrieved, request.top_k)
 
@@ -539,6 +586,12 @@ async def query_documents_stream(
         retrieved = vector_store.similarity_search_with_scores(
             request.question, k=int(request.top_k * 1.5), doc_ids=doc_ids,
         )
+
+        # Expand vague queries
+        _, retrieved = await _maybe_expand_query(
+            request.question, retrieved, llm, vector_store, settings, doc_ids, request.top_k,
+        )
+
         retrieved = _demote_reference_results(retrieved, request.top_k)
         needs_web_search = _should_web_search(request, settings, user_scoped, retrieved)
         if not needs_web_search:
