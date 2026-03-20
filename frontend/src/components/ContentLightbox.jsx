@@ -75,14 +75,7 @@ export default function ContentLightbox({ sources, currentIndex, onClose, onNavi
   }, [])
 
   const zoomOut = useCallback(() => {
-    setZoom(z => {
-      const next = z / 1.5
-      if (next <= 1.05) {
-        setPan({ x: 0, y: 0 })
-        return 1
-      }
-      return next
-    })
+    setZoom(z => Math.max(z / 1.5, 0.3))
   }, [])
 
   const resetZoom = useCallback(() => {
@@ -91,18 +84,13 @@ export default function ContentLightbox({ sources, currentIndex, onClose, onNavi
   }, [])
 
   const handleWheel = useCallback((e) => {
+    // Only zoom on Ctrl+scroll (or pinch gesture); let normal scroll work for scrollbars
+    if (!e.ctrlKey && !e.metaKey) return
     e.preventDefault()
     if (e.deltaY < 0) {
       setZoom(z => Math.min(z * 1.15, 8))
     } else {
-      setZoom(z => {
-        const next = z / 1.15
-        if (next <= 1.05) {
-          setPan({ x: 0, y: 0 })
-          return 1
-        }
-        return next
-      })
+      setZoom(z => Math.max(z / 1.15, 0.3))
     }
   }, [])
 
@@ -269,8 +257,6 @@ export default function ContentLightbox({ sources, currentIndex, onClose, onNavi
                 page={source.page}
                 highlights={highlights}
                 zoom={zoom}
-                pan={pan}
-                dragging={dragging}
                 onClick={handleContentClick}
                 onError={() => setPdfFailed(true)}
                 onHighlightClick={(sourceIdx) => onNavigate(sourceIdx)}

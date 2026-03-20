@@ -24,8 +24,8 @@ function buildFragments(text) {
   return fragments
 }
 
-// Target height for PDF page rendering
-const PAGE_HEIGHT = Math.round(window.innerHeight * 0.82)
+// Default fallback width if container measurement isn't ready
+const DEFAULT_WIDTH = 800
 
 const HIGHLIGHT_COLORS = [
   { bg: 'rgba(250, 204, 21, 0.35)', border: 'rgba(234, 179, 8, 0.8)',   mark: 'rgba(250, 204, 21, 0.40)' },
@@ -42,7 +42,7 @@ const SEARCH_MATCH_BG = 'rgba(34, 197, 94, 0.35)'
  * Text selection, page navigation, bbox + text highlighting.
  */
 export default function PdfViewer({
-  docId, page, highlights, zoom, pan, dragging, onClick, onError, onHighlightClick
+  docId, page, highlights, zoom, onClick, onError, onHighlightClick
 }) {
   const [numPages, setNumPages] = useState(null)
   const [currentPage, setCurrentPage] = useState((page || 0) + 1) // react-pdf is 1-indexed
@@ -52,12 +52,24 @@ export default function PdfViewer({
   const [searchQuery, setSearchQuery] = useState('')
   const [searchMatches, setSearchMatches] = useState([]) // [{pageNum, charIndex}] all matches
   const [activeMatchIdx, setActiveMatchIdx] = useState(0)
+  const [containerWidth, setContainerWidth] = useState(DEFAULT_WIDTH)
   const pageInputTimer = useRef(null)
+  const containerRef = useRef(null)
 
   const pdfUrl = useMemo(() => `${API_BASE}/documents/${docId}/pdf`, [docId])
   const initialPage = (page || 0) + 1
   const isSourcePage = currentPage === initialPage
-  const isZoomed = zoom > 1
+
+  // Measure container width dynamically
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const measure = () => setContainerWidth(el.clientWidth)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
 
   // Reset page when docId changes
   useEffect(() => {
@@ -293,14 +305,8 @@ export default function PdfViewer({
   }, [goToPage])
 
   return (
-    <div className="pdf-viewer-wrapper" onClick={onClick}>
-      <div
-        className="pdf-viewer-canvas-container"
-        style={{
-          transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
-          cursor: isZoomed ? (dragging ? 'grabbing' : 'grab') : 'default',
-        }}
-      >
+    <div className="pdf-viewer-wrapper" onClick={onClick} ref={containerRef}>
+      <div className="pdf-viewer-canvas-container">
         <Document
           file={pdfUrl}
           onLoadSuccess={handleDocLoad}
@@ -310,7 +316,7 @@ export default function PdfViewer({
         >
           <Page
             pageNumber={currentPage}
-            height={PAGE_HEIGHT}
+            width={containerWidth * zoom}
             renderTextLayer={true}
             renderAnnotationLayer={false}
             customTextRenderer={textRenderer}
