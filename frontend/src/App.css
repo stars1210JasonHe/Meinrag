@@ -1941,9 +1941,8 @@ body {
   background: rgba(59, 130, 246, 0.4);
 }
 
-/* Yellow highlight for matched chunk text via customTextRenderer */
+/* Highlight for matched chunk text — background color set inline by multi-highlight renderer */
 .pdf-viewer-canvas-container .textLayer mark {
-  background: rgba(250, 204, 21, 0.4);
   color: transparent;
   border-radius: 2px;
 }

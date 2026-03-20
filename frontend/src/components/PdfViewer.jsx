@@ -71,11 +71,13 @@ export default function PdfViewer({
 
     if (textHighlights.length === 0) return undefined
 
+    // Sort once: active highlights first so they win on overlap
+    const sorted = [...textHighlights].sort((a, b) => (b.isActive ? 1 : 0) - (a.isActive ? 1 : 0))
+
     return ({ str }) => {
       const norm = str.replace(/\s+/g, ' ').trim().toLowerCase()
       if (norm.length < 4) return escapeHtml(str)
 
-      const sorted = [...textHighlights].sort((a, b) => (b.isActive ? 1 : 0) - (a.isActive ? 1 : 0))
       for (const hl of sorted) {
         if (hl.fragments.some(f => f.includes(norm))) {
           const bg = hl.isActive ? hl.color.mark : hl.color.mark.replace(/[\d.]+\)$/, '0.2)')
