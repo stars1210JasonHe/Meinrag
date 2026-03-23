@@ -122,6 +122,11 @@ class DocumentProcessor:
         chunks = self._splitter.split_documents(documents)
         logger.info(f"Split into {len(chunks)} chunk(s)")
 
+        # Apply chunk quality filters
+        from app.services.chunk_utils import deduplicate_chunks, tag_reference_chunks
+        chunks = deduplicate_chunks(chunks)
+        tag_reference_chunks(chunks)
+
         for i, chunk in enumerate(chunks):
             chunk.metadata["source_file"] = self._clean_name
             chunk.metadata["chunk_index"] = i
@@ -493,6 +498,9 @@ class DocumentProcessor:
                         text_count += 1
 
                 elif chunk_type == "table":
+                    from app.services.chunk_utils import is_garbage_table
+                    if is_garbage_table(content):
+                        continue
                     bbox = None
                     if page_table_idx < len(bboxes["tables"]):
                         bbox = json.dumps(bboxes["tables"][page_table_idx])
@@ -527,6 +535,11 @@ class DocumentProcessor:
                     image_count += 1
             except Exception as e:
                 logger.warning(f"Poppler figure extraction failed: {e}")
+
+        # Apply chunk quality filters
+        from app.services.chunk_utils import deduplicate_chunks, tag_reference_chunks
+        all_chunks = deduplicate_chunks(all_chunks)
+        tag_reference_chunks(all_chunks)
 
         for i, chunk in enumerate(all_chunks):
             chunk.metadata["source_file"] = self._clean_name

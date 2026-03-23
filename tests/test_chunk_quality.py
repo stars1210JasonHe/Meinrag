@@ -1,4 +1,4 @@
-"""Tests for chunk quality helpers in docling_processor.py and query.py.
+"""Tests for chunk quality helpers.
 
 Covers garbage table filtering, deduplication, reference section tagging,
 and retrieval-time quality fixes.
@@ -6,10 +6,10 @@ and retrieval-time quality fixes.
 import pytest
 from langchain_core.documents import Document
 
-from app.services.docling_processor import (
-    _is_garbage_table,
-    _deduplicate_chunks,
-    _tag_reference_chunks,
+from app.services.chunk_utils import (
+    is_garbage_table as _is_garbage_table,
+    deduplicate_chunks as _deduplicate_chunks,
+    tag_reference_chunks as _tag_reference_chunks,
 )
 
 

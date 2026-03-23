@@ -14,91 +14,12 @@ from app.config import Settings
 logger = logging.getLogger(__name__)
 
 
-# ── Chunk quality helpers ────────────────────────────────────────────────
-
-_GENERIC_COL_RE = re.compile(r"^Col\d+$", re.IGNORECASE)
-
-
-def _is_garbage_table(markdown: str) -> bool:
-    """Detect garbage tables that should be filtered out during ingestion.
-
-    Returns True (garbage) for:
-    - Empty / whitespace-only tables
-    - Tables with 3+ generic column headers (Col1, Col2, ...)
-    - Tables where >60% of cells are 1-2 chars AND total cells > 10
-    """
-    if not markdown or not markdown.strip():
-        return True
-
-    lines = [l.strip() for l in markdown.strip().splitlines() if l.strip()]
-    if not lines:
-        return True
-
-    # Extract cells from all non-separator lines
-    all_cells: list[str] = []
-    header_cells: list[str] = []
-    for idx, line in enumerate(lines):
-        # Skip separator lines (e.g., |---|---|---|)
-        if re.fullmatch(r"[|\s:-]+", line):
-            continue
-        cells = [c.strip() for c in line.split("|") if c.strip()]
-        all_cells.extend(cells)
-        if idx == 0:
-            header_cells = cells
-
-    if not all_cells:
-        return True
-
-    # Check for generic column headers (Col1, Col2, ...)
-    generic_count = sum(1 for c in header_cells if _GENERIC_COL_RE.match(c))
-    if generic_count >= 3:
-        return True
-
-    # Check for tokenized attention visualisation: >60% tiny cells, 10+ total
-    if len(all_cells) > 10:
-        tiny = sum(1 for c in all_cells if len(c) <= 2)
-        if tiny / len(all_cells) > 0.6:
-            return True
-
-    return False
-
-
-def _deduplicate_chunks(chunks: list[Document]) -> list[Document]:
-    """Remove exact-duplicate chunks (after whitespace normalisation).
-
-    Keeps the first occurrence.
-    """
-    seen: set[str] = set()
-    result: list[Document] = []
-    for chunk in chunks:
-        key = " ".join(chunk.page_content.split()).strip()
-        if key in seen:
-            continue
-        seen.add(key)
-        result.append(chunk)
-    return result
-
-
-_REF_HEADING_KEYWORDS = re.compile(
-    r"\b(references|bibliography|works\s+cited)\b", re.IGNORECASE
+# ── Chunk quality helpers (shared with document_processor) ───────────────
+from app.services.chunk_utils import (
+    is_garbage_table as _is_garbage_table,
+    deduplicate_chunks as _deduplicate_chunks,
+    tag_reference_chunks as _tag_reference_chunks,
 )
-
-
-def _tag_reference_chunks(chunks: list[Document]) -> None:
-    """Tag reference-section chunks in-place with metadata["section"] = "references".
-
-    Detection methods (in order):
-    1. Heading-based: chunk metadata["headings"] contains References / Bibliography / Works Cited
-    2. Text-based fallback: uses ``is_reference_entry()`` from ``app.rag.chain``
-    """
-    from app.rag.chain import is_reference_entry
-
-    for chunk in chunks:
-        headings = chunk.metadata.get("headings", "")
-        if headings and _REF_HEADING_KEYWORDS.search(headings):
-            chunk.metadata["section"] = "references"
-        elif is_reference_entry(chunk.page_content):
-            chunk.metadata["section"] = "references"
 
 
 def has_docling() -> bool:
