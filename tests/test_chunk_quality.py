@@ -1,7 +1,9 @@
-"""Tests for chunk quality helpers in docling_processor.py.
+"""Tests for chunk quality helpers in docling_processor.py and query.py.
 
-Covers garbage table filtering, deduplication, and reference section tagging.
+Covers garbage table filtering, deduplication, reference section tagging,
+and retrieval-time quality fixes.
 """
+import pytest
 from langchain_core.documents import Document
 
 from app.services.docling_processor import (
@@ -137,3 +139,32 @@ class TestReferenceTagging:
         ]
         _tag_reference_chunks(chunks)
         assert chunks[0].metadata.get("section") == "references"
+
+
+# ── Task 5: Reference score penalty ──────────────────────────────────
+
+
+class TestReferenceScorePenalty:
+    def test_reference_chunk_penalized(self):
+        from app.routers.query import _apply_reference_penalty
+        results = [
+            (Document(page_content="Real content", metadata={}), 0.6),
+            (Document(page_content="[1] Author et al.", metadata={"section": "references"}), 0.5),
+        ]
+        penalized = _apply_reference_penalty(results)
+        assert penalized[0][1] == 0.6
+        assert penalized[1][1] == pytest.approx(0.5 * 0.3)
+
+    def test_non_reference_unchanged(self):
+        from app.routers.query import _apply_reference_penalty
+        results = [
+            (Document(page_content="Normal text", metadata={}), 0.8),
+            (Document(page_content="Another chunk", metadata={"section": "introduction"}), 0.7),
+        ]
+        penalized = _apply_reference_penalty(results)
+        assert penalized[0][1] == 0.8
+        assert penalized[1][1] == 0.7
+
+    def test_empty_results(self):
+        from app.routers.query import _apply_reference_penalty
+        assert _apply_reference_penalty([]) == []

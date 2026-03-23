@@ -7,7 +7,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.config import Settings
 from app.dependencies import (
-    get_settings, get_vector_store, get_llm, get_memory_manager,
+    get_settings, get_vector_store, get_llm, get_embeddings, get_memory_manager,
     get_registry, get_current_user,
 )
 from app.db.repositories import DocumentRepository, ChatSessionRepository
@@ -17,12 +17,14 @@ from app.rag.chain import build_rag_chain, is_reference_entry
 from app.rag.prompts import WEB_SEARCH_PROMPT, CHUNK_CONTEXT_PROMPT, QUERY_REWRITE_PROMPT, QUERY_EXPANSION_PROMPT, ASK_AI_PROMPT
 from app.routers.stream_helpers import sse_event, stream_chain_response
 from app.vectorstore.base import VectorStoreManager
+from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseChatModel
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _RETRYABLE_KEYWORDS = ("500", "503", "rate", "overloaded", "internal server error")
+_REFERENCE_SCORE_PENALTY = 0.3
 
 
 async def _maybe_expand_query(
@@ -77,6 +79,14 @@ def _demote_reference_results(
     if refs:
         logger.info("Reference demotion: %d ref chunks demoted out of %d results", len(refs), len(results))
     return (content + refs)[:top_k]
+
+
+def _apply_reference_penalty(results: list[tuple]) -> list[tuple]:
+    """Multiply score by penalty factor for chunks tagged as reference section."""
+    return [
+        (doc, score * _REFERENCE_SCORE_PENALTY) if doc.metadata.get("section") == "references" else (doc, score)
+        for doc, score in results
+    ]
 
 
 def _smart_truncate(text: str, max_len: int = 500) -> str:
@@ -203,12 +213,15 @@ def _supplement_visual_chunks(
     retrieved: list,
     vector_store: VectorStoreManager,
     doc_ids: list[str] | None,
+    question: str | None = None,
+    embeddings=None,
 ) -> list:
     """Append image and table chunks from queried documents that weren't already retrieved.
 
     Image chunks have short descriptions that rarely match queries via similarity
     search, and table chunks may also rank poorly. We always include them as
-    supplementary visual context.
+    supplementary visual context. When question and embeddings are available,
+    computes real cosine similarity scores instead of hardcoding 0.0.
     """
     if not doc_ids:
         return retrieved
@@ -220,7 +233,7 @@ def _supplement_visual_chunks(
         key = (meta.get("doc_id"), meta.get("chunk_index"))
         retrieved_keys.add(key)
 
-    extra = []
+    extra_docs = []
     for did in doc_ids:
         chunks = vector_store.get_chunks_by_doc(did)
         for chunk in chunks:
@@ -231,14 +244,44 @@ def _supplement_visual_chunks(
                 continue
             if ct not in ("image", "table", "formula"):
                 continue
+            if ct == "table":
+                # Filter garbage tables (generic headers or tokenized viz)
+                lower = chunk.page_content.lower()
+                if lower.count("|col") >= 3:
+                    continue
+                cells = [c.strip() for c in chunk.page_content.split("|") if c.strip()]
+                if cells and len(cells) > 10 and sum(1 for c in cells if len(c) <= 2) / len(cells) > 0.6:
+                    continue
             key = (meta.get("doc_id"), meta.get("chunk_index"))
             if key not in retrieved_keys:
-                extra.append((chunk, 0.0))
+                extra_docs.append(chunk)
                 retrieved_keys.add(key)
 
-    if extra:
-        logger.info(f"Supplemented {len(extra)} visual chunks (images+tables) from queried documents")
-    return retrieved + extra
+    if not extra_docs:
+        return retrieved
+
+    # Compute real similarity scores if embeddings and question available
+    extra_with_scores = []
+    if question and embeddings:
+        try:
+            import numpy as np
+            query_emb = embeddings.embed_query(question)
+            doc_texts = [d.page_content for d in extra_docs]
+            doc_embs = embeddings.embed_documents(doc_texts)
+            query_vec = np.array(query_emb)
+            for doc, emb in zip(extra_docs, doc_embs):
+                doc_vec = np.array(emb)
+                cosine = float(np.dot(query_vec, doc_vec) / (np.linalg.norm(query_vec) * np.linalg.norm(doc_vec) + 1e-10))
+                extra_with_scores.append((doc, max(0.0, cosine)))
+        except Exception as e:
+            logger.warning(f"Failed to compute supplement scores: {e}")
+            extra_with_scores = [(doc, 0.0) for doc in extra_docs]
+    else:
+        extra_with_scores = [(doc, 0.0) for doc in extra_docs]
+
+    if extra_with_scores:
+        logger.info(f"Supplemented {len(extra_with_scores)} visual chunks (images+tables) from queried documents")
+    return retrieved + extra_with_scores
 
 
 async def _fetch_page(url: str) -> str:
@@ -382,6 +425,7 @@ async def query_documents(
     settings: Settings = Depends(get_settings),
     vector_store: VectorStoreManager = Depends(get_vector_store),
     llm: BaseChatModel = Depends(get_llm),
+    embeddings: Embeddings = Depends(get_embeddings),
     memory_manager: ChatSessionRepository = Depends(get_memory_manager),
     registry: DocumentRepository = Depends(get_registry),
     current_user: str = Depends(get_current_user),
@@ -424,6 +468,7 @@ async def query_documents(
 
         # Demote reference-list entries so real content fills top_k
         retrieved = _demote_reference_results(retrieved, request.top_k)
+        retrieved = _apply_reference_penalty(retrieved)
 
         # Web search fallback if needed
         if _should_web_search(request, settings, user_scoped, retrieved):
@@ -432,7 +477,10 @@ async def query_documents(
             )
 
         # Supplement with image chunks that weren't retrieved by similarity
-        retrieved = _supplement_visual_chunks(retrieved, vector_store, doc_ids)
+        retrieved = _supplement_visual_chunks(
+            retrieved, vector_store, doc_ids,
+            question=request.question, embeddings=embeddings,
+        )
 
         answer = await _invoke_with_retry(chain, request.question)
 
@@ -557,6 +605,7 @@ async def query_documents_stream(
     settings: Settings = Depends(get_settings),
     vector_store: VectorStoreManager = Depends(get_vector_store),
     llm: BaseChatModel = Depends(get_llm),
+    embeddings: Embeddings = Depends(get_embeddings),
     memory_manager: ChatSessionRepository = Depends(get_memory_manager),
     registry: DocumentRepository = Depends(get_registry),
     current_user: str = Depends(get_current_user),
@@ -593,9 +642,13 @@ async def query_documents_stream(
         )
 
         retrieved = _demote_reference_results(retrieved, request.top_k)
+        retrieved = _apply_reference_penalty(retrieved)
         needs_web_search = _should_web_search(request, settings, user_scoped, retrieved)
         if not needs_web_search:
-            retrieved = _supplement_visual_chunks(retrieved, vector_store, doc_ids)
+            retrieved = _supplement_visual_chunks(
+                retrieved, vector_store, doc_ids,
+                question=request.question, embeddings=embeddings,
+            )
 
     # Pre-compute web search context if needed
     web_context = ""
