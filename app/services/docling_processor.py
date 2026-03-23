@@ -19,6 +19,7 @@ from app.services.chunk_utils import (
     is_garbage_table as _is_garbage_table,
     deduplicate_chunks as _deduplicate_chunks,
     tag_reference_chunks as _tag_reference_chunks,
+    enrich_section_metadata as _enrich_section_metadata,
 )
 
 
@@ -382,6 +383,7 @@ def process(
     # Post-processing: deduplicate and tag reference chunks
     all_chunks = _deduplicate_chunks(all_chunks)
     _tag_reference_chunks(all_chunks)
+    _enrich_section_metadata(all_chunks)
 
     # Assign chunk_index
     for i, chunk in enumerate(all_chunks):

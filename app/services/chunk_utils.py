@@ -4,6 +4,9 @@ Functions:
 - is_garbage_table: detect garbage markdown tables
 - deduplicate_chunks: remove exact-duplicate chunks
 - tag_reference_chunks: tag reference-section chunks in metadata
+- classify_section_type: classify a heading into a section type
+- classify_section_from_headings: classify from a heading chain string
+- enrich_section_metadata: add section_type metadata to all chunks
 """
 import re
 import logging
@@ -92,3 +95,86 @@ def tag_reference_chunks(chunks: list[Document]) -> None:
             chunk.metadata["section"] = "references"
         elif is_reference_entry(chunk.page_content):
             chunk.metadata["section"] = "references"
+
+
+# ── Section type classifier ───────────────────────────────────────────────
+
+# Prefix pattern: optional leading section number like "3", "3.1", "3.1.2 "
+_SEC_NUM = r"(?:^|\d+(?:\.\d+)*[\.\s]*)"
+
+_SECTION_PATTERNS = [
+    ("abstract",       re.compile(_SEC_NUM + r"abstract", re.IGNORECASE)),
+    ("introduction",   re.compile(_SEC_NUM + r"introduction", re.IGNORECASE)),
+    ("related_work",   re.compile(_SEC_NUM + r"(?:related\s+work|background|prior\s+work)", re.IGNORECASE)),
+    ("methods",        re.compile(_SEC_NUM + r"(?:method|model|architecture|approach|framework|system|design|formulation|proposed)", re.IGNORECASE)),
+    ("training",       re.compile(_SEC_NUM + r"(?:training|implementation|setup|configuration)", re.IGNORECASE)),
+    ("results",        re.compile(_SEC_NUM + r"(?:result|experiment|evaluation|empirical|ablation|analysis|performance)", re.IGNORECASE)),
+    ("discussion",     re.compile(_SEC_NUM + r"(?:discussion|conclusion|future\s+work|limitation|summary)", re.IGNORECASE)),
+    ("references",     re.compile(_SEC_NUM + r"(?:references|bibliography|works\s+cited)", re.IGNORECASE)),
+    ("appendix",       re.compile(_SEC_NUM + r"(?:appendix|supplementary|supplemental)", re.IGNORECASE)),
+    ("acknowledgment", re.compile(_SEC_NUM + r"(?:acknowledg)", re.IGNORECASE)),
+]
+
+
+def classify_section_type(heading: str | None) -> str:
+    """Classify a heading into a section type.
+
+    Returns one of: abstract, introduction, related_work, methods, training,
+    results, discussion, references, appendix, acknowledgment, body.
+    """
+    if not heading:
+        return "body"
+    cleaned = heading.strip()
+    for pattern_name, pattern in _SECTION_PATTERNS:
+        if pattern.search(cleaned):
+            return pattern_name
+    return "body"
+
+
+def classify_section_from_headings(headings_str: str | None) -> str:
+    """Classify from a heading chain like '3 Model Architecture > 3.1 Attention'.
+
+    Uses the top-level (first) heading for classification.
+    """
+    if not headings_str:
+        return "body"
+    top = headings_str.split(" > ")[0].strip()
+    return classify_section_type(top)
+
+
+def enrich_section_metadata(chunks: list[Document]) -> None:
+    """Add ``section_type`` metadata to all chunks in-place.
+
+    - Text chunks with ``headings``: classified via :func:`classify_section_from_headings`
+    - Text chunks already tagged ``section=references``: set ``section_type=references``
+    - Visual chunks (table/image/formula) without headings: inherit from nearest
+      text chunk by page proximity
+    """
+    # First pass: classify text chunks that have headings or reference tags
+    for chunk in chunks:
+        if chunk.metadata.get("headings"):
+            chunk.metadata["section_type"] = classify_section_from_headings(
+                chunk.metadata["headings"]
+            )
+        elif chunk.metadata.get("section") == "references":
+            chunk.metadata["section_type"] = "references"
+
+    # Second pass: visual chunks inherit from nearest text chunk
+    page_sections: dict[int, str] = {}
+    for chunk in chunks:
+        if chunk.metadata.get("chunk_type") == "text" and "section_type" in chunk.metadata:
+            page = chunk.metadata.get("page", 0)
+            page_sections[page] = chunk.metadata["section_type"]
+
+    for chunk in chunks:
+        if "section_type" in chunk.metadata:
+            continue
+        page = chunk.metadata.get("page", 0)
+        best_section = "body"
+        best_dist = float("inf")
+        for p, sec in page_sections.items():
+            dist = abs(p - page)
+            if dist < best_dist or (dist == best_dist and p <= page):
+                best_dist = dist
+                best_section = sec
+        chunk.metadata["section_type"] = best_section

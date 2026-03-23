@@ -10,6 +10,9 @@ from app.services.chunk_utils import (
     is_garbage_table as _is_garbage_table,
     deduplicate_chunks as _deduplicate_chunks,
     tag_reference_chunks as _tag_reference_chunks,
+    classify_section_type,
+    classify_section_from_headings,
+    enrich_section_metadata,
 )
 
 
@@ -168,3 +171,111 @@ class TestReferenceScorePenalty:
     def test_empty_results(self):
         from app.routers.query import _apply_reference_penalty
         assert _apply_reference_penalty([]) == []
+
+
+# ── Task 8: Section type classifier ──────────────────────────────────────
+
+
+class TestSectionClassifier:
+    def test_abstract(self):
+        assert classify_section_type("Abstract") == "abstract"
+        assert classify_section_type("ABSTRACT") == "abstract"
+
+    def test_introduction(self):
+        assert classify_section_type("1 Introduction") == "introduction"
+        assert classify_section_type("Introduction") == "introduction"
+
+    def test_methods(self):
+        assert classify_section_type("3 Model Architecture") == "methods"
+        assert classify_section_type("Methodology") == "methods"
+        assert classify_section_type("Proposed Approach") == "methods"
+        assert classify_section_type("3.1 Model Design") == "methods"
+
+    def test_methods_subsection_via_heading_chain(self):
+        """Subsections without keywords are resolved via the parent heading chain."""
+        assert classify_section_from_headings("3 Model Architecture > 3.1 Encoder and Decoder Stacks") == "methods"
+
+    def test_results(self):
+        assert classify_section_type("6 Results") == "results"
+        assert classify_section_type("Experiments") == "results"
+
+    def test_discussion(self):
+        assert classify_section_type("7 Conclusion") == "discussion"
+        assert classify_section_type("Discussion") == "discussion"
+        assert classify_section_type("Future Work") == "discussion"
+
+    def test_references(self):
+        assert classify_section_type("References") == "references"
+        assert classify_section_type("Bibliography") == "references"
+
+    def test_appendix(self):
+        assert classify_section_type("Appendix A") == "appendix"
+        assert classify_section_type("Supplementary Material") == "appendix"
+
+    def test_training(self):
+        assert classify_section_type("5 Training") == "training"
+        assert classify_section_type("Training Details") == "training"
+
+    def test_unknown_defaults_to_body(self):
+        assert classify_section_type("Some Random Heading") == "body"
+        assert classify_section_type("") == "body"
+        assert classify_section_type(None) == "body"
+
+    def test_heading_chain(self):
+        assert classify_section_from_headings("3 Model Architecture > 3.1 Attention") == "methods"
+        assert classify_section_from_headings("References") == "references"
+        assert classify_section_from_headings(None) == "body"
+        assert classify_section_from_headings("") == "body"
+
+
+# ── Task 9: Section metadata enrichment ──────────────────────────────────
+
+
+class TestSectionMetadata:
+    def test_text_chunk_gets_section(self):
+        chunks = [
+            Document(page_content="We propose a model...", metadata={"headings": "3 Model Architecture", "chunk_type": "text", "page": 3}),
+            Document(page_content="Results show...", metadata={"headings": "6 Results > 6.1 Translation", "chunk_type": "text", "page": 7}),
+            Document(page_content="[1] Author et al.", metadata={"headings": "References", "chunk_type": "text", "page": 12}),
+        ]
+        enrich_section_metadata(chunks)
+        assert chunks[0].metadata["section_type"] == "methods"
+        assert chunks[1].metadata["section_type"] == "results"
+        assert chunks[2].metadata["section_type"] == "references"
+
+    def test_text_chunk_no_headings_gets_body(self):
+        """A chunk with no headings and no nearby classified chunks gets 'body'."""
+        chunks = [
+            Document(page_content="Some content", metadata={"chunk_type": "text"}),
+        ]
+        enrich_section_metadata(chunks)
+        assert chunks[0].metadata["section_type"] == "body"
+
+    def test_table_inherits_nearest_section(self):
+        chunks = [
+            Document(page_content="Training details...", metadata={"headings": "5 Training", "chunk_type": "text", "page": 6}),
+            Document(page_content="|Model|BLEU|", metadata={"chunk_type": "table", "page": 7}),
+            Document(page_content="Results...", metadata={"headings": "6 Results", "chunk_type": "text", "page": 7}),
+        ]
+        enrich_section_metadata(chunks)
+        assert chunks[0].metadata["section_type"] == "training"
+        assert chunks[1].metadata["section_type"] in ("training", "results")
+        assert chunks[2].metadata["section_type"] == "results"
+
+    def test_empty_chunks(self):
+        enrich_section_metadata([])  # should not crash
+
+    def test_reference_section_tag_inherited(self):
+        chunks = [
+            Document(page_content="[1] Author et al.", metadata={"section": "references", "chunk_type": "text"}),
+        ]
+        enrich_section_metadata(chunks)
+        assert chunks[0].metadata["section_type"] == "references"
+
+    def test_image_inherits_from_nearest_page(self):
+        chunks = [
+            Document(page_content="Introduction text", metadata={"headings": "1 Introduction", "chunk_type": "text", "page": 1}),
+            Document(page_content="Figure 1", metadata={"chunk_type": "image", "page": 2}),
+        ]
+        enrich_section_metadata(chunks)
+        assert chunks[1].metadata["section_type"] == "introduction"

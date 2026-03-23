@@ -123,9 +123,10 @@ class DocumentProcessor:
         logger.info(f"Split into {len(chunks)} chunk(s)")
 
         # Apply chunk quality filters
-        from app.services.chunk_utils import deduplicate_chunks, tag_reference_chunks
+        from app.services.chunk_utils import deduplicate_chunks, tag_reference_chunks, enrich_section_metadata
         chunks = deduplicate_chunks(chunks)
         tag_reference_chunks(chunks)
+        enrich_section_metadata(chunks)
 
         for i, chunk in enumerate(chunks):
             chunk.metadata["source_file"] = self._clean_name
@@ -537,9 +538,10 @@ class DocumentProcessor:
                 logger.warning(f"Poppler figure extraction failed: {e}")
 
         # Apply chunk quality filters
-        from app.services.chunk_utils import deduplicate_chunks, tag_reference_chunks
+        from app.services.chunk_utils import deduplicate_chunks, tag_reference_chunks, enrich_section_metadata
         all_chunks = deduplicate_chunks(all_chunks)
         tag_reference_chunks(all_chunks)
+        enrich_section_metadata(all_chunks)
 
         for i, chunk in enumerate(all_chunks):
             chunk.metadata["source_file"] = self._clean_name
