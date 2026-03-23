@@ -279,3 +279,44 @@ class TestSectionMetadata:
         ]
         enrich_section_metadata(chunks)
         assert chunks[1].metadata["section_type"] == "introduction"
+
+
+# ── Task 10: Section-based score weighting ────────────────────────────────
+
+
+class TestSectionScoreWeighting:
+    def test_acknowledgment_penalized(self):
+        from app.routers.query import _apply_section_weights
+        results = [
+            (Document(page_content="Thanks to...", metadata={"section_type": "acknowledgment"}), 0.5),
+        ]
+        weighted = _apply_section_weights(results)
+        assert weighted[0][1] == pytest.approx(0.5 * 0.4)
+
+    def test_appendix_penalized(self):
+        from app.routers.query import _apply_section_weights
+        results = [
+            (Document(page_content="Appendix content", metadata={"section_type": "appendix"}), 0.5),
+        ]
+        weighted = _apply_section_weights(results)
+        assert weighted[0][1] == pytest.approx(0.5 * 0.7)
+
+    def test_body_sections_unchanged(self):
+        from app.routers.query import _apply_section_weights
+        results = [
+            (Document(page_content="Methods", metadata={"section_type": "methods"}), 0.7),
+            (Document(page_content="Results", metadata={"section_type": "results"}), 0.6),
+            (Document(page_content="Intro", metadata={"section_type": "introduction"}), 0.5),
+        ]
+        weighted = _apply_section_weights(results)
+        assert weighted[0][1] == 0.7
+        assert weighted[1][1] == 0.6
+        assert weighted[2][1] == 0.5
+
+    def test_references_not_double_penalized(self):
+        from app.routers.query import _apply_section_weights
+        results = [
+            (Document(page_content="[1] Author", metadata={"section_type": "references", "section": "references"}), 0.15),
+        ]
+        weighted = _apply_section_weights(results)
+        assert weighted[0][1] == 0.15  # unchanged — handled by reference penalty

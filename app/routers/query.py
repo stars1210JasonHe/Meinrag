@@ -89,6 +89,38 @@ def _apply_reference_penalty(results: list[tuple]) -> list[tuple]:
     ]
 
 
+_SECTION_WEIGHTS = {
+    "abstract": 1.0,
+    "introduction": 1.0,
+    "related_work": 0.9,
+    "methods": 1.0,
+    "training": 1.0,
+    "results": 1.0,
+    "discussion": 1.0,
+    "references": 1.0,      # handled separately by _apply_reference_penalty
+    "appendix": 0.7,
+    "acknowledgment": 0.4,
+    "body": 1.0,
+}
+
+
+def _apply_section_weights(results: list[tuple]) -> list[tuple]:
+    """Apply section-based score weights.
+
+    Penalizes low-value sections (acknowledgments, appendix).
+    References NOT penalized here — they have their own penalty.
+    """
+    weighted = []
+    for doc, score in results:
+        section = doc.metadata.get("section_type", "body")
+        if section == "references":
+            weighted.append((doc, score))
+            continue
+        weight = _SECTION_WEIGHTS.get(section, 1.0)
+        weighted.append((doc, score * weight))
+    return weighted
+
+
 def _smart_truncate(text: str, max_len: int = 500) -> str:
     """Truncate text at a sentence or word boundary instead of mid-word."""
     if len(text) <= max_len:
@@ -469,6 +501,7 @@ async def query_documents(
         # Demote reference-list entries so real content fills top_k
         retrieved = _demote_reference_results(retrieved, request.top_k)
         retrieved = _apply_reference_penalty(retrieved)
+        retrieved = _apply_section_weights(retrieved)
 
         # Web search fallback if needed
         if _should_web_search(request, settings, user_scoped, retrieved):
@@ -643,6 +676,7 @@ async def query_documents_stream(
 
         retrieved = _demote_reference_results(retrieved, request.top_k)
         retrieved = _apply_reference_penalty(retrieved)
+        retrieved = _apply_section_weights(retrieved)
         needs_web_search = _should_web_search(request, settings, user_scoped, retrieved)
         if not needs_web_search:
             retrieved = _supplement_visual_chunks(
