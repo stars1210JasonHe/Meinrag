@@ -515,6 +515,9 @@ async def query_documents(
             question=request.question, embeddings=embeddings,
         )
 
+        # Sort by score descending so highest-relevance sources appear first
+        retrieved.sort(key=lambda x: x[1], reverse=True)
+
         answer = await _invoke_with_retry(chain, request.question)
 
         # Store exchange in session memory
@@ -683,6 +686,8 @@ async def query_documents_stream(
                 retrieved, vector_store, doc_ids,
                 question=request.question, embeddings=embeddings,
             )
+            # Sort by score descending
+            retrieved.sort(key=lambda x: x[1], reverse=True)
 
     # Pre-compute web search context if needed
     web_context = ""
