@@ -320,3 +320,44 @@ class TestSectionScoreWeighting:
         ]
         weighted = _apply_section_weights(results)
         assert weighted[0][1] == 0.15  # unchanged — handled by reference penalty
+
+
+# ── Task 1 (bbox plan): Bbox merging ──────────────────────────────────────
+
+
+class TestBboxMerging:
+    def test_single_element_bbox(self):
+        from app.services.docling_processor import _merge_element_bboxes
+        elements = [{"page": 1, "bbox": [100, 200, 400, 250]}]
+        result = _merge_element_bboxes(elements, target_page=1)
+        assert result == [100, 200, 400, 250]
+
+    def test_multiple_elements_merged(self):
+        from app.services.docling_processor import _merge_element_bboxes
+        elements = [
+            {"page": 1, "bbox": [100, 200, 400, 250]},
+            {"page": 1, "bbox": [100, 260, 400, 310]},
+            {"page": 1, "bbox": [80, 320, 420, 370]},
+        ]
+        result = _merge_element_bboxes(elements, target_page=1)
+        assert result == [80, 200, 420, 370]
+
+    def test_multi_page_uses_target_page(self):
+        from app.services.docling_processor import _merge_element_bboxes
+        elements = [
+            {"page": 2, "bbox": [100, 500, 400, 600]},
+            {"page": 2, "bbox": [100, 610, 400, 700]},
+            {"page": 3, "bbox": [100, 50, 400, 100]},
+        ]
+        result = _merge_element_bboxes(elements, target_page=2)
+        assert result == [100, 500, 400, 700]
+
+    def test_no_elements_on_target_page(self):
+        from app.services.docling_processor import _merge_element_bboxes
+        elements = [{"page": 3, "bbox": [100, 200, 400, 250]}]
+        result = _merge_element_bboxes(elements, target_page=1)
+        assert result is None
+
+    def test_empty_elements(self):
+        from app.services.docling_processor import _merge_element_bboxes
+        assert _merge_element_bboxes([], target_page=1) is None

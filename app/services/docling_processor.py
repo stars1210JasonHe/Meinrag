@@ -23,6 +23,30 @@ from app.services.chunk_utils import (
 )
 
 
+def _merge_element_bboxes(
+    elements: list[dict], target_page: int
+) -> list[float] | None:
+    """Merge element bboxes on a specific page into one enclosing bbox.
+
+    Args:
+        elements: List of {"page": int, "bbox": [x0, y0, x1, y1]} dicts
+                  (already in top-left origin coordinates).
+        target_page: Only include elements on this page.
+
+    Returns:
+        [x0, y0, x1, y1] merged bbox, or None if no elements on target_page.
+    """
+    page_bboxes = [e["bbox"] for e in elements if e["page"] == target_page]
+    if not page_bboxes:
+        return None
+
+    x0 = min(b[0] for b in page_bboxes)
+    y0 = min(b[1] for b in page_bboxes)
+    x1 = max(b[2] for b in page_bboxes)
+    y1 = max(b[3] for b in page_bboxes)
+    return [x0, y0, x1, y1]
+
+
 def has_docling() -> bool:
     """Return True if docling is installed."""
     try:
@@ -223,7 +247,7 @@ def _get_element_bbox(element, page_height: float) -> list[float] | None:
 _MIN_CHUNK_LENGTH = 50  # Skip junk chunks (code fences, bare headings, etc.)
 
 
-def _chunk_text_elements(doc, settings: Settings, source_name: str) -> list[Document]:
+def _chunk_text_elements(doc, settings: Settings, source_name: str, page_heights: dict | None = None) -> list[Document]:
     """Use HybridChunker on the full document, extract only text chunks."""
     try:
         from docling.chunking import HybridChunker
@@ -262,6 +286,22 @@ def _chunk_text_elements(doc, settings: Settings, source_name: str) -> list[Docu
             # Add heading context if available (store as string for FAISS compatibility)
             if chunk.meta and chunk.meta.headings:
                 text_chunk.metadata["headings"] = " > ".join(chunk.meta.headings)
+
+            # Compute merged bbox from doc_items
+            if chunk.meta and chunk.meta.doc_items and page_heights:
+                elem_bboxes = []
+                for item in chunk.meta.doc_items:
+                    if item.prov and len(item.prov) > 0:
+                        prov = item.prov[0]
+                        item_page = prov.page_no - 1  # 0-indexed
+                        bbox = prov.bbox
+                        page_h = page_heights.get(prov.page_no, 792.0)
+                        converted = _convert_bbox(bbox.l, bbox.t, bbox.r, bbox.b, page_h)
+                        elem_bboxes.append({"page": item_page, "bbox": converted})
+
+                merged = _merge_element_bboxes(elem_bboxes, target_page=page)
+                if merged:
+                    text_chunk.metadata["bbox"] = json.dumps(merged)
 
             chunks.append(text_chunk)
     except Exception as e:
@@ -377,7 +417,7 @@ def process(
             all_chunks.append(chunk)
 
     # Chunk text elements with HybridChunker
-    text_chunks = _chunk_text_elements(doc, settings, source_name)
+    text_chunks = _chunk_text_elements(doc, settings, source_name, page_heights)
     all_chunks.extend(text_chunks)
 
     # Post-processing: deduplicate and tag reference chunks
