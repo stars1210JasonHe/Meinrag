@@ -1,0 +1,705 @@
+{
+  "aggregate": {
+    "avg_precision": 0.4,
+    "avg_scored_sources": 11.9,
+    "avg_zero_score": 0.0,
+    "total_garbage": 0,
+    "total_references_in_non_ref_queries": 0,
+    "total_duplicates": 0,
+    "total_contaminated": 3,
+    "avg_top1_score": 0.59,
+    "top1_relevant_rate": 0.875
+  },
+  "queries": [
+    {
+      "question": "What is the Transformer architecture?",
+      "total_sources": 12,
+      "scored_sources": 12,
+      "zero_score_sources": 0,
+      "garbage_chunks": 0,
+      "reference_chunks": 0,
+      "duplicate_chunks": 0,
+      "precision_at_k": 0.667,
+      "contaminated": 1,
+      "top1_score": 0.8464000225067139,
+      "top1_relevant": true,
+      "sources": [
+        {
+          "score": 0.8464000225067139,
+          "page": 2,
+          "chunk_type": "image",
+          "content_preview": "Figure 1: The Transformer - model architecture."
+        },
+        {
+          "score": 0.5616999864578247,
+          "page": 4,
+          "chunk_type": "text",
+          "content_preview": "The Transformer uses multi-head attention in three different ways:\n- In \"encoder-decoder attention\" "
+        },
+        {
+          "score": 0.5575000047683716,
+          "page": 1,
+          "chunk_type": "text",
+          "content_preview": "Most competitive neural sequence transduction models have an encoder-decoder structure [5, 2, 35]. H"
+        },
+        {
+          "score": 0.5084999799728394,
+          "page": 1,
+          "chunk_type": "text",
+          "content_preview": "Attention mechanisms have become an integral part of compelling sequence modeling and transduction m"
+        },
+        {
+          "score": 0.149,
+          "page": 3,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 4"
+        },
+        {
+          "score": 0.1442,
+          "page": 4,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 5"
+        },
+        {
+          "score": 0.1843,
+          "page": 5,
+          "chunk_type": "table",
+          "content_preview": "Table 1: Maximum path lengths, per-layer complexity and minimum number of sequential operations for "
+        },
+        {
+          "score": 0.128,
+          "page": 5,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 6"
+        },
+        {
+          "score": 0.14,
+          "page": 6,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 7"
+        },
+        {
+          "score": 0.3944,
+          "page": 7,
+          "chunk_type": "table",
+          "content_preview": "Table 2: The Transformer achieves better BLEU scores than previous state-of-the-art models on the En"
+        },
+        {
+          "score": 0.3295,
+          "page": 8,
+          "chunk_type": "table",
+          "content_preview": "Table 3: Variations on the Transformer architecture. Unlisted values are identical to those of the b"
+        },
+        {
+          "score": 0.4224,
+          "page": 9,
+          "chunk_type": "table",
+          "content_preview": "Table 4: The Transformer generalizes well to English constituency parsing (Results are on Section 23"
+        }
+      ]
+    },
+    {
+      "question": "How does multi-head attention work?",
+      "total_sources": 12,
+      "scored_sources": 12,
+      "zero_score_sources": 0,
+      "garbage_chunks": 0,
+      "reference_chunks": 0,
+      "duplicate_chunks": 0,
+      "precision_at_k": 0.5,
+      "contaminated": 1,
+      "top1_score": 0.7506999969482422,
+      "top1_relevant": true,
+      "sources": [
+        {
+          "score": 0.7506999969482422,
+          "page": 3,
+          "chunk_type": "image",
+          "content_preview": "Figure 2: (left) Scaled Dot-Product Attention. (right) Multi-Head Attention consists of several atte"
+        },
+        {
+          "score": 0.7010999917984009,
+          "page": 3,
+          "chunk_type": "text",
+          "content_preview": "Figure 2: (left) Scaled Dot-Product Attention. (right) Multi-Head Attention consists of several atte"
+        },
+        {
+          "score": 0.640500009059906,
+          "page": 3,
+          "chunk_type": "text",
+          "content_preview": "Instead of performing a single attention function with d model-dimensional keys, values and queries,"
+        },
+        {
+          "score": 0.6067000031471252,
+          "page": 4,
+          "chunk_type": "text",
+          "content_preview": "The Transformer uses multi-head attention in three different ways:\n- In \"encoder-decoder attention\" "
+        },
+        {
+          "score": 0.0723,
+          "page": 3,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 4"
+        },
+        {
+          "score": 0.0575,
+          "page": 4,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 5"
+        },
+        {
+          "score": 0.2459,
+          "page": 5,
+          "chunk_type": "table",
+          "content_preview": "Table 1: Maximum path lengths, per-layer complexity and minimum number of sequential operations for "
+        },
+        {
+          "score": 0.0684,
+          "page": 5,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 6"
+        },
+        {
+          "score": 0.079,
+          "page": 6,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 7"
+        },
+        {
+          "score": 0.2652,
+          "page": 7,
+          "chunk_type": "table",
+          "content_preview": "Table 2: The Transformer achieves better BLEU scores than previous state-of-the-art models on the En"
+        },
+        {
+          "score": 0.2174,
+          "page": 8,
+          "chunk_type": "table",
+          "content_preview": "Table 3: Variations on the Transformer architecture. Unlisted values are identical to those of the b"
+        },
+        {
+          "score": 0.3182,
+          "page": 9,
+          "chunk_type": "table",
+          "content_preview": "Table 4: The Transformer generalizes well to English constituency parsing (Results are on Section 23"
+        }
+      ]
+    },
+    {
+      "question": "What are the training details?",
+      "total_sources": 12,
+      "scored_sources": 12,
+      "zero_score_sources": 0,
+      "garbage_chunks": 0,
+      "reference_chunks": 0,
+      "duplicate_chunks": 0,
+      "precision_at_k": 0.417,
+      "contaminated": 0,
+      "top1_score": 0.5292999744415283,
+      "top1_relevant": true,
+      "sources": [
+        {
+          "score": 0.5292999744415283,
+          "page": 6,
+          "chunk_type": "text",
+          "content_preview": "This section describes the training regime for our models."
+        },
+        {
+          "score": 0.33629998564720154,
+          "page": 6,
+          "chunk_type": "text",
+          "content_preview": "We trained our models on one machine with 8 NVIDIA P100 GPUs. For our base models using the hyperpar"
+        },
+        {
+          "score": 0.3124000132083893,
+          "page": 6,
+          "chunk_type": "text",
+          "content_preview": "We employ three types of regularization during training:\n"
+        },
+        {
+          "score": 0.2745000123977661,
+          "page": 7,
+          "chunk_type": "text",
+          "content_preview": "For the base models, we used a single model obtained by averaging the last 5 checkpoints, which were"
+        },
+        {
+          "score": 0.0998,
+          "page": 3,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 4"
+        },
+        {
+          "score": 0.0927,
+          "page": 4,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 5"
+        },
+        {
+          "score": 0.1627,
+          "page": 5,
+          "chunk_type": "table",
+          "content_preview": "Table 1: Maximum path lengths, per-layer complexity and minimum number of sequential operations for "
+        },
+        {
+          "score": 0.0922,
+          "page": 5,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 6"
+        },
+        {
+          "score": 0.1088,
+          "page": 6,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 7"
+        },
+        {
+          "score": 0.248,
+          "page": 7,
+          "chunk_type": "table",
+          "content_preview": "Table 2: The Transformer achieves better BLEU scores than previous state-of-the-art models on the En"
+        },
+        {
+          "score": 0.2596,
+          "page": 8,
+          "chunk_type": "table",
+          "content_preview": "Table 3: Variations on the Transformer architecture. Unlisted values are identical to those of the b"
+        },
+        {
+          "score": 0.2331,
+          "page": 9,
+          "chunk_type": "table",
+          "content_preview": "Table 4: The Transformer generalizes well to English constituency parsing (Results are on Section 23"
+        }
+      ]
+    },
+    {
+      "question": "What BLEU scores did the model achieve?",
+      "total_sources": 11,
+      "scored_sources": 11,
+      "zero_score_sources": 0,
+      "garbage_chunks": 0,
+      "reference_chunks": 0,
+      "duplicate_chunks": 0,
+      "precision_at_k": 0.364,
+      "contaminated": 0,
+      "top1_score": 0.5699999928474426,
+      "top1_relevant": true,
+      "sources": [
+        {
+          "score": 0.5699999928474426,
+          "page": 7,
+          "chunk_type": "text",
+          "content_preview": "On the WMT 2014 English-to-German translation task, the big transformer model (Transformer (big) in "
+        },
+        {
+          "score": 0.5537999868392944,
+          "page": 7,
+          "chunk_type": "table",
+          "content_preview": "Table 2: The Transformer achieves better BLEU scores than previous state-of-the-art models on the En"
+        },
+        {
+          "score": 0.4927000105381012,
+          "page": 7,
+          "chunk_type": "text",
+          "content_preview": "For the base models, we used a single model obtained by averaging the last 5 checkpoints, which were"
+        },
+        {
+          "score": 0.47530001401901245,
+          "page": 8,
+          "chunk_type": "text",
+          "content_preview": "In Table 3 rows (A), we vary the number of attention heads and the attention key and value dimension"
+        },
+        {
+          "score": 0.1787,
+          "page": 3,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 4"
+        },
+        {
+          "score": 0.1721,
+          "page": 4,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 5"
+        },
+        {
+          "score": 0.1337,
+          "page": 5,
+          "chunk_type": "table",
+          "content_preview": "Table 1: Maximum path lengths, per-layer complexity and minimum number of sequential operations for "
+        },
+        {
+          "score": 0.1804,
+          "page": 5,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 6"
+        },
+        {
+          "score": 0.1712,
+          "page": 6,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 7"
+        },
+        {
+          "score": 0.4398,
+          "page": 8,
+          "chunk_type": "table",
+          "content_preview": "Table 3: Variations on the Transformer architecture. Unlisted values are identical to those of the b"
+        },
+        {
+          "score": 0.3839,
+          "page": 9,
+          "chunk_type": "table",
+          "content_preview": "Table 4: The Transformer generalizes well to English constituency parsing (Results are on Section 23"
+        }
+      ]
+    },
+    {
+      "question": "What are the references of this paper?",
+      "total_sources": 12,
+      "scored_sources": 12,
+      "zero_score_sources": 0,
+      "garbage_chunks": 0,
+      "reference_chunks": 2,
+      "duplicate_chunks": 0,
+      "precision_at_k": 0.167,
+      "contaminated": 0,
+      "top1_score": 0.3361999988555908,
+      "top1_relevant": false,
+      "sources": [
+        {
+          "score": 0.3361999988555908,
+          "page": 9,
+          "chunk_type": "text",
+          "content_preview": "Acknowledgements We are grateful to Nal Kalchbrenner and Stephan Gouws for their fruitful comments, "
+        },
+        {
+          "score": 0.1046999990940094,
+          "page": 11,
+          "chunk_type": "text",
+          "content_preview": "- [36] Christian Szegedy, Vincent Vanhoucke, Sergey Ioffe, Jonathon Shlens, and Zbigniew Wojna. Reth"
+        },
+        {
+          "score": 0.10379999876022339,
+          "page": 11,
+          "chunk_type": "text",
+          "content_preview": "- [29] Slav Petrov, Leon Barrett, Romain Thibaux, and Dan Klein. Learning accurate, compact, and int"
+        },
+        {
+          "score": 0.10279999673366547,
+          "page": 11,
+          "chunk_type": "text",
+          "content_preview": "- [25] Mitchell P Marcus, Mary Ann Marcinkiewicz, and Beatrice Santorini. Building a large annotated"
+        },
+        {
+          "score": 0.253,
+          "page": 3,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 4"
+        },
+        {
+          "score": 0.2436,
+          "page": 4,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 5"
+        },
+        {
+          "score": 0.164,
+          "page": 5,
+          "chunk_type": "table",
+          "content_preview": "Table 1: Maximum path lengths, per-layer complexity and minimum number of sequential operations for "
+        },
+        {
+          "score": 0.2522,
+          "page": 5,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 6"
+        },
+        {
+          "score": 0.2653,
+          "page": 6,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 7"
+        },
+        {
+          "score": 0.199,
+          "page": 7,
+          "chunk_type": "table",
+          "content_preview": "Table 2: The Transformer achieves better BLEU scores than previous state-of-the-art models on the En"
+        },
+        {
+          "score": 0.2779,
+          "page": 8,
+          "chunk_type": "table",
+          "content_preview": "Table 3: Variations on the Transformer architecture. Unlisted values are identical to those of the b"
+        },
+        {
+          "score": 0.2533,
+          "page": 9,
+          "chunk_type": "table",
+          "content_preview": "Table 4: The Transformer generalizes well to English constituency parsing (Results are on Section 23"
+        }
+      ]
+    },
+    {
+      "question": "What is positional encoding?",
+      "total_sources": 12,
+      "scored_sources": 12,
+      "zero_score_sources": 0,
+      "garbage_chunks": 0,
+      "reference_chunks": 0,
+      "duplicate_chunks": 0,
+      "precision_at_k": 0.417,
+      "contaminated": 1,
+      "top1_score": 0.5511000156402588,
+      "top1_relevant": true,
+      "sources": [
+        {
+          "score": 0.5511000156402588,
+          "page": 5,
+          "chunk_type": "text",
+          "content_preview": "Since our model contains no recurrence and no convolution, in order for the model to make use of the"
+        },
+        {
+          "score": 0.5307999849319458,
+          "page": 5,
+          "chunk_type": "text",
+          "content_preview": "where pos is the position and i is the dimension. That is, each dimension of the positional encoding"
+        },
+        {
+          "score": 0.4050000011920929,
+          "page": 2,
+          "chunk_type": "text",
+          "content_preview": "Decoder: The decoder is also composed of a stack of N = 6 identical layers. In addition to the two s"
+        },
+        {
+          "score": 0.3889999985694885,
+          "page": 4,
+          "chunk_type": "text",
+          "content_preview": "In addition to attention sub-layers, each of the layers in our encoder and decoder contains a fully "
+        },
+        {
+          "score": 0.1789,
+          "page": 3,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 4"
+        },
+        {
+          "score": 0.1681,
+          "page": 4,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 5"
+        },
+        {
+          "score": 0.1518,
+          "page": 5,
+          "chunk_type": "table",
+          "content_preview": "Table 1: Maximum path lengths, per-layer complexity and minimum number of sequential operations for "
+        },
+        {
+          "score": 0.1647,
+          "page": 5,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 6"
+        },
+        {
+          "score": 0.1657,
+          "page": 6,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 7"
+        },
+        {
+          "score": 0.1716,
+          "page": 7,
+          "chunk_type": "table",
+          "content_preview": "Table 2: The Transformer achieves better BLEU scores than previous state-of-the-art models on the En"
+        },
+        {
+          "score": 0.3416,
+          "page": 8,
+          "chunk_type": "table",
+          "content_preview": "Table 3: Variations on the Transformer architecture. Unlisted values are identical to those of the b"
+        },
+        {
+          "score": 0.2242,
+          "page": 9,
+          "chunk_type": "table",
+          "content_preview": "Table 4: The Transformer generalizes well to English constituency parsing (Results are on Section 23"
+        }
+      ]
+    },
+    {
+      "question": "How does the model compare to RNNs?",
+      "total_sources": 12,
+      "scored_sources": 12,
+      "zero_score_sources": 0,
+      "garbage_chunks": 0,
+      "reference_chunks": 0,
+      "duplicate_chunks": 0,
+      "precision_at_k": 0.333,
+      "contaminated": 0,
+      "top1_score": 0.5444999933242798,
+      "top1_relevant": true,
+      "sources": [
+        {
+          "score": 0.5444999933242798,
+          "page": 1,
+          "chunk_type": "text",
+          "content_preview": "Recurrent neural networks, long short-term memory [13] and gated recurrent [7] neural networks in pa"
+        },
+        {
+          "score": 0.45399999618530273,
+          "page": 1,
+          "chunk_type": "text",
+          "content_preview": "End-to-end memory networks are based on a recurrent attention mechanism instead of sequencealigned r"
+        },
+        {
+          "score": 0.49300000071525574,
+          "page": 0,
+          "chunk_type": "text",
+          "content_preview": "The dominant sequence transduction models are based on complex recurrent or convolutional neural net"
+        },
+        {
+          "score": 0.4643999934196472,
+          "page": 1,
+          "chunk_type": "text",
+          "content_preview": "Most competitive neural sequence transduction models have an encoder-decoder structure [5, 2, 35]. H"
+        },
+        {
+          "score": 0.1143,
+          "page": 3,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 4"
+        },
+        {
+          "score": 0.127,
+          "page": 4,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 5"
+        },
+        {
+          "score": 0.2995,
+          "page": 5,
+          "chunk_type": "table",
+          "content_preview": "Table 1: Maximum path lengths, per-layer complexity and minimum number of sequential operations for "
+        },
+        {
+          "score": 0.1225,
+          "page": 5,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 6"
+        },
+        {
+          "score": 0.1211,
+          "page": 6,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 7"
+        },
+        {
+          "score": 0.4006,
+          "page": 7,
+          "chunk_type": "table",
+          "content_preview": "Table 2: The Transformer achieves better BLEU scores than previous state-of-the-art models on the En"
+        },
+        {
+          "score": 0.3517,
+          "page": 8,
+          "chunk_type": "table",
+          "content_preview": "Table 3: Variations on the Transformer architecture. Unlisted values are identical to those of the b"
+        },
+        {
+          "score": 0.3787,
+          "page": 9,
+          "chunk_type": "table",
+          "content_preview": "Table 4: The Transformer generalizes well to English constituency parsing (Results are on Section 23"
+        }
+      ]
+    },
+    {
+      "question": "What is the complexity of self-attention?",
+      "total_sources": 12,
+      "scored_sources": 12,
+      "zero_score_sources": 0,
+      "garbage_chunks": 0,
+      "reference_chunks": 0,
+      "duplicate_chunks": 0,
+      "precision_at_k": 0.333,
+      "contaminated": 0,
+      "top1_score": 0.5893999934196472,
+      "top1_relevant": true,
+      "sources": [
+        {
+          "score": 0.5893999934196472,
+          "page": 5,
+          "chunk_type": "text",
+          "content_preview": "In this section we compare various aspects of self-attention layers to the recurrent and convolution"
+        },
+        {
+          "score": 0.5796999931335449,
+          "page": 6,
+          "chunk_type": "text",
+          "content_preview": "As side benefit, self-attention could yield more interpretable models. We inspect attention distribu"
+        },
+        {
+          "score": 0.5073999762535095,
+          "page": 1,
+          "chunk_type": "text",
+          "content_preview": "The goal of reducing sequential computation also forms the foundation of the Extended Neural GPU [16"
+        },
+        {
+          "score": 0.5192999839782715,
+          "page": 12,
+          "chunk_type": "image",
+          "content_preview": "Figure 3: An example of the attention mechanism following long-distance dependencies in the encoder "
+        },
+        {
+          "score": 0.1371,
+          "page": 3,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 4"
+        },
+        {
+          "score": 0.1198,
+          "page": 4,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 5"
+        },
+        {
+          "score": 0.436,
+          "page": 5,
+          "chunk_type": "table",
+          "content_preview": "Table 1: Maximum path lengths, per-layer complexity and minimum number of sequential operations for "
+        },
+        {
+          "score": 0.1104,
+          "page": 5,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 6"
+        },
+        {
+          "score": 0.1266,
+          "page": 6,
+          "chunk_type": "formula",
+          "content_preview": "Equation on page 7"
+        },
+        {
+          "score": 0.2888,
+          "page": 7,
+          "chunk_type": "table",
+          "content_preview": "Table 2: The Transformer achieves better BLEU scores than previous state-of-the-art models on the En"
+        },
+        {
+          "score": 0.298,
+          "page": 8,
+          "chunk_type": "table",
+          "content_preview": "Table 3: Variations on the Transformer architecture. Unlisted values are identical to those of the b"
+        },
+        {
+          "score": 0.31,
+          "page": 9,
+          "chunk_type": "table",
+          "content_preview": "Table 4: The Transformer generalizes well to English constituency parsing (Results are on Section 23"
+        }
+      ]
+    }
+  ]
+}
