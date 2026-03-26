@@ -52,7 +52,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-docling = ["docling>=2.80.0"]
+docling = [
+    "docling>=2.80.0",
+    "torch>=2.6.0",
+    "torchvision>=0.21.0",
+]
 
 [dependency-groups]
 dev = [

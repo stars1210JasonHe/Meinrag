@@ -187,7 +187,7 @@ def _get_converter(settings: Settings):
     logger.info("Docling: initializing converter (first-time model download may take minutes)...")
 
     pipeline_options = PdfPipelineOptions()
-    pipeline_options.generate_picture_images = True
+    pipeline_options.generate_picture_images = False  # images handled by poppler; docling crashes on some PDFs
     pipeline_options.do_ocr = settings.docling_ocr
     pipeline_options.do_code_enrichment = False
     pipeline_options.table_structure_options = TableStructureOptions(mode="fast")

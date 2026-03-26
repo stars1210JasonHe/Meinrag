@@ -68,7 +68,7 @@ class SourceChunk(BaseModel):
     source_type: Literal["document", "web"] = "document"
     score: float | None = None
     url: str | None = None
-    chunk_type: Literal["text", "table", "image"] | None = None
+    chunk_type: Literal["text", "table", "image", "formula"] | None = None
     image_path: str | None = None
     bbox: list[float] | None = None
 
