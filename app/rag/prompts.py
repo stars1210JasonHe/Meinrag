@@ -106,3 +106,12 @@ LABEL_EXTRACT_PROMPT = ChatPromptTemplate.from_messages([
      "Answer with ONLY the label or 'none'."),
     ("human", "{content}"),
 ])
+
+QUERY_LABEL_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", "Does this question ask about a specific table, figure, or equation by number?\n"
+     "If yes, return ONLY the label normalized to English (e.g., 'Table 1', 'Figure 2', 'Equation 3').\n"
+     "Handle any language: '表1' → 'Table 1', '图2' → 'Figure 2', 'Tabelle 3' → 'Table 3'.\n"
+     "If no specific label is referenced, return 'none'.\n"
+     "Answer with ONLY the label or 'none'."),
+    ("human", "{question}"),
+])

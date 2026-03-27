@@ -687,3 +687,110 @@ class TestLLMLabelExtraction:
 
         result = await _extract_label_llm("ab", MockLLM())
         assert result is None
+
+
+# ── Query label detection ────────────────────────────────────────────────
+
+
+class TestQueryLabelDetection:
+    """Test _extract_query_label() detects label references in queries."""
+
+    @pytest.mark.asyncio
+    async def test_table_reference(self):
+        from app.routers.query import _extract_query_label
+
+        class MockLLM:
+            async def ainvoke(self, input):
+                class R:
+                    content = "Table 1"
+                return R()
+
+        result = await _extract_query_label("Show me table 1", MockLLM())
+        assert result == "Table 1"
+
+    @pytest.mark.asyncio
+    async def test_no_reference(self):
+        from app.routers.query import _extract_query_label
+
+        class MockLLM:
+            async def ainvoke(self, input):
+                class R:
+                    content = "none"
+                return R()
+
+        result = await _extract_query_label("What is attention?", MockLLM())
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_llm_failure(self):
+        from app.routers.query import _extract_query_label
+
+        class MockLLM:
+            async def ainvoke(self, input):
+                raise RuntimeError("fail")
+
+        result = await _extract_query_label("Table 1", MockLLM())
+        assert result is None
+
+
+# ── Label lookup ─────────────────────────────────────────────────────────
+
+
+class TestLabelLookup:
+    """Test _lookup_by_label() finds chunks by label metadata."""
+
+    def _make_store(self, chunks_by_doc):
+        class MockStore:
+            def __init__(self, data):
+                self._data = data
+            def get_chunks_by_doc(self, doc_id):
+                return self._data.get(doc_id, [])
+        return MockStore(chunks_by_doc)
+
+    def test_finds_table_by_label(self):
+        from app.routers.query import _lookup_by_label
+
+        table = Document(
+            page_content="Table 1: Max path lengths",
+            metadata={"doc_id": "doc1", "chunk_type": "table", "label": "Table 1", "page": 5},
+        )
+        other = Document(
+            page_content="Table 2: BLEU scores",
+            metadata={"doc_id": "doc1", "chunk_type": "table", "label": "Table 2", "page": 7},
+        )
+        store = self._make_store({"doc1": [table, other]})
+        result = _lookup_by_label("Table 1", store, ["doc1"])
+        assert len(result) == 1
+        assert result[0].page_content == "Table 1: Max path lengths"
+
+    def test_case_insensitive(self):
+        from app.routers.query import _lookup_by_label
+
+        table = Document(
+            page_content="Table 1: data",
+            metadata={"doc_id": "doc1", "label": "Table 1", "page": 5},
+        )
+        store = self._make_store({"doc1": [table]})
+        result = _lookup_by_label("table 1", store, ["doc1"])
+        assert len(result) == 1
+
+    def test_no_match(self):
+        from app.routers.query import _lookup_by_label
+
+        table = Document(
+            page_content="Table 2: data",
+            metadata={"doc_id": "doc1", "label": "Table 2", "page": 5},
+        )
+        store = self._make_store({"doc1": [table]})
+        result = _lookup_by_label("Table 99", store, ["doc1"])
+        assert len(result) == 0
+
+    def test_no_doc_ids(self):
+        from app.routers.query import _lookup_by_label
+
+        class MockStore:
+            def get_chunks_by_doc(self, doc_id):
+                return []
+
+        result = _lookup_by_label("Table 1", MockStore(), None)
+        assert len(result) == 0

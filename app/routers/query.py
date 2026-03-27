@@ -15,7 +15,7 @@ from app.models.schemas import QueryRequest, QueryResponse, SourceChunk, ChunkCo
 from langchain_core.output_parsers import StrOutputParser
 from app.rag.chain import build_rag_chain, is_reference_entry
 from app.services.chunk_utils import is_garbage_table
-from app.rag.prompts import WEB_SEARCH_PROMPT, CHUNK_CONTEXT_PROMPT, QUERY_REWRITE_PROMPT, QUERY_EXPANSION_PROMPT, ASK_AI_PROMPT, QUESTION_CLASSIFY_PROMPT
+from app.rag.prompts import WEB_SEARCH_PROMPT, CHUNK_CONTEXT_PROMPT, QUERY_REWRITE_PROMPT, QUERY_EXPANSION_PROMPT, ASK_AI_PROMPT, QUESTION_CLASSIFY_PROMPT, QUERY_LABEL_PROMPT
 from app.routers.stream_helpers import sse_event, stream_chain_response
 from app.vectorstore.base import VectorStoreManager
 from langchain_core.embeddings import Embeddings
@@ -169,6 +169,49 @@ def _section_aware_sample(
     sampled = list(best_per_section.values())
     sampled.sort(key=lambda x: x[1], reverse=True)
     return sampled
+
+
+async def _extract_query_label(
+    question: str, llm: BaseChatModel,
+) -> str | None:
+    """Extract a table/figure/equation label from the user's query using LLM.
+
+    Returns normalized label like 'Table 1', 'Figure 2', or None.
+    """
+    try:
+        messages = QUERY_LABEL_PROMPT.format_messages(question=question)
+        response = await llm.ainvoke(messages)
+        result = response.content if hasattr(response, "content") else str(response)
+        result = result.strip()
+        if result.lower() == "none" or len(result) > 30:
+            return None
+        return result
+    except Exception as e:
+        logger.warning("Query label extraction failed: %s", e)
+        return None
+
+
+def _lookup_by_label(
+    label: str,
+    vector_store: VectorStoreManager,
+    doc_ids: list[str] | None,
+) -> list:
+    """Find chunks with a matching label in metadata.
+
+    Returns list of Documents with matching label.
+    """
+    if not doc_ids or not label:
+        return []
+
+    label_lower = label.lower()
+    matches = []
+    for did in doc_ids:
+        chunks = vector_store.get_chunks_by_doc(did)
+        for chunk in chunks:
+            chunk_label = chunk.metadata.get("label", "")
+            if chunk_label and chunk_label.lower() == label_lower:
+                matches.append(chunk)
+    return matches
 
 
 def _link_nearby_visuals(
@@ -549,6 +592,15 @@ async def query_documents(
             question_type = await _classify_question(request.question, llm)
             is_open = question_type == "open"
 
+        # Check if query references a specific table/figure/equation
+        label_chunks = []
+        if doc_ids:
+            label = await _extract_query_label(request.question, llm)
+            if label:
+                label_chunks = _lookup_by_label(label, vector_store, doc_ids)
+                if label_chunks:
+                    logger.info("Label lookup: found %d chunks for %r", len(label_chunks), label)
+
         fetch_k = int(request.top_k * 25) if is_open else int(request.top_k * 1.5)
 
         # Get source docs with similarity scores
@@ -590,6 +642,19 @@ async def query_documents(
 
         # Sort by score descending so highest-relevance sources appear first
         retrieved.sort(key=lambda x: x[1], reverse=True)
+
+        # Prepend label-matched chunks at top of results
+        if label_chunks:
+            label_keys = set()
+            label_results = []
+            for chunk in label_chunks:
+                key = (chunk.metadata.get("doc_id"), chunk.metadata.get("chunk_index"))
+                label_keys.add(key)
+                label_results.append((chunk, 1.0))  # score 1.0 = exact match
+            # Remove duplicates from retrieved
+            retrieved = [(doc, score) for doc, score in retrieved
+                         if (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index")) not in label_keys]
+            retrieved = label_results + retrieved
 
         answer = await _invoke_with_retry(chain, request.question)
 
@@ -747,6 +812,15 @@ async def query_documents_stream(
             question_type = await _classify_question(request.question, llm)
             is_open = question_type == "open"
 
+        # Check if query references a specific table/figure/equation
+        label_chunks = []
+        if doc_ids:
+            label = await _extract_query_label(request.question, llm)
+            if label:
+                label_chunks = _lookup_by_label(label, vector_store, doc_ids)
+                if label_chunks:
+                    logger.info("Label lookup: found %d chunks for %r", len(label_chunks), label)
+
         fetch_k = int(request.top_k * 25) if is_open else int(request.top_k * 1.5)
 
         retrieved = vector_store.similarity_search_with_scores(
@@ -779,6 +853,19 @@ async def query_documents_stream(
                 )
             # Sort by score descending
             retrieved.sort(key=lambda x: x[1], reverse=True)
+
+            # Prepend label-matched chunks at top of results
+            if label_chunks:
+                label_keys = set()
+                label_results = []
+                for chunk in label_chunks:
+                    key = (chunk.metadata.get("doc_id"), chunk.metadata.get("chunk_index"))
+                    label_keys.add(key)
+                    label_results.append((chunk, 1.0))  # score 1.0 = exact match
+                # Remove duplicates from retrieved
+                retrieved = [(doc, score) for doc, score in retrieved
+                             if (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index")) not in label_keys]
+                retrieved = label_results + retrieved
 
     # Pre-compute web search context if needed
     web_context = ""
