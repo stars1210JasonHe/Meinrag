@@ -36,6 +36,7 @@ async def _maybe_expand_query(
     settings: Settings,
     doc_ids: list[str] | None,
     top_k: int,
+    fetch_k: int | None = None,
 ) -> tuple[str, list[tuple]]:
     """If all retrieval scores are below threshold, expand the query via LLM and re-query."""
     if not settings.query_expansion_enabled or not retrieved:
@@ -55,9 +56,10 @@ async def _maybe_expand_query(
 
         logger.info("Query expanded: %r → %r", question, expanded)
 
-        # Re-query with expanded query
+        # Re-query with expanded query (use caller's fetch_k if provided)
+        k = fetch_k if fetch_k is not None else int(top_k * 1.5)
         new_retrieved = vector_store.similarity_search_with_scores(
-            expanded, k=int(top_k * 1.5), doc_ids=doc_ids,
+            expanded, k=k, doc_ids=doc_ids,
         )
         new_max = max(score for _, score in new_retrieved) if new_retrieved else 0
 
@@ -557,6 +559,7 @@ async def query_documents(
         # Expand vague queries (low scores → LLM rewrites → re-query)
         search_query, retrieved = await _maybe_expand_query(
             request.question, retrieved, llm, vector_store, settings, doc_ids, request.top_k,
+            fetch_k=fetch_k,
         )
 
         # Apply section-aware sampling for open questions
@@ -751,6 +754,7 @@ async def query_documents_stream(
         # Expand vague queries
         _, retrieved = await _maybe_expand_query(
             request.question, retrieved, llm, vector_store, settings, doc_ids, request.top_k,
+            fetch_k=fetch_k,
         )
 
         if is_open:
