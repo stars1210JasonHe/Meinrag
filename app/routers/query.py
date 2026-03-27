@@ -549,7 +549,7 @@ async def query_documents(
             question_type = await _classify_question(request.question, llm)
             is_open = question_type == "open"
 
-        fetch_k = int(request.top_k * 3) if is_open else int(request.top_k * 1.5)
+        fetch_k = int(request.top_k * 25) if is_open else int(request.top_k * 1.5)
 
         # Get source docs with similarity scores
         retrieved = vector_store.similarity_search_with_scores(
@@ -569,8 +569,9 @@ async def query_documents(
             # Demote reference-list entries so real content fills top_k
             retrieved = _demote_reference_results(retrieved, request.top_k)
 
-        retrieved = _apply_reference_penalty(retrieved)
-        retrieved = _apply_section_weights(retrieved)
+        if not is_open:
+            retrieved = _apply_reference_penalty(retrieved)
+            retrieved = _apply_section_weights(retrieved)
 
         # Web search fallback if needed
         if _should_web_search(request, settings, user_scoped, retrieved):
@@ -578,16 +579,16 @@ async def query_documents(
                 request, llm, memory_manager, settings, current_user=current_user,
             )
 
-        # Link visual chunks from pages near retrieved text chunks
-        if settings.visual_proximity_enabled:
-            retrieved = _link_nearby_visuals(
-                retrieved, vector_store, doc_ids,
-                question=request.question, embeddings=embeddings,
-                proximity_pages=settings.visual_proximity_pages,
-            )
-
-        # Sort by score descending so highest-relevance sources appear first
-        retrieved.sort(key=lambda x: x[1], reverse=True)
+        if not is_open:
+            # Link visual chunks from pages near retrieved text chunks
+            if settings.visual_proximity_enabled:
+                retrieved = _link_nearby_visuals(
+                    retrieved, vector_store, doc_ids,
+                    question=request.question, embeddings=embeddings,
+                    proximity_pages=settings.visual_proximity_pages,
+                )
+            # Sort by score descending so highest-relevance sources appear first
+            retrieved.sort(key=lambda x: x[1], reverse=True)
 
         answer = await _invoke_with_retry(chain, request.question)
 
@@ -745,7 +746,7 @@ async def query_documents_stream(
             question_type = await _classify_question(request.question, llm)
             is_open = question_type == "open"
 
-        fetch_k = int(request.top_k * 3) if is_open else int(request.top_k * 1.5)
+        fetch_k = int(request.top_k * 25) if is_open else int(request.top_k * 1.5)
 
         retrieved = vector_store.similarity_search_with_scores(
             request.question, k=fetch_k, doc_ids=doc_ids,
@@ -762,10 +763,12 @@ async def query_documents_stream(
         else:
             retrieved = _demote_reference_results(retrieved, request.top_k)
 
-        retrieved = _apply_reference_penalty(retrieved)
-        retrieved = _apply_section_weights(retrieved)
+        if not is_open:
+            retrieved = _apply_reference_penalty(retrieved)
+            retrieved = _apply_section_weights(retrieved)
+
         needs_web_search = _should_web_search(request, settings, user_scoped, retrieved)
-        if not needs_web_search:
+        if not needs_web_search and not is_open:
             if settings.visual_proximity_enabled:
                 retrieved = _link_nearby_visuals(
                     retrieved, vector_store, doc_ids,
