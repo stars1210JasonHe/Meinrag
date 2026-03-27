@@ -418,3 +418,62 @@ class TestQuestionClassification:
 
         result = await _classify_question("Some question", MockLLM())
         assert result == "closed"
+
+
+# ── Section-aware sampling ───────────────────────────────────────────────
+
+
+class TestSectionAwareSampling:
+    """Test _section_aware_sample() picks best chunk per section."""
+
+    def test_one_per_section(self):
+        from app.routers.query import _section_aware_sample
+        results = [
+            (Document(page_content="Intro text 1", metadata={"section_type": "introduction"}), 0.8),
+            (Document(page_content="Intro text 2", metadata={"section_type": "introduction"}), 0.6),
+            (Document(page_content="Methods text", metadata={"section_type": "methods"}), 0.7),
+            (Document(page_content="Results text", metadata={"section_type": "results"}), 0.5),
+            (Document(page_content="Conclusion", metadata={"section_type": "discussion"}), 0.4),
+        ]
+        sampled = _section_aware_sample(results)
+        # Should pick best from each section: intro(0.8), methods(0.7), results(0.5), discussion(0.4)
+        assert len(sampled) == 4
+        contents = [doc.page_content for doc, _ in sampled]
+        assert "Intro text 1" in contents
+        assert "Intro text 2" not in contents
+        assert "Methods text" in contents
+
+    def test_sorted_by_score_descending(self):
+        from app.routers.query import _section_aware_sample
+        results = [
+            (Document(page_content="A", metadata={"section_type": "introduction"}), 0.3),
+            (Document(page_content="B", metadata={"section_type": "methods"}), 0.9),
+            (Document(page_content="C", metadata={"section_type": "results"}), 0.6),
+        ]
+        sampled = _section_aware_sample(results)
+        scores = [score for _, score in sampled]
+        assert scores == sorted(scores, reverse=True)
+
+    def test_missing_section_type_uses_body(self):
+        from app.routers.query import _section_aware_sample
+        results = [
+            (Document(page_content="No section", metadata={}), 0.5),
+            (Document(page_content="Has section", metadata={"section_type": "methods"}), 0.6),
+        ]
+        sampled = _section_aware_sample(results)
+        assert len(sampled) == 2
+
+    def test_empty_results(self):
+        from app.routers.query import _section_aware_sample
+        assert _section_aware_sample([]) == []
+
+    def test_single_section_returns_one(self):
+        from app.routers.query import _section_aware_sample
+        results = [
+            (Document(page_content="A", metadata={"section_type": "introduction"}), 0.8),
+            (Document(page_content="B", metadata={"section_type": "introduction"}), 0.6),
+            (Document(page_content="C", metadata={"section_type": "introduction"}), 0.4),
+        ]
+        sampled = _section_aware_sample(results)
+        assert len(sampled) == 1
+        assert sampled[0][0].page_content == "A"

@@ -145,6 +145,29 @@ async def _classify_question(
         return "closed"
 
 
+def _section_aware_sample(
+    results: list[tuple],
+) -> list[tuple]:
+    """Pick the highest-scoring chunk from each section type.
+
+    For open questions that need broad coverage across a document,
+    this ensures the LLM sees content from every section instead of
+    multiple chunks from the same section.
+    """
+    if not results:
+        return []
+
+    best_per_section: dict[str, tuple] = {}
+    for doc, score in results:
+        section = doc.metadata.get("section_type", "body")
+        if section not in best_per_section or score > best_per_section[section][1]:
+            best_per_section[section] = (doc, score)
+
+    sampled = list(best_per_section.values())
+    sampled.sort(key=lambda x: x[1], reverse=True)
+    return sampled
+
+
 def _smart_truncate(text: str, max_len: int = 500) -> str:
     """Truncate text at a sentence or word boundary instead of mid-word."""
     if len(text) <= max_len:
