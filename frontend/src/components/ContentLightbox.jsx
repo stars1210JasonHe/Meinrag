@@ -27,34 +27,14 @@ export default function ContentLightbox({ sources, currentIndex, onClose, onNavi
 
   const highlights = useMemo(() => {
     if (!source || source.doc_id == null || source.page == null) return []
+    if (!source.bbox) return []
 
-    const active = {
+    return [{
       bbox: source.bbox,
-      chunkText: source.content,
       colorIndex: 0,
       isActive: true,
-      sourceIndex: currentIndex,
-      label: `S${currentIndex + 1}`,
-    }
-
-    const colocated = sources
-      .map((s, i) => ({ s, i }))
-      .filter(({ s, i }) =>
-        i !== currentIndex &&
-        s.doc_id === source.doc_id &&
-        s.page === source.page
-      )
-      .map(({ s, i }, ci) => ({
-        bbox: s.bbox,
-        chunkText: s.content,
-        colorIndex: (ci % 4) + 1,
-        isActive: false,
-        sourceIndex: i,
-        label: `S${i + 1}`,
-      }))
-
-    return [active, ...colocated]
-  }, [sources, currentIndex, source])
+    }]
+  }, [source])
 
   const isImage = type === 'image'
   const isTable = type === 'table'
@@ -259,7 +239,6 @@ export default function ContentLightbox({ sources, currentIndex, onClose, onNavi
                 zoom={zoom}
                 onClick={handleContentClick}
                 onError={() => setPdfFailed(true)}
-                onHighlightClick={(sourceIdx) => onNavigate(sourceIdx)}
               />
             ) : (
               renderFallback()

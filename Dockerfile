@@ -24,7 +24,7 @@ COPY alembic.ini ./
 # Create data directories
 RUN mkdir -p data/uploads data/vectorstore
 
-EXPOSE 8000
+EXPOSE ${PORT:-8000}
 
-# Run with uv to ensure correct virtual env
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run with uv to ensure correct virtual env — port from env
+CMD ["sh", "-c", "uv run uvicorn app.main:app --host ${HOST:-0.0.0.0} --port ${PORT:-8000}"]

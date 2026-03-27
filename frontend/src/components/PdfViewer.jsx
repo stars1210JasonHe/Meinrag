@@ -12,27 +12,15 @@ function escapeHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-// Build text highlight fragments from chunk text
-function buildFragments(text) {
-  const normalized = text.replace(/\s+/g, ' ').trim().toLowerCase()
-  if (normalized.length < 10) return []
-  const fragments = []
-  for (let i = 0; i < normalized.length; i += 40) {
-    const frag = normalized.slice(i, i + 60).trim()
-    if (frag.length >= 15) fragments.push(frag)
-  }
-  return fragments
-}
-
 // Default fallback width if container measurement isn't ready
 const DEFAULT_WIDTH = 800
 
 const HIGHLIGHT_COLORS = [
-  { bg: 'rgba(250, 204, 21, 0.35)', border: 'rgba(234, 179, 8, 0.8)',   mark: 'rgba(250, 204, 21, 0.40)' },
-  { bg: 'rgba(96, 165, 250, 0.25)',  border: 'rgba(59, 130, 246, 0.7)',  mark: 'rgba(96, 165, 250, 0.35)' },
-  { bg: 'rgba(167, 139, 250, 0.25)', border: 'rgba(139, 92, 246, 0.7)', mark: 'rgba(167, 139, 250, 0.35)' },
-  { bg: 'rgba(52, 211, 153, 0.25)',  border: 'rgba(16, 185, 129, 0.7)', mark: 'rgba(52, 211, 153, 0.35)' },
-  { bg: 'rgba(251, 146, 60, 0.25)',  border: 'rgba(249, 115, 22, 0.7)', mark: 'rgba(251, 146, 60, 0.35)' },
+  { bg: 'rgba(250, 204, 21, 0.35)', border: 'rgba(234, 179, 8, 0.8)' },
+  { bg: 'rgba(96, 165, 250, 0.25)',  border: 'rgba(59, 130, 246, 0.7)' },
+  { bg: 'rgba(167, 139, 250, 0.25)', border: 'rgba(139, 92, 246, 0.7)' },
+  { bg: 'rgba(52, 211, 153, 0.25)',  border: 'rgba(16, 185, 129, 0.7)' },
+  { bg: 'rgba(251, 146, 60, 0.25)',  border: 'rgba(249, 115, 22, 0.7)' },
 ]
 
 const SEARCH_MATCH_BG = 'rgba(34, 197, 94, 0.35)'
@@ -42,7 +30,7 @@ const SEARCH_MATCH_BG = 'rgba(34, 197, 94, 0.35)'
  * Text selection, page navigation, bbox + text highlighting.
  */
 export default function PdfViewer({
-  docId, page, highlights, zoom, onClick, onError, onHighlightClick
+  docId, page, highlights, zoom, onClick, onError
 }) {
   const [numPages, setNumPages] = useState(null)
   const [currentPage, setCurrentPage] = useState((page || 0) + 1) // react-pdf is 1-indexed
@@ -101,105 +89,46 @@ export default function PdfViewer({
     if (!cancelledRef.current) setPageTexts(texts)
   }, [])
 
-  // Custom text renderer: source highlights + search highlights
+  // Custom text renderer: search highlights only (Ctrl+F)
   const textRenderer = useMemo(() => {
-    // Source text highlights (no bbox)
-    const textHighlights = isSourcePage
-      ? (highlights || [])
-          .filter(h => h.chunkText && (!h.bbox || h.bbox.length !== 4))
-          .map(h => ({
-            fragments: buildFragments(h.chunkText),
-            color: HIGHLIGHT_COLORS[h.colorIndex % HIGHLIGHT_COLORS.length],
-            isActive: h.isActive,
-          }))
-          .filter(h => h.fragments.length > 0)
-      : []
-
     const hasSearch = searchOpen && searchQuery.trim().length > 0
-    const searchLower = hasSearch ? searchQuery.toLowerCase() : ''
+    if (!hasSearch) return undefined
 
-    if (textHighlights.length === 0 && !hasSearch) return undefined
-
-    // Sort once: active highlights first
-    const sorted = textHighlights.length > 0
-      ? [...textHighlights].sort((a, b) => (b.isActive ? 1 : 0) - (a.isActive ? 1 : 0))
-      : []
-
+    const searchLower = searchQuery.toLowerCase()
     return ({ str }) => {
       const escaped = escapeHtml(str)
       const norm = str.replace(/\s+/g, ' ').trim().toLowerCase()
-
-      // Search highlight takes visual priority
-      if (hasSearch && norm.length >= 2 && norm.includes(searchLower)) {
+      if (norm.length >= 2 && norm.includes(searchLower)) {
         return `<mark style="background:${SEARCH_MATCH_BG}">${escaped}</mark>`
       }
-
-      // Source highlights
-      if (norm.length >= 4 && sorted.length > 0) {
-        for (const hl of sorted) {
-          if (hl.fragments.some(f => f.includes(norm))) {
-            const bg = hl.isActive ? hl.color.mark : hl.color.mark.replace(/[\d.]+\)$/, '0.2)')
-            return `<mark style="background:${bg}">${escaped}</mark>`
-          }
-        }
-      }
-
       return escaped
     }
-  }, [isSourcePage, highlights, searchOpen, searchQuery])
+  }, [searchOpen, searchQuery])
 
-  // Render multiple bbox highlight overlays with per-source colors
+  // Render bbox overlay for the active source only
   const renderBboxOverlays = () => {
     if (!isSourcePage || !pageSize) return null
-    const bboxHighlights = (highlights || []).filter(h => h.bbox && h.bbox.length === 4)
-    if (bboxHighlights.length === 0) return null
+    const active = (highlights || []).find(h => h.isActive && h.bbox && h.bbox.length === 4)
+    if (!active) return null
 
     const pw = pageSize.originalWidth
     const ph = pageSize.originalHeight
+    const [x0, y0, x1, y1] = active.bbox
+    const color = HIGHLIGHT_COLORS[active.colorIndex % HIGHLIGHT_COLORS.length]
 
     return (
       <div className="pdf-highlight-overlay">
-        {bboxHighlights.map((h) => {
-          const [x0, y0, x1, y1] = h.bbox
-          const color = HIGHLIGHT_COLORS[h.colorIndex % HIGHLIGHT_COLORS.length]
-          const opacity = h.isActive ? 1 : 0.5
-          return (
-            <div key={h.sourceIndex}>
-              <div
-                className={`pdf-highlight-bbox ${h.isActive ? 'active' : 'inactive'}`}
-                style={{
-                  left: `${(x0 / pw) * 100}%`,
-                  top: `${(y0 / ph) * 100}%`,
-                  width: `${((x1 - x0) / pw) * 100}%`,
-                  height: `${((y1 - y0) / ph) * 100}%`,
-                  borderColor: color.border,
-                  backgroundColor: color.bg,
-                  opacity,
-                  pointerEvents: h.isActive ? 'none' : 'auto',
-                  cursor: h.isActive ? 'default' : 'pointer',
-                }}
-                onClick={(e) => {
-                  if (!h.isActive && onHighlightClick) {
-                    e.stopPropagation()
-                    onHighlightClick(h.sourceIndex)
-                  }
-                }}
-              />
-              {!h.isActive && h.label && (
-                <div
-                  className="pdf-highlight-label"
-                  style={{
-                    left: `${(x0 / pw) * 100}%`,
-                    top: `${(y0 / ph) * 100}%`,
-                    backgroundColor: color.border,
-                  }}
-                >
-                  {h.label}
-                </div>
-              )}
-            </div>
-          )
-        })}
+        <div
+          className="pdf-highlight-bbox active"
+          style={{
+            left: `${(x0 / pw) * 100}%`,
+            top: `${(y0 / ph) * 100}%`,
+            width: `${((x1 - x0) / pw) * 100}%`,
+            height: `${((y1 - y0) / ph) * 100}%`,
+            borderColor: color.border,
+            backgroundColor: color.bg,
+          }}
+        />
       </div>
     )
   }

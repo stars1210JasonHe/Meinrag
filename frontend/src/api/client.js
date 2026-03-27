@@ -1,6 +1,10 @@
 import axios from 'axios'
 
-export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+if (!import.meta.env.VITE_API_URL) {
+  console.error('VITE_API_URL is not set. Create frontend/.env with VITE_API_URL=http://localhost:<PORT>')
+}
+
+export const API_BASE = import.meta.env.VITE_API_URL
 
 const api = axios.create({
   baseURL: API_BASE,
