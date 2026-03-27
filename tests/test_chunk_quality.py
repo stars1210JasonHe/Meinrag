@@ -477,3 +477,143 @@ class TestSectionAwareSampling:
         sampled = _section_aware_sample(results)
         assert len(sampled) == 1
         assert sampled[0][0].page_content == "A"
+
+
+# ── Visual proximity linking ─────────────────────────────────────────────
+
+
+class TestVisualProximityLinking:
+    """Test _link_nearby_visuals() pulls in visual chunks from adjacent pages."""
+
+    def _make_store(self, chunks_by_doc):
+        """Create a mock vector store with get_chunks_by_doc."""
+        class MockStore:
+            def __init__(self, data):
+                self._data = data
+            def get_chunks_by_doc(self, doc_id):
+                return self._data.get(doc_id, [])
+        return MockStore(chunks_by_doc)
+
+    def test_links_table_on_same_page(self):
+        from app.routers.query import _link_nearby_visuals
+
+        text_chunk = Document(
+            page_content="As shown in Table 1...",
+            metadata={"doc_id": "doc1", "page": 5, "chunk_type": "text", "chunk_index": 0},
+        )
+        table_chunk = Document(
+            page_content="|Model|BLEU|\n|---|---|\n|Transformer|28.4|",
+            metadata={"doc_id": "doc1", "page": 5, "chunk_type": "table", "chunk_index": 1},
+        )
+        store = self._make_store({"doc1": [text_chunk, table_chunk]})
+        retrieved = [(text_chunk, 0.8)]
+
+        result = _link_nearby_visuals(retrieved, store, ["doc1"], proximity_pages=1)
+        assert len(result) == 2
+        assert result[1][0].page_content == table_chunk.page_content
+
+    def test_links_image_on_adjacent_page(self):
+        from app.routers.query import _link_nearby_visuals
+
+        text_chunk = Document(
+            page_content="See Figure 1...",
+            metadata={"doc_id": "doc1", "page": 3, "chunk_type": "text", "chunk_index": 0},
+        )
+        image_chunk = Document(
+            page_content="Figure 1. Architecture diagram",
+            metadata={"doc_id": "doc1", "page": 4, "chunk_type": "image", "chunk_index": 1, "image_path": "/img.png"},
+        )
+        store = self._make_store({"doc1": [text_chunk, image_chunk]})
+        retrieved = [(text_chunk, 0.7)]
+
+        result = _link_nearby_visuals(retrieved, store, ["doc1"], proximity_pages=1)
+        assert len(result) == 2
+
+    def test_skips_distant_page(self):
+        from app.routers.query import _link_nearby_visuals
+
+        text_chunk = Document(
+            page_content="Some text",
+            metadata={"doc_id": "doc1", "page": 2, "chunk_type": "text", "chunk_index": 0},
+        )
+        far_table = Document(
+            page_content="|A|B|\n|---|---|\n|1|2|",
+            metadata={"doc_id": "doc1", "page": 10, "chunk_type": "table", "chunk_index": 1},
+        )
+        store = self._make_store({"doc1": [text_chunk, far_table]})
+        retrieved = [(text_chunk, 0.6)]
+
+        result = _link_nearby_visuals(retrieved, store, ["doc1"], proximity_pages=1)
+        assert len(result) == 1  # no visuals linked
+
+    def test_skips_already_retrieved(self):
+        from app.routers.query import _link_nearby_visuals
+
+        text_chunk = Document(
+            page_content="Text",
+            metadata={"doc_id": "doc1", "page": 5, "chunk_type": "text", "chunk_index": 0},
+        )
+        table_chunk = Document(
+            page_content="|A|B|",
+            metadata={"doc_id": "doc1", "page": 5, "chunk_type": "table", "chunk_index": 1},
+        )
+        store = self._make_store({"doc1": [text_chunk, table_chunk]})
+        # table already in retrieved
+        retrieved = [(text_chunk, 0.8), (table_chunk, 0.5)]
+
+        result = _link_nearby_visuals(retrieved, store, ["doc1"], proximity_pages=1)
+        assert len(result) == 2  # no duplicates added
+
+    def test_skips_image_without_image_path(self):
+        from app.routers.query import _link_nearby_visuals
+
+        text_chunk = Document(
+            page_content="Text",
+            metadata={"doc_id": "doc1", "page": 5, "chunk_type": "text", "chunk_index": 0},
+        )
+        bad_image = Document(
+            page_content="Figure caption",
+            metadata={"doc_id": "doc1", "page": 5, "chunk_type": "image", "chunk_index": 1},
+        )
+        store = self._make_store({"doc1": [text_chunk, bad_image]})
+        retrieved = [(text_chunk, 0.7)]
+
+        result = _link_nearby_visuals(retrieved, store, ["doc1"], proximity_pages=1)
+        assert len(result) == 1  # image without image_path skipped
+
+    def test_filters_garbage_tables(self):
+        from app.routers.query import _link_nearby_visuals
+
+        text_chunk = Document(
+            page_content="Text",
+            metadata={"doc_id": "doc1", "page": 5, "chunk_type": "text", "chunk_index": 0},
+        )
+        garbage = Document(
+            page_content="|Col1|Col2|Col3|Col4|Col5|\n|---|---|---|---|---|\n|a|b|c|d|e|",
+            metadata={"doc_id": "doc1", "page": 5, "chunk_type": "table", "chunk_index": 1},
+        )
+        store = self._make_store({"doc1": [text_chunk, garbage]})
+        retrieved = [(text_chunk, 0.7)]
+
+        result = _link_nearby_visuals(retrieved, store, ["doc1"], proximity_pages=1)
+        assert len(result) == 1  # garbage table filtered
+
+    def test_no_doc_ids_returns_unchanged(self):
+        from app.routers.query import _link_nearby_visuals
+
+        text_chunk = Document(
+            page_content="Text",
+            metadata={"doc_id": "doc1", "page": 5, "chunk_type": "text", "chunk_index": 0},
+        )
+        retrieved = [(text_chunk, 0.7)]
+        result = _link_nearby_visuals(retrieved, None, None, proximity_pages=1)
+        assert len(result) == 1
+
+    def test_empty_retrieved(self):
+        from app.routers.query import _link_nearby_visuals
+
+        class MockStore:
+            def get_chunks_by_doc(self, doc_id):
+                return []
+        result = _link_nearby_visuals([], MockStore(), ["doc1"], proximity_pages=1)
+        assert result == []

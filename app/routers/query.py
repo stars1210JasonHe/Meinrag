@@ -14,6 +14,7 @@ from app.db.repositories import DocumentRepository, ChatSessionRepository
 from app.models.schemas import QueryRequest, QueryResponse, SourceChunk, ChunkContextRequest, AskAIRequest, AskAIResponse
 from langchain_core.output_parsers import StrOutputParser
 from app.rag.chain import build_rag_chain, is_reference_entry
+from app.services.chunk_utils import is_garbage_table
 from app.rag.prompts import WEB_SEARCH_PROMPT, CHUNK_CONTEXT_PROMPT, QUERY_REWRITE_PROMPT, QUERY_EXPANSION_PROMPT, ASK_AI_PROMPT, QUESTION_CLASSIFY_PROMPT
 from app.routers.stream_helpers import sse_event, stream_chain_response
 from app.vectorstore.base import VectorStoreManager
@@ -166,6 +167,86 @@ def _section_aware_sample(
     sampled = list(best_per_section.values())
     sampled.sort(key=lambda x: x[1], reverse=True)
     return sampled
+
+
+def _link_nearby_visuals(
+    retrieved: list,
+    vector_store: VectorStoreManager,
+    doc_ids: list[str] | None,
+    question: str | None = None,
+    embeddings=None,
+    proximity_pages: int = 1,
+) -> list:
+    """Link visual chunks (image/table/formula) from pages near retrieved text chunks.
+
+    For each retrieved text chunk, finds visual chunks on the same or
+    adjacent pages (within proximity_pages range) from the same document.
+    Computes real cosine similarity scores when embeddings are available.
+    """
+    if not doc_ids or not retrieved:
+        return retrieved
+
+    # Collect pages referenced by retrieved text chunks, per doc
+    doc_pages: dict[str, set[int]] = {}
+    retrieved_keys = set()
+    for doc, _ in retrieved:
+        meta = doc.metadata
+        key = (meta.get("doc_id"), meta.get("chunk_index"))
+        retrieved_keys.add(key)
+        did = meta.get("doc_id")
+        page = meta.get("page")
+        if did and page is not None:
+            doc_pages.setdefault(did, set())
+            for p in range(page - proximity_pages, page + proximity_pages + 1):
+                doc_pages[did].add(p)
+
+    # Find visual chunks on those pages
+    extra_docs = []
+    for did, pages in doc_pages.items():
+        chunks = vector_store.get_chunks_by_doc(did)
+        for chunk in chunks:
+            meta = chunk.metadata
+            ct = meta.get("chunk_type")
+            if ct not in ("image", "table", "formula"):
+                continue
+            if ct == "image" and not meta.get("image_path"):
+                continue
+            if ct == "table" and is_garbage_table(chunk.page_content):
+                continue
+            chunk_page = meta.get("page")
+            if chunk_page not in pages:
+                continue
+            key = (meta.get("doc_id"), meta.get("chunk_index"))
+            if key in retrieved_keys:
+                continue
+            extra_docs.append(chunk)
+            retrieved_keys.add(key)
+
+    if not extra_docs:
+        return retrieved
+
+    # Compute real similarity scores if embeddings and question available
+    extra_with_scores = []
+    if question and embeddings:
+        try:
+            import numpy as np
+            query_emb = embeddings.embed_query(question)
+            doc_texts = [d.page_content for d in extra_docs]
+            doc_embs = embeddings.embed_documents(doc_texts)
+            query_vec = np.array(query_emb)
+            for doc, emb in zip(extra_docs, doc_embs):
+                doc_vec = np.array(emb)
+                cosine = float(np.dot(query_vec, doc_vec) / (np.linalg.norm(query_vec) * np.linalg.norm(doc_vec) + 1e-10))
+                extra_with_scores.append((doc, max(0.0, cosine)))
+        except Exception as e:
+            logger.warning(f"Failed to compute proximity scores: {e}")
+            extra_with_scores = [(doc, 0.0) for doc in extra_docs]
+    else:
+        extra_with_scores = [(doc, 0.0) for doc in extra_docs]
+
+    if extra_with_scores:
+        logger.info(f"Linked {len(extra_with_scores)} visual chunks from nearby pages")
+    return retrieved + extra_with_scores
 
 
 def _smart_truncate(text: str, max_len: int = 500) -> str:
