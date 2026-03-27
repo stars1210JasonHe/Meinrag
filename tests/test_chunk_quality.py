@@ -617,3 +617,73 @@ class TestVisualProximityLinking:
                 return []
         result = _link_nearby_visuals([], MockStore(), ["doc1"], proximity_pages=1)
         assert result == []
+
+
+# ── LLM label extraction during ingestion ────────────────────────────────
+
+
+class TestLLMLabelExtraction:
+    """Test _extract_label_llm() extracts and normalizes labels via LLM."""
+
+    @pytest.mark.asyncio
+    async def test_table_label(self):
+        from app.services.docling_processor import _extract_label_llm
+
+        class MockLLM:
+            async def ainvoke(self, input):
+                class R:
+                    content = "Table 1"
+                return R()
+
+        result = await _extract_label_llm("Table 1: Maximum path lengths", MockLLM())
+        assert result == "Table 1"
+
+    @pytest.mark.asyncio
+    async def test_no_label(self):
+        from app.services.docling_processor import _extract_label_llm
+
+        class MockLLM:
+            async def ainvoke(self, input):
+                class R:
+                    content = "none"
+                return R()
+
+        result = await _extract_label_llm("| Col1 | Col2 |", MockLLM())
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_llm_failure(self):
+        from app.services.docling_processor import _extract_label_llm
+
+        class MockLLM:
+            async def ainvoke(self, input):
+                raise RuntimeError("fail")
+
+        result = await _extract_label_llm("Figure 1: arch", MockLLM())
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_long_response_rejected(self):
+        from app.services.docling_processor import _extract_label_llm
+
+        class MockLLM:
+            async def ainvoke(self, input):
+                class R:
+                    content = "This is a very long response that is not a label"
+                return R()
+
+        result = await _extract_label_llm("some text", MockLLM())
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_short_content_skipped(self):
+        from app.services.docling_processor import _extract_label_llm
+
+        class MockLLM:
+            async def ainvoke(self, input):
+                class R:
+                    content = "Table 1"
+                return R()
+
+        result = await _extract_label_llm("ab", MockLLM())
+        assert result is None

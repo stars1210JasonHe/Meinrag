@@ -96,3 +96,13 @@ QUESTION_CLASSIFY_PROMPT = ChatPromptTemplate.from_messages([
      "Answer with EXACTLY one word: open or closed"),
     ("human", "{question}"),
 ])
+
+LABEL_EXTRACT_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", "Extract the figure, table, or equation label from this text.\n"
+     "If the text starts with a label like 'Table 1', 'Figure 2', '图1', 'Tabelle 3', "
+     "'Eq. 5', etc., return the label normalized to English format.\n"
+     "Normalize: 'Table N', 'Figure N', or 'Equation N'.\n"
+     "If there is no label, return 'none'.\n"
+     "Answer with ONLY the label or 'none'."),
+    ("human", "{content}"),
+])

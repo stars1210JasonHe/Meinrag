@@ -14,6 +14,8 @@ from app.config import Settings
 logger = logging.getLogger(__name__)
 
 
+from app.rag.prompts import LABEL_EXTRACT_PROMPT
+
 # ── Chunk quality helpers (shared with document_processor) ───────────────
 from app.services.chunk_utils import (
     is_garbage_table as _is_garbage_table,
@@ -45,6 +47,26 @@ def _merge_element_bboxes(
     x1 = max(b[2] for b in page_bboxes)
     y1 = max(b[3] for b in page_bboxes)
     return [x0, y0, x1, y1]
+
+
+async def _extract_label_llm(content: str, llm) -> str | None:
+    """Extract a normalized label (e.g., 'Table 1', 'Figure 2') from chunk content using LLM.
+
+    Returns None if no label found or on failure.
+    """
+    if not content or len(content) < 3:
+        return None
+    try:
+        messages = LABEL_EXTRACT_PROMPT.format_messages(content=content[:200])
+        response = await llm.ainvoke(messages)
+        result = response.content if hasattr(response, "content") else str(response)
+        result = result.strip()
+        if result.lower() == "none" or len(result) > 30:
+            return None
+        return result
+    except Exception as e:
+        logger.warning("Label extraction failed: %s", e)
+        return None
 
 
 def has_docling() -> bool:
@@ -324,8 +346,9 @@ def _fallback_text_chunks(doc, settings: Settings, source_name: str) -> list[Doc
     return [_make_text_chunk(text, 0, source_name) for text in splits]
 
 
-def process(
-    file_path: Path, doc_id: str, settings: Settings, source_name: str
+async def process(
+    file_path: Path, doc_id: str, settings: Settings, source_name: str,
+    llm=None,
 ) -> list[Document]:
     """Process a document with docling and return LangChain Document chunks.
 
@@ -334,6 +357,7 @@ def process(
         doc_id: Unique document ID for image storage paths.
         settings: App settings (chunk_size, docling_* options).
         source_name: Clean filename for citations (doc_id prefix stripped).
+        llm: Optional LLM for label extraction on visual chunks.
 
     Returns:
         List of LangChain Documents with consistent metadata.
@@ -428,6 +452,17 @@ def process(
     # Assign chunk_index
     for i, chunk in enumerate(all_chunks):
         chunk.metadata["chunk_index"] = i
+
+    # Extract labels for visual chunks via LLM
+    if llm is not None:
+        for chunk in all_chunks:
+            ct = chunk.metadata.get("chunk_type")
+            if ct in ("table", "image", "formula"):
+                label = await _extract_label_llm(chunk.page_content, llm)
+                if label:
+                    chunk.metadata["label"] = label
+                    logger.info("Label extracted: %s for %s chunk on page %s",
+                                label, ct, chunk.metadata.get("page"))
 
     text_count = sum(1 for c in all_chunks if c.metadata.get("chunk_type") == "text")
     table_count = sum(1 for c in all_chunks if c.metadata.get("chunk_type") == "table")

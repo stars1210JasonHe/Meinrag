@@ -57,7 +57,7 @@ class DocumentProcessor:
         )
         self._clean_name: str = "unknown"  # set per load_and_split() call
 
-    def load_and_split(self, file_path: Path, doc_id: str | None = None) -> list[Document]:
+    async def load_and_split(self, file_path: Path, doc_id: str | None = None, llm=None) -> list[Document]:
         """Load a file and split it into chunks."""
         suffix = file_path.suffix.lower()
 
@@ -90,7 +90,7 @@ class DocumentProcessor:
                 from app.services.docling_processor import process as docling_process, has_docling
                 if not has_docling():
                     raise ImportError("docling not installed. Install with: uv sync --extra docling")
-                return docling_process(file_path, doc_id, self._settings, self._clean_name)
+                return await docling_process(file_path, doc_id, self._settings, self._clean_name, llm=llm)
             except Exception as e:
                 logger.warning(f"Docling mode failed, falling back: {e}")
                 if suffix == ".pdf":

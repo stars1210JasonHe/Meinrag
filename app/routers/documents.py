@@ -87,7 +87,7 @@ async def upload_document(
     try:
         # Process and index
         processor = DocumentProcessor(settings)
-        chunks = processor.load_and_split(upload_path, doc_id=doc_id)
+        chunks = await processor.load_and_split(upload_path, doc_id=doc_id, llm=llm)
 
         # Parse collections from comma-separated string
         parsed_collections: list[str] | None = None
