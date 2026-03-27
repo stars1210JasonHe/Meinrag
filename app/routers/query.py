@@ -14,7 +14,7 @@ from app.db.repositories import DocumentRepository, ChatSessionRepository
 from app.models.schemas import QueryRequest, QueryResponse, SourceChunk, ChunkContextRequest, AskAIRequest, AskAIResponse
 from langchain_core.output_parsers import StrOutputParser
 from app.rag.chain import build_rag_chain, is_reference_entry
-from app.rag.prompts import WEB_SEARCH_PROMPT, CHUNK_CONTEXT_PROMPT, QUERY_REWRITE_PROMPT, QUERY_EXPANSION_PROMPT, ASK_AI_PROMPT
+from app.rag.prompts import WEB_SEARCH_PROMPT, CHUNK_CONTEXT_PROMPT, QUERY_REWRITE_PROMPT, QUERY_EXPANSION_PROMPT, ASK_AI_PROMPT, QUESTION_CLASSIFY_PROMPT
 from app.routers.stream_helpers import sse_event, stream_chain_response
 from app.vectorstore.base import VectorStoreManager
 from langchain_core.embeddings import Embeddings
@@ -119,6 +119,30 @@ def _apply_section_weights(results: list[tuple]) -> list[tuple]:
         weight = _SECTION_WEIGHTS.get(section, 1.0)
         weighted.append((doc, score * weight))
     return weighted
+
+
+async def _classify_question(
+    question: str, llm: BaseChatModel,
+) -> str:
+    """Classify a question as 'open' or 'closed' using LLM.
+
+    Open questions need broad section coverage (summaries, overviews).
+    Closed questions need specific top-K retrieval (facts, scores).
+    Returns 'closed' on any failure.
+    """
+    try:
+        messages = QUESTION_CLASSIFY_PROMPT.format_messages(question=question)
+        response = await llm.ainvoke(messages)
+        result = response.content if hasattr(response, "content") else str(response)
+        classification = result.strip().lower()
+        if classification in ("open", "closed"):
+            logger.info("Question classified as: %s — %r", classification, question)
+            return classification
+        logger.warning("Unexpected classification %r, defaulting to closed", result)
+        return "closed"
+    except Exception as e:
+        logger.warning("Question classification failed: %s, defaulting to closed", e)
+        return "closed"
 
 
 def _smart_truncate(text: str, max_len: int = 500) -> str:

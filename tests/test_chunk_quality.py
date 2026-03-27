@@ -361,3 +361,60 @@ class TestBboxMerging:
     def test_empty_elements(self):
         from app.services.docling_processor import _merge_element_bboxes
         assert _merge_element_bboxes([], target_page=1) is None
+
+
+# ── Open/Closed question classification ──────────────────────────────────
+
+
+class TestQuestionClassification:
+    """Test _classify_question() with mock LLM."""
+
+    @pytest.mark.asyncio
+    async def test_open_question(self):
+        from app.routers.query import _classify_question
+
+        class MockLLM:
+            async def ainvoke(self, input):
+                class Resp:
+                    content = "open"
+                return Resp()
+
+        result = await _classify_question("Summarize this paper", MockLLM())
+        assert result == "open"
+
+    @pytest.mark.asyncio
+    async def test_closed_question(self):
+        from app.routers.query import _classify_question
+
+        class MockLLM:
+            async def ainvoke(self, input):
+                class Resp:
+                    content = "closed"
+                return Resp()
+
+        result = await _classify_question("What BLEU score did the model achieve?", MockLLM())
+        assert result == "closed"
+
+    @pytest.mark.asyncio
+    async def test_llm_failure_defaults_to_closed(self):
+        from app.routers.query import _classify_question
+
+        class MockLLM:
+            async def ainvoke(self, input):
+                raise RuntimeError("LLM error")
+
+        result = await _classify_question("Some question", MockLLM())
+        assert result == "closed"
+
+    @pytest.mark.asyncio
+    async def test_unexpected_response_defaults_to_closed(self):
+        from app.routers.query import _classify_question
+
+        class MockLLM:
+            async def ainvoke(self, input):
+                class Resp:
+                    content = "maybe open maybe not"
+                return Resp()
+
+        result = await _classify_question("Some question", MockLLM())
+        assert result == "closed"
