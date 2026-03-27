@@ -86,3 +86,13 @@ ASK_AI_PROMPT = ChatPromptTemplate.from_messages([
     ("system", ASK_AI_SYSTEM_PROMPT),
     ("human", "{question}"),
 ])
+
+QUESTION_CLASSIFY_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", "Classify this question as 'open' or 'closed'.\n"
+     "Open = needs broad coverage across a document (summarize, overview, opinion, "
+     "explain the paper, what is this about, compare sections).\n"
+     "Closed = needs specific facts from a narrow part of a document (what score, "
+     "which method, how many layers, what equation).\n"
+     "Answer with EXACTLY one word: open or closed"),
+    ("human", "{question}"),
+])
