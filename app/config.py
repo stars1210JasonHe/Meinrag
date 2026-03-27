@@ -94,6 +94,13 @@ class Settings(BaseSettings):
     query_expansion_enabled: bool = True
     query_expansion_score_threshold: float = 0.3  # trigger when all scores below this
 
+    # Open question detection (section-aware sampling for broad queries)
+    open_question_detection: bool = False
+
+    # Visual proximity linking (replace blanket visual supplements)
+    visual_proximity_enabled: bool = True
+    visual_proximity_pages: int = 1  # pages before/after to search
+
     # Hybrid search
     hybrid_search_enabled: bool = False
     hybrid_bm25_weight: float = 0.5
