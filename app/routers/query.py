@@ -369,81 +369,6 @@ def _build_source_chunks(retrieved: list) -> list[SourceChunk]:
     ]
 
 
-def _supplement_visual_chunks(
-    retrieved: list,
-    vector_store: VectorStoreManager,
-    doc_ids: list[str] | None,
-    question: str | None = None,
-    embeddings=None,
-) -> list:
-    """Append image and table chunks from queried documents that weren't already retrieved.
-
-    Image chunks have short descriptions that rarely match queries via similarity
-    search, and table chunks may also rank poorly. We always include them as
-    supplementary visual context. When question and embeddings are available,
-    computes real cosine similarity scores instead of hardcoding 0.0.
-    """
-    if not doc_ids:
-        return retrieved
-
-    # Collect doc_ids already seen and chunk_indices of retrieved chunks
-    retrieved_keys = set()
-    for doc, _ in retrieved:
-        meta = doc.metadata
-        key = (meta.get("doc_id"), meta.get("chunk_index"))
-        retrieved_keys.add(key)
-
-    extra_docs = []
-    for did in doc_ids:
-        chunks = vector_store.get_chunks_by_doc(did)
-        for chunk in chunks:
-            meta = chunk.metadata
-            ct = meta.get("chunk_type")
-            # Supplement images (with image_path), tables, and formulas
-            if ct == "image" and not meta.get("image_path"):
-                continue
-            if ct not in ("image", "table", "formula"):
-                continue
-            if ct == "table":
-                # Filter garbage tables (generic headers or tokenized viz)
-                lower = chunk.page_content.lower()
-                if lower.count("|col") >= 3:
-                    continue
-                cells = [c.strip() for c in chunk.page_content.split("|") if c.strip()]
-                if cells and len(cells) > 10 and sum(1 for c in cells if len(c) <= 2) / len(cells) > 0.6:
-                    continue
-            key = (meta.get("doc_id"), meta.get("chunk_index"))
-            if key not in retrieved_keys:
-                extra_docs.append(chunk)
-                retrieved_keys.add(key)
-
-    if not extra_docs:
-        return retrieved
-
-    # Compute real similarity scores if embeddings and question available
-    extra_with_scores = []
-    if question and embeddings:
-        try:
-            import numpy as np
-            query_emb = embeddings.embed_query(question)
-            doc_texts = [d.page_content for d in extra_docs]
-            doc_embs = embeddings.embed_documents(doc_texts)
-            query_vec = np.array(query_emb)
-            for doc, emb in zip(extra_docs, doc_embs):
-                doc_vec = np.array(emb)
-                cosine = float(np.dot(query_vec, doc_vec) / (np.linalg.norm(query_vec) * np.linalg.norm(doc_vec) + 1e-10))
-                extra_with_scores.append((doc, max(0.0, cosine)))
-        except Exception as e:
-            logger.warning(f"Failed to compute supplement scores: {e}")
-            extra_with_scores = [(doc, 0.0) for doc in extra_docs]
-    else:
-        extra_with_scores = [(doc, 0.0) for doc in extra_docs]
-
-    if extra_with_scores:
-        logger.info(f"Supplemented {len(extra_with_scores)} visual chunks (images+tables) from queried documents")
-    return retrieved + extra_with_scores
-
-
 async def _fetch_page(url: str) -> str:
     """Fetch a web page and extract plain text content."""
     import httpx
@@ -650,11 +575,13 @@ async def query_documents(
                 request, llm, memory_manager, settings, current_user=current_user,
             )
 
-        # Supplement with image chunks that weren't retrieved by similarity
-        retrieved = _supplement_visual_chunks(
-            retrieved, vector_store, doc_ids,
-            question=request.question, embeddings=embeddings,
-        )
+        # Link visual chunks from pages near retrieved text chunks
+        if settings.visual_proximity_enabled:
+            retrieved = _link_nearby_visuals(
+                retrieved, vector_store, doc_ids,
+                question=request.question, embeddings=embeddings,
+                proximity_pages=settings.visual_proximity_pages,
+            )
 
         # Sort by score descending so highest-relevance sources appear first
         retrieved.sort(key=lambda x: x[1], reverse=True)
@@ -835,10 +762,12 @@ async def query_documents_stream(
         retrieved = _apply_section_weights(retrieved)
         needs_web_search = _should_web_search(request, settings, user_scoped, retrieved)
         if not needs_web_search:
-            retrieved = _supplement_visual_chunks(
-                retrieved, vector_store, doc_ids,
-                question=request.question, embeddings=embeddings,
-            )
+            if settings.visual_proximity_enabled:
+                retrieved = _link_nearby_visuals(
+                    retrieved, vector_store, doc_ids,
+                    question=request.question, embeddings=embeddings,
+                    proximity_pages=settings.visual_proximity_pages,
+                )
             # Sort by score descending
             retrieved.sort(key=lambda x: x[1], reverse=True)
 
