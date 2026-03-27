@@ -562,16 +562,17 @@ async def query_documents(
             fetch_k=fetch_k,
         )
 
-        # Apply section-aware sampling for open questions
+        # Apply section-aware sampling for open questions (text only)
         if is_open:
-            retrieved = _section_aware_sample(retrieved)
+            text_only = [(doc, score) for doc, score in retrieved
+                         if doc.metadata.get("chunk_type") == "text"]
+            retrieved = _section_aware_sample(text_only)
         else:
             # Demote reference-list entries so real content fills top_k
             retrieved = _demote_reference_results(retrieved, request.top_k)
 
-        if not is_open:
-            retrieved = _apply_reference_penalty(retrieved)
-            retrieved = _apply_section_weights(retrieved)
+        retrieved = _apply_reference_penalty(retrieved)
+        retrieved = _apply_section_weights(retrieved)
 
         # Web search fallback if needed
         if _should_web_search(request, settings, user_scoped, retrieved):
@@ -579,16 +580,16 @@ async def query_documents(
                 request, llm, memory_manager, settings, current_user=current_user,
             )
 
-        if not is_open:
-            # Link visual chunks from pages near retrieved text chunks
-            if settings.visual_proximity_enabled:
-                retrieved = _link_nearby_visuals(
-                    retrieved, vector_store, doc_ids,
-                    question=request.question, embeddings=embeddings,
-                    proximity_pages=settings.visual_proximity_pages,
-                )
-            # Sort by score descending so highest-relevance sources appear first
-            retrieved.sort(key=lambda x: x[1], reverse=True)
+        # Link visual chunks from pages near retrieved text chunks
+        if settings.visual_proximity_enabled:
+            retrieved = _link_nearby_visuals(
+                retrieved, vector_store, doc_ids,
+                question=request.question, embeddings=embeddings,
+                proximity_pages=settings.visual_proximity_pages,
+            )
+
+        # Sort by score descending so highest-relevance sources appear first
+        retrieved.sort(key=lambda x: x[1], reverse=True)
 
         answer = await _invoke_with_retry(chain, request.question)
 
@@ -759,16 +760,17 @@ async def query_documents_stream(
         )
 
         if is_open:
-            retrieved = _section_aware_sample(retrieved)
+            text_only = [(doc, score) for doc, score in retrieved
+                         if doc.metadata.get("chunk_type") == "text"]
+            retrieved = _section_aware_sample(text_only)
         else:
             retrieved = _demote_reference_results(retrieved, request.top_k)
 
-        if not is_open:
-            retrieved = _apply_reference_penalty(retrieved)
-            retrieved = _apply_section_weights(retrieved)
+        retrieved = _apply_reference_penalty(retrieved)
+        retrieved = _apply_section_weights(retrieved)
 
         needs_web_search = _should_web_search(request, settings, user_scoped, retrieved)
-        if not needs_web_search and not is_open:
+        if not needs_web_search:
             if settings.visual_proximity_enabled:
                 retrieved = _link_nearby_visuals(
                     retrieved, vector_store, doc_ids,
