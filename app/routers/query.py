@@ -535,9 +535,17 @@ async def query_documents(
                 request, llm, memory_manager, settings, current_user=current_user,
             )
 
-        # Get source docs with similarity scores (over-fetch to allow reference demotion)
+        # Determine fetch size based on question type
+        is_open = False
+        if settings.open_question_detection:
+            question_type = await _classify_question(request.question, llm)
+            is_open = question_type == "open"
+
+        fetch_k = int(request.top_k * 3) if is_open else int(request.top_k * 1.5)
+
+        # Get source docs with similarity scores
         retrieved = vector_store.similarity_search_with_scores(
-            request.question, k=int(request.top_k * 1.5), doc_ids=doc_ids,
+            request.question, k=fetch_k, doc_ids=doc_ids,
         )
 
         # Expand vague queries (low scores → LLM rewrites → re-query)
@@ -545,8 +553,13 @@ async def query_documents(
             request.question, retrieved, llm, vector_store, settings, doc_ids, request.top_k,
         )
 
-        # Demote reference-list entries so real content fills top_k
-        retrieved = _demote_reference_results(retrieved, request.top_k)
+        # Apply section-aware sampling for open questions
+        if is_open:
+            retrieved = _section_aware_sample(retrieved)
+        else:
+            # Demote reference-list entries so real content fills top_k
+            retrieved = _demote_reference_results(retrieved, request.top_k)
+
         retrieved = _apply_reference_penalty(retrieved)
         retrieved = _apply_section_weights(retrieved)
 
@@ -715,8 +728,16 @@ async def query_documents_stream(
     if request.force_web_search and settings.web_search_enabled:
         needs_web_search = True
     else:
+        # Determine fetch size based on question type
+        is_open = False
+        if settings.open_question_detection:
+            question_type = await _classify_question(request.question, llm)
+            is_open = question_type == "open"
+
+        fetch_k = int(request.top_k * 3) if is_open else int(request.top_k * 1.5)
+
         retrieved = vector_store.similarity_search_with_scores(
-            request.question, k=int(request.top_k * 1.5), doc_ids=doc_ids,
+            request.question, k=fetch_k, doc_ids=doc_ids,
         )
 
         # Expand vague queries
@@ -724,7 +745,11 @@ async def query_documents_stream(
             request.question, retrieved, llm, vector_store, settings, doc_ids, request.top_k,
         )
 
-        retrieved = _demote_reference_results(retrieved, request.top_k)
+        if is_open:
+            retrieved = _section_aware_sample(retrieved)
+        else:
+            retrieved = _demote_reference_results(retrieved, request.top_k)
+
         retrieved = _apply_reference_penalty(retrieved)
         retrieved = _apply_section_weights(retrieved)
         needs_web_search = _should_web_search(request, settings, user_scoped, retrieved)
