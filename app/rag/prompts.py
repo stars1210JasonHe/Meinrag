@@ -118,11 +118,14 @@ QUERY_LABEL_PROMPT = ChatPromptTemplate.from_messages([
 
 QUERY_ANALYZE_PROMPT = ChatPromptTemplate.from_messages([
     ("system", "Analyze this question and return a JSON object with two fields:\n"
-     "1. \"types\": array of applicable types from: fact, overview, reference, exploratory\n"
+     "1. \"types\": array of ALL applicable types. A question often has MULTIPLE types:\n"
      "   - fact: specific data lookup (what score, how many, which method)\n"
-     "   - overview: broad coverage (summarize, explain the paper, what is this about)\n"
-     "   - reference: asks about a specific table/figure/equation by number\n"
+     "   - overview: broad coverage, summarization (summarize, explain, what is this about)\n"
+     "   - reference: mentions a specific table/figure/equation by number\n"
      "   - exploratory: open exploration (tell me about X, explain X, compare)\n"
+     "   Examples: 'Summarize Table 1 results' → [\"overview\", \"reference\"]\n"
+     "            'What does Figure 2 show?' → [\"fact\", \"reference\"]\n"
+     "            'Compare the BLEU scores' → [\"fact\", \"exploratory\"]\n"
      "2. \"label\": if reference type, the label normalized to English (e.g., 'Table 1', 'Figure 2'). null otherwise.\n"
      "   Handle any language: '表1' → 'Table 1', '图2' → 'Figure 2'.\n"
      "Return ONLY valid JSON, nothing else."),
