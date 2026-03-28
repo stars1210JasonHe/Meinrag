@@ -132,3 +132,107 @@ class TestReferencesEdges:
         edges = build_intra_doc_edges(chunks, doc_id="d1")
         refs = [e for e in edges if e["relation"] == "references"]
         assert len(refs) == 2
+
+
+class TestGraphExpansion:
+    """Test _expand_via_edges() traverses edges to find related chunks."""
+
+    @pytest.mark.asyncio
+    async def test_expands_describes_edge(self):
+        from app.routers.query import _expand_via_edges
+
+        text_chunk = Document(
+            page_content="The model architecture",
+            metadata={"doc_id": "d1", "chunk_index": 0, "chunk_type": "text", "page": 2},
+        )
+        image_chunk = Document(
+            page_content="Figure 1: Architecture",
+            metadata={"doc_id": "d1", "chunk_index": 1, "chunk_type": "image", "page": 2},
+        )
+
+        class MockEdgeRepo:
+            async def get_edges_from(self, doc_id, chunk_index, relations=None):
+                if chunk_index == 0:
+                    return [{"target_doc_id": "d1", "target_chunk_index": 1,
+                             "relation": "describes", "score": 0.8}]
+                return []
+
+        class MockStore:
+            def get_chunks_by_doc(self, doc_id):
+                return [text_chunk, image_chunk]
+
+        retrieved = [(text_chunk, 0.7)]
+        expanded = await _expand_via_edges(
+            retrieved, MockEdgeRepo(), MockStore(),
+            relations=["describes", "references"],
+        )
+        assert len(expanded) == 2
+        assert expanded[1][0].page_content == "Figure 1: Architecture"
+        assert expanded[1][1] == 0.8
+
+    @pytest.mark.asyncio
+    async def test_no_duplicates(self):
+        from app.routers.query import _expand_via_edges
+
+        chunk = Document(
+            page_content="Text",
+            metadata={"doc_id": "d1", "chunk_index": 0, "chunk_type": "text"},
+        )
+
+        class MockEdgeRepo:
+            async def get_edges_from(self, doc_id, chunk_index, relations=None):
+                return []
+
+        class MockStore:
+            def get_chunks_by_doc(self, doc_id):
+                return [chunk]
+
+        retrieved = [(chunk, 0.7)]
+        expanded = await _expand_via_edges(retrieved, MockEdgeRepo(), MockStore())
+        assert len(expanded) == 1
+
+    @pytest.mark.asyncio
+    async def test_empty_retrieved(self):
+        from app.routers.query import _expand_via_edges
+
+        class MockEdgeRepo:
+            async def get_edges_from(self, doc_id, chunk_index, relations=None):
+                return []
+
+        class MockStore:
+            def get_chunks_by_doc(self, doc_id):
+                return []
+
+        result = await _expand_via_edges([], MockEdgeRepo(), MockStore())
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_max_expansion_limit(self):
+        from app.routers.query import _expand_via_edges
+
+        text_chunk = Document(
+            page_content="Text",
+            metadata={"doc_id": "d1", "chunk_index": 0, "chunk_type": "text"},
+        )
+        targets = [
+            Document(page_content=f"Target {i}", metadata={"doc_id": "d1", "chunk_index": i + 1, "chunk_type": "text"})
+            for i in range(10)
+        ]
+
+        class MockEdgeRepo:
+            async def get_edges_from(self, doc_id, chunk_index, relations=None):
+                if chunk_index == 0:
+                    return [{"target_doc_id": "d1", "target_chunk_index": i + 1,
+                             "relation": "describes", "score": 0.5} for i in range(10)]
+                return []
+
+        class MockStore:
+            def get_chunks_by_doc(self, doc_id):
+                return [text_chunk] + targets
+
+        retrieved = [(text_chunk, 0.7)]
+        expanded = await _expand_via_edges(
+            retrieved, MockEdgeRepo(), MockStore(), max_expansion=3,
+        )
+        # 1 original + 3 expanded (capped at max_expansion)
+        assert len(expanded) == 4

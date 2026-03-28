@@ -8,9 +8,9 @@ from sse_starlette.sse import EventSourceResponse
 from app.config import Settings
 from app.dependencies import (
     get_settings, get_vector_store, get_llm, get_embeddings, get_memory_manager,
-    get_registry, get_current_user,
+    get_registry, get_current_user, get_edge_repository,
 )
-from app.db.repositories import DocumentRepository, ChatSessionRepository
+from app.db.repositories import DocumentRepository, ChatSessionRepository, EdgeRepository
 from app.models.schemas import QueryRequest, QueryResponse, SourceChunk, ChunkContextRequest, AskAIRequest, AskAIResponse
 from langchain_core.output_parsers import StrOutputParser
 from app.rag.chain import build_rag_chain, is_reference_entry
@@ -212,6 +212,60 @@ def _lookup_by_label(
             if chunk_label and chunk_label.lower() == label_lower:
                 matches.append(chunk)
     return matches
+
+
+async def _expand_via_edges(
+    retrieved: list[tuple],
+    edge_repo,
+    vector_store: VectorStoreManager,
+    relations: list[str] | None = None,
+    max_expansion: int = 5,
+) -> list[tuple]:
+    """Expand retrieved results by traversing graph edges.
+
+    For each retrieved chunk, find connected chunks via edges
+    and add them to the result set.
+    """
+    if not retrieved:
+        return retrieved
+
+    # Track what we already have
+    seen_keys = set()
+    for doc, _ in retrieved:
+        key = (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index"))
+        seen_keys.add(key)
+
+    expanded = []
+    for doc, score in retrieved:
+        doc_id = doc.metadata.get("doc_id")
+        chunk_index = doc.metadata.get("chunk_index")
+        if doc_id is None or chunk_index is None:
+            continue
+
+        edges = await edge_repo.get_edges_from(doc_id, chunk_index, relations=relations)
+        for edge in edges:
+            target_key = (edge["target_doc_id"], edge["target_chunk_index"])
+            if target_key in seen_keys:
+                continue
+            seen_keys.add(target_key)
+
+            # Fetch the target chunk
+            target_chunks = vector_store.get_chunks_by_doc(edge["target_doc_id"])
+            for tc in target_chunks:
+                if tc.metadata.get("chunk_index") == edge["target_chunk_index"]:
+                    edge_score = edge.get("score") or score * 0.8
+                    expanded.append((tc, edge_score))
+                    break
+
+            if len(expanded) >= max_expansion:
+                break
+        if len(expanded) >= max_expansion:
+            break
+
+    if expanded:
+        logger.info("Graph expansion: added %d chunks via edges", len(expanded))
+
+    return retrieved + expanded
 
 
 def _link_nearby_visuals(
@@ -559,6 +613,7 @@ async def query_documents(
     memory_manager: ChatSessionRepository = Depends(get_memory_manager),
     registry: DocumentRepository = Depends(get_registry),
     current_user: str = Depends(get_current_user),
+    edge_repo: EdgeRepository = Depends(get_edge_repository),
 ):
     doc_ids, user_scoped = await _resolve_doc_ids(request, settings, registry, current_user)
 
@@ -639,6 +694,12 @@ async def query_documents(
                 question=request.question, embeddings=embeddings,
                 proximity_pages=settings.visual_proximity_pages,
             )
+
+        # Graph expansion: traverse edges for related chunks
+        retrieved = await _expand_via_edges(
+            retrieved, edge_repo, vector_store,
+            relations=["describes", "references"],
+        )
 
         # Sort by score descending so highest-relevance sources appear first
         retrieved.sort(key=lambda x: x[1], reverse=True)
@@ -783,6 +844,7 @@ async def query_documents_stream(
     memory_manager: ChatSessionRepository = Depends(get_memory_manager),
     registry: DocumentRepository = Depends(get_registry),
     current_user: str = Depends(get_current_user),
+    edge_repo: EdgeRepository = Depends(get_edge_repository),
 ):
     """Streaming version of /query. Returns SSE events."""
     doc_ids, user_scoped = await _resolve_doc_ids(request, settings, registry, current_user)
@@ -851,6 +913,11 @@ async def query_documents_stream(
                     question=request.question, embeddings=embeddings,
                     proximity_pages=settings.visual_proximity_pages,
                 )
+            # Graph expansion: traverse edges for related chunks
+            retrieved = await _expand_via_edges(
+                retrieved, edge_repo, vector_store,
+                relations=["describes", "references"],
+            )
             # Sort by score descending
             retrieved.sort(key=lambda x: x[1], reverse=True)
 

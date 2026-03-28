@@ -13,7 +13,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.config import Settings, LLMProvider, VectorStoreType
 from app.db.models import Base, UserModel
-from app.dependencies import get_settings, get_vector_store, get_db, get_llm, get_embeddings
+from app.dependencies import get_settings, get_vector_store, get_db, get_llm, get_embeddings, get_edge_repository
 from app.main import create_app
 
 
@@ -78,11 +78,18 @@ def client(mock_settings, mock_vector_store, mock_llm):
     app = create_app()
     app.router.lifespan_context = test_lifespan
 
+    async def mock_get_edges_from(*args, **kwargs):
+        return []
+
+    mock_edge_repo = MagicMock()
+    mock_edge_repo.get_edges_from = mock_get_edges_from
+
     app.dependency_overrides[get_settings] = lambda: mock_settings
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_vector_store] = lambda: mock_vector_store
     app.dependency_overrides[get_llm] = lambda: mock_llm
     app.dependency_overrides[get_embeddings] = lambda: MagicMock()
+    app.dependency_overrides[get_edge_repository] = lambda: mock_edge_repo
 
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c
