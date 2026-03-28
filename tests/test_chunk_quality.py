@@ -835,3 +835,62 @@ class TestCompositeScoring:
         overview_score = _composite_score(0.8, 0.0, 0.0, 0.0, weights=(0.5, 0.2, 0.1, 0.2))
         # Fact weights similarity higher, so fact_score should be higher when similarity is high
         assert fact_score > overview_score
+
+
+# ── Unified query analysis ───────────────────────────────────────────────
+
+
+class TestQueryAnalysis:
+    @pytest.mark.asyncio
+    async def test_fact_query(self):
+        from app.routers.query import _analyze_query
+
+        class MockLLM:
+            async def ainvoke(self, input):
+                class R:
+                    content = '{"types": ["fact"], "label": null}'
+                return R()
+
+        result = await _analyze_query("What BLEU score?", MockLLM())
+        assert "fact" in result["types"]
+        assert result["label"] is None
+
+    @pytest.mark.asyncio
+    async def test_overview_with_reference(self):
+        from app.routers.query import _analyze_query
+
+        class MockLLM:
+            async def ainvoke(self, input):
+                class R:
+                    content = '{"types": ["overview", "reference"], "label": "Table 1"}'
+                return R()
+
+        result = await _analyze_query("Summarize Table 1", MockLLM())
+        assert "overview" in result["types"]
+        assert "reference" in result["types"]
+        assert result["label"] == "Table 1"
+
+    @pytest.mark.asyncio
+    async def test_llm_failure_defaults_to_exploratory(self):
+        from app.routers.query import _analyze_query
+
+        class MockLLM:
+            async def ainvoke(self, input):
+                raise RuntimeError("fail")
+
+        result = await _analyze_query("some question", MockLLM())
+        assert result["types"] == ["exploratory"]
+        assert result["label"] is None
+
+    @pytest.mark.asyncio
+    async def test_invalid_json_defaults(self):
+        from app.routers.query import _analyze_query
+
+        class MockLLM:
+            async def ainvoke(self, input):
+                class R:
+                    content = "not json at all"
+                return R()
+
+        result = await _analyze_query("some question", MockLLM())
+        assert result["types"] == ["exploratory"]

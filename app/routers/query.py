@@ -15,7 +15,7 @@ from app.models.schemas import QueryRequest, QueryResponse, SourceChunk, ChunkCo
 from langchain_core.output_parsers import StrOutputParser
 from app.rag.chain import build_rag_chain, is_reference_entry
 from app.services.chunk_utils import is_garbage_table
-from app.rag.prompts import WEB_SEARCH_PROMPT, CHUNK_CONTEXT_PROMPT, QUERY_REWRITE_PROMPT, QUERY_EXPANSION_PROMPT, ASK_AI_PROMPT, QUESTION_CLASSIFY_PROMPT, QUERY_LABEL_PROMPT
+from app.rag.prompts import WEB_SEARCH_PROMPT, CHUNK_CONTEXT_PROMPT, QUERY_REWRITE_PROMPT, QUERY_EXPANSION_PROMPT, ASK_AI_PROMPT, QUESTION_CLASSIFY_PROMPT, QUERY_LABEL_PROMPT, QUERY_ANALYZE_PROMPT
 from app.routers.stream_helpers import sse_event, stream_chain_response
 from app.vectorstore.base import VectorStoreManager
 from langchain_core.embeddings import Embeddings
@@ -189,6 +189,39 @@ async def _extract_query_label(
     except Exception as e:
         logger.warning("Query label extraction failed: %s", e)
         return None
+
+
+async def _analyze_query(
+    question: str, llm: BaseChatModel,
+) -> dict:
+    """Analyze query to determine types and optional label in a single LLM call.
+
+    Returns {"types": ["fact"|"overview"|"reference"|"exploratory"], "label": str|None}
+    """
+    try:
+        messages = QUERY_ANALYZE_PROMPT.format_messages(question=question)
+        response = await llm.ainvoke(messages)
+        result = response.content if hasattr(response, "content") else str(response)
+        # Try to extract JSON from response (handle markdown code blocks)
+        text = result.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        parsed = json.loads(text)
+
+        types = parsed.get("types", [])
+        valid_types = {"fact", "overview", "reference", "exploratory"}
+        types = [t for t in types if t in valid_types]
+        if not types:
+            types = ["exploratory"]
+
+        label = parsed.get("label")
+        if label and len(label) > 30:
+            label = None
+
+        return {"types": types, "label": label}
+    except Exception as e:
+        logger.warning("Query analysis failed: %s, defaulting to exploratory", e)
+        return {"types": ["exploratory"], "label": None}
 
 
 def _lookup_by_label(
@@ -742,22 +775,25 @@ async def query_documents(
                 request, llm, memory_manager, settings, current_user=current_user,
             )
 
-        # Determine fetch size based on question type
-        is_open = False
-        if settings.open_question_detection:
-            question_type = await _classify_question(request.question, llm)
-            is_open = question_type == "open"
+        # Analyze query: get types + optional label (single LLM call)
+        analysis = await _analyze_query(request.question, llm)
+        query_types = analysis["types"]
+        query_label = analysis["label"]
+        logger.info("Query analysis: types=%s label=%s — %r", query_types, query_label, request.question)
 
-        # Check if query references a specific table/figure/equation
+        # Determine primary query type for scoring (first type wins)
+        primary_type = query_types[0]
+
+        # Label lookup (reference type)
         label_chunks = []
-        if doc_ids:
-            label = await _extract_query_label(request.question, llm)
-            if label:
-                label_chunks = _lookup_by_label(label, vector_store, doc_ids)
-                if label_chunks:
-                    logger.info("Label lookup: found %d chunks for %r", len(label_chunks), label)
+        if query_label and doc_ids:
+            label_chunks = _lookup_by_label(query_label, vector_store, doc_ids)
+            if label_chunks:
+                logger.info("Label lookup: found %d chunks for %r", len(label_chunks), query_label)
 
-        fetch_k = int(request.top_k * 25) if is_open else int(request.top_k * 1.5)
+        # Determine fetch size
+        is_overview = "overview" in query_types
+        fetch_k = int(request.top_k * 25) if is_overview else int(request.top_k * 1.5)
 
         # Get source docs with similarity scores
         retrieved = vector_store.similarity_search_with_scores(
@@ -770,13 +806,12 @@ async def query_documents(
             fetch_k=fetch_k,
         )
 
-        # Apply section-aware sampling for open questions (text only)
-        if is_open:
+        # Apply type-specific retrieval strategies
+        if is_overview:
             text_only = [(doc, score) for doc, score in retrieved
                          if doc.metadata.get("chunk_type") == "text"]
             retrieved = _section_aware_sample(text_only)
         else:
-            # Demote reference-list entries so real content fills top_k
             retrieved = _demote_reference_results(retrieved, request.top_k)
 
         retrieved = _apply_reference_penalty(retrieved)
@@ -802,7 +837,10 @@ async def query_documents(
             relations=["describes", "references"],
         )
 
-        # Sort by score descending so highest-relevance sources appear first
+        # Apply composite scoring with per-type weights
+        retrieved = await _apply_composite_scoring(retrieved, edge_repo, primary_type, settings)
+
+        # Sort by score descending
         retrieved.sort(key=lambda x: x[1], reverse=True)
 
         # Prepend label-matched chunks at top of results
@@ -812,8 +850,7 @@ async def query_documents(
             for chunk in label_chunks:
                 key = (chunk.metadata.get("doc_id"), chunk.metadata.get("chunk_index"))
                 label_keys.add(key)
-                label_results.append((chunk, 1.0))  # score 1.0 = exact match
-            # Remove duplicates from retrieved
+                label_results.append((chunk, 1.0))
             retrieved = [(doc, score) for doc, score in retrieved
                          if (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index")) not in label_keys]
             retrieved = label_results + retrieved
@@ -969,22 +1006,25 @@ async def query_documents_stream(
     if request.force_web_search and settings.web_search_enabled:
         needs_web_search = True
     else:
-        # Determine fetch size based on question type
-        is_open = False
-        if settings.open_question_detection:
-            question_type = await _classify_question(request.question, llm)
-            is_open = question_type == "open"
+        # Analyze query: get types + optional label (single LLM call)
+        analysis = await _analyze_query(request.question, llm)
+        query_types = analysis["types"]
+        query_label = analysis["label"]
+        logger.info("Query analysis: types=%s label=%s — %r", query_types, query_label, request.question)
 
-        # Check if query references a specific table/figure/equation
+        # Determine primary query type for scoring (first type wins)
+        primary_type = query_types[0]
+
+        # Label lookup (reference type)
         label_chunks = []
-        if doc_ids:
-            label = await _extract_query_label(request.question, llm)
-            if label:
-                label_chunks = _lookup_by_label(label, vector_store, doc_ids)
-                if label_chunks:
-                    logger.info("Label lookup: found %d chunks for %r", len(label_chunks), label)
+        if query_label and doc_ids:
+            label_chunks = _lookup_by_label(query_label, vector_store, doc_ids)
+            if label_chunks:
+                logger.info("Label lookup: found %d chunks for %r", len(label_chunks), query_label)
 
-        fetch_k = int(request.top_k * 25) if is_open else int(request.top_k * 1.5)
+        # Determine fetch size
+        is_overview = "overview" in query_types
+        fetch_k = int(request.top_k * 25) if is_overview else int(request.top_k * 1.5)
 
         retrieved = vector_store.similarity_search_with_scores(
             request.question, k=fetch_k, doc_ids=doc_ids,
@@ -996,7 +1036,8 @@ async def query_documents_stream(
             fetch_k=fetch_k,
         )
 
-        if is_open:
+        # Apply type-specific retrieval strategies
+        if is_overview:
             text_only = [(doc, score) for doc, score in retrieved
                          if doc.metadata.get("chunk_type") == "text"]
             retrieved = _section_aware_sample(text_only)
@@ -1019,6 +1060,10 @@ async def query_documents_stream(
                 retrieved, edge_repo, vector_store,
                 relations=["describes", "references"],
             )
+
+            # Apply composite scoring with per-type weights
+            retrieved = await _apply_composite_scoring(retrieved, edge_repo, primary_type, settings)
+
             # Sort by score descending
             retrieved.sort(key=lambda x: x[1], reverse=True)
 
@@ -1029,8 +1074,7 @@ async def query_documents_stream(
                 for chunk in label_chunks:
                     key = (chunk.metadata.get("doc_id"), chunk.metadata.get("chunk_index"))
                     label_keys.add(key)
-                    label_results.append((chunk, 1.0))  # score 1.0 = exact match
-                # Remove duplicates from retrieved
+                    label_results.append((chunk, 1.0))
                 retrieved = [(doc, score) for doc, score in retrieved
                              if (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index")) not in label_keys]
                 retrieved = label_results + retrieved
