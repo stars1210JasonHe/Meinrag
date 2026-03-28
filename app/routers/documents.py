@@ -5,13 +5,15 @@ import re
 import shutil
 from pathlib import Path
 
+import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from fastapi.responses import FileResponse, Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.classification import PRIMARY_CATEGORIES
 from app.dependencies import (
-    get_settings, get_vector_store, get_registry, get_llm, get_embeddings, get_current_user,
+    get_settings, get_vector_store, get_registry, get_llm, get_embeddings, get_current_user, get_db,
 )
 from app.db.repositories import DocumentRepository
 from langchain_core.embeddings import Embeddings
@@ -50,6 +52,7 @@ async def upload_document(
     embeddings: Embeddings = Depends(get_embeddings),
     registry: DocumentRepository = Depends(get_registry),
     current_user: str = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     filename = file.filename or "unknown"
     suffix = Path(filename).suffix.lower()
@@ -112,6 +115,28 @@ async def upload_document(
             chunk.metadata["collections_csv"] = collections_csv
 
         vector_store.add_documents(chunks, doc_id=doc_id)
+
+        # Build graph edges between chunks
+        from app.services.edge_builder import build_intra_doc_edges, build_cross_doc_edges
+        from app.db.repositories import EdgeRepository
+
+        chunk_embeddings = {}
+        try:
+            texts = [c.page_content for c in chunks]
+            emb_vectors = embeddings.embed_documents(texts)
+            for i, chunk in enumerate(chunks):
+                chunk_embeddings[chunk.metadata["chunk_index"]] = np.array(emb_vectors[i])
+        except Exception as e:
+            logger.warning("Failed to get embeddings for edge building: %s", e)
+
+        intra_edges = build_intra_doc_edges(
+            chunks, doc_id=doc_id,
+            embeddings=chunk_embeddings if chunk_embeddings else None,
+        )
+        cross_edges = build_cross_doc_edges(doc_id, chunks, vector_store, top_k=5)
+
+        edge_repo = EdgeRepository(db)
+        await edge_repo.bulk_insert(intra_edges + cross_edges)
 
         # Register metadata
         await registry.add(
@@ -498,6 +523,7 @@ async def delete_document(
     settings: Settings = Depends(get_settings),
     vector_store: VectorStoreManager = Depends(get_vector_store),
     registry: DocumentRepository = Depends(get_registry),
+    db: AsyncSession = Depends(get_db),
 ):
     if not await registry.get(doc_id):
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
@@ -506,6 +532,11 @@ async def delete_document(
         vector_store.delete_document(doc_id)
     except Exception as e:
         logger.warning(f"Vector store delete failed for {doc_id} (continuing): {e}")
+
+    # Remove all edges involving this document
+    from app.db.repositories import EdgeRepository
+    edge_repo = EdgeRepository(db)
+    await edge_repo.delete_by_doc(doc_id)
 
     await registry.remove(doc_id)
 
