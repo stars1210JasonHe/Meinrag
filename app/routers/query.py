@@ -246,6 +246,75 @@ def _lookup_by_label(
     return []
 
 
+def _parse_weights(weights_str: str) -> tuple[float, float, float, float]:
+    """Parse comma-separated weights string into tuple."""
+    try:
+        parts = [float(x.strip()) for x in weights_str.split(",")]
+    except (ValueError, AttributeError):
+        return (0.7, 0.15, 0.05, 0.1)
+    if len(parts) != 4:
+        return (0.7, 0.15, 0.05, 0.1)
+    return tuple(parts)
+
+
+def _composite_score(
+    similarity: float,
+    graph_score: float = 0.0,
+    recency: float = 1.0,
+    authority: float = 1.0,
+    weights: tuple[float, float, float, float] = (0.7, 0.15, 0.05, 0.1),
+) -> float:
+    """Compute weighted composite score from multiple signals."""
+    w_sim, w_graph, w_rec, w_auth = weights
+    return w_sim * similarity + w_graph * graph_score + w_rec * recency + w_auth * authority
+
+
+async def _apply_composite_scoring(
+    retrieved: list[tuple],
+    edge_repo,
+    query_type: str,
+    settings,
+) -> list[tuple]:
+    """Replace raw similarity scores with composite scores.
+
+    Uses per-query-type weights from settings.
+    """
+    # Select weights based on query type
+    weights_map = {
+        "fact": settings.scoring_fact_weights,
+        "overview": settings.scoring_overview_weights,
+        "reference": settings.scoring_reference_weights,
+        "exploratory": settings.scoring_exploratory_weights,
+    }
+    weights_str = weights_map.get(query_type, settings.scoring_exploratory_weights)
+    weights = _parse_weights(weights_str)
+
+    rescored = []
+    for doc, similarity in retrieved:
+        # Graph score: count edges for this chunk (normalized)
+        graph_score = 0.0
+        if edge_repo:
+            doc_id = doc.metadata.get("doc_id")
+            chunk_index = doc.metadata.get("chunk_index")
+            if doc_id is not None and chunk_index is not None:
+                try:
+                    edges = await edge_repo.get_edges_from(doc_id, chunk_index)
+                    graph_score = min(len(edges) / 10.0, 1.0)
+                except Exception:
+                    pass
+
+        # Recency: default 1.0 (could use document upload date in future)
+        recency = 1.0
+
+        # Authority: default 1.0 (user-configurable per document in future)
+        authority = 1.0
+
+        new_score = _composite_score(similarity, graph_score, recency, authority, weights)
+        rescored.append((doc, new_score))
+
+    return rescored
+
+
 async def _expand_via_edges(
     retrieved: list[tuple],
     edge_repo,

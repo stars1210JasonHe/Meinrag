@@ -796,3 +796,42 @@ class TestLabelLookup:
 
         result = _lookup_by_label("Table 1", MockStore(), None)
         assert len(result) == 0
+
+
+# ── Composite scoring ────────────────────────────────────────────────
+
+
+class TestCompositeScoring:
+    def test_basic_scoring(self):
+        from app.routers.query import _composite_score
+        score = _composite_score(
+            similarity=0.8, graph_score=0.5, recency=1.0, authority=1.0,
+            weights=(0.7, 0.15, 0.05, 0.1),
+        )
+        expected = 0.7*0.8 + 0.15*0.5 + 0.05*1.0 + 0.1*1.0
+        assert abs(score - expected) < 0.001
+
+    def test_zero_similarity_still_scores(self):
+        from app.routers.query import _composite_score
+        score = _composite_score(
+            similarity=0.0, graph_score=1.0, recency=1.0, authority=1.0,
+            weights=(0.7, 0.15, 0.05, 0.1),
+        )
+        assert score > 0
+
+    def test_parse_weights(self):
+        from app.routers.query import _parse_weights
+        assert _parse_weights("0.8,0.1,0.0,0.1") == (0.8, 0.1, 0.0, 0.1)
+
+    def test_parse_weights_invalid_falls_back(self):
+        from app.routers.query import _parse_weights
+        assert _parse_weights("invalid") == (0.7, 0.15, 0.05, 0.1)
+
+    def test_different_type_weights(self):
+        from app.routers.query import _composite_score
+        # With graph_score=0.0, recency=0.0, authority=0.0, only similarity matters.
+        # Fact weights similarity at 0.8 vs overview at 0.5, so fact_score > overview_score.
+        fact_score = _composite_score(0.8, 0.0, 0.0, 0.0, weights=(0.8, 0.1, 0.0, 0.1))
+        overview_score = _composite_score(0.8, 0.0, 0.0, 0.0, weights=(0.5, 0.2, 0.1, 0.2))
+        # Fact weights similarity higher, so fact_score should be higher when similarity is high
+        assert fact_score > overview_score
