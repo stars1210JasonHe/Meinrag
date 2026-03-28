@@ -62,20 +62,50 @@ def is_garbage_table(markdown: str) -> bool:
     return False
 
 
-def deduplicate_chunks(chunks: list[Document]) -> list[Document]:
-    """Remove exact-duplicate chunks (after whitespace normalisation).
+def _trigram_set(text: str) -> set[str]:
+    """Generate character trigrams from normalized text."""
+    t = text.lower().strip()
+    if len(t) < 3:
+        return {t}
+    return {t[i:i+3] for i in range(len(t) - 2)}
 
-    Keeps the first occurrence.
+
+def _token_set(text: str) -> set[str]:
+    """Generate token set from text, excluding short stopwords."""
+    tokens = text.lower().split()
+    return {t for t in tokens if len(t) > 2}
+
+
+def _hybrid_jaccard(a: str, b: str) -> float:
+    """Compute max of trigram Jaccard and token Jaccard similarity."""
+    tri_a, tri_b = _trigram_set(a), _trigram_set(b)
+    tok_a, tok_b = _token_set(a), _token_set(b)
+
+    tri_sim = len(tri_a & tri_b) / len(tri_a | tri_b) if (tri_a | tri_b) else 0.0
+    tok_sim = len(tok_a & tok_b) / len(tok_a | tok_b) if (tok_a | tok_b) else 0.0
+
+    return max(tri_sim, tok_sim)
+
+
+def deduplicate_chunks(chunks: list, threshold: float = 0.7) -> list:
+    """Remove near-duplicate chunks using hybrid trigram-token Jaccard similarity.
+
+    Keeps the first occurrence, removes later chunks that exceed the threshold.
     """
-    seen: set[str] = set()
-    result: list[Document] = []
+    if not chunks:
+        return []
+
+    kept = []
     for chunk in chunks:
-        key = " ".join(chunk.page_content.split()).strip()
-        if key in seen:
-            continue
-        seen.add(key)
-        result.append(chunk)
-    return result
+        text = chunk.page_content.strip()
+        is_dup = False
+        for existing in kept:
+            if _hybrid_jaccard(text, existing.page_content.strip()) >= threshold:
+                is_dup = True
+                break
+        if not is_dup:
+            kept.append(chunk)
+    return kept
 
 
 def tag_reference_chunks(chunks: list[Document]) -> None:

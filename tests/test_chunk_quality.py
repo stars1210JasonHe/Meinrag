@@ -54,40 +54,42 @@ class TestGarbageTableFilter:
 class TestDeduplication:
     def test_identical_chunks_removed(self):
         chunks = [
-            Document(page_content="Hello world", metadata={"chunk_index": 0}),
-            Document(page_content="Hello world", metadata={"chunk_index": 1}),
-            Document(page_content="Different text", metadata={"chunk_index": 2}),
+            Document(page_content="Hello world testing dedup", metadata={"chunk_index": 0}),
+            Document(page_content="Hello world testing dedup", metadata={"chunk_index": 1}),
+            Document(page_content="Completely different text here", metadata={"chunk_index": 2}),
         ]
         result = _deduplicate_chunks(chunks)
         assert len(result) == 2
-        assert result[0].page_content == "Hello world"
-        assert result[1].page_content == "Different text"
+        assert result[0].page_content == "Hello world testing dedup"
+        assert result[1].page_content == "Completely different text here"
 
-    def test_near_duplicate_kept(self):
+    def test_near_duplicate_removed(self):
+        """Near-duplicates with minor differences should be deduped."""
         chunks = [
-            Document(page_content="Hello world", metadata={"chunk_index": 0}),
-            Document(page_content="Hello world!", metadata={"chunk_index": 1}),
-        ]
-        result = _deduplicate_chunks(chunks)
-        assert len(result) == 2
-
-    def test_whitespace_normalization(self):
-        chunks = [
-            Document(page_content="Hello  world\n", metadata={"chunk_index": 0}),
-            Document(page_content="Hello world", metadata={"chunk_index": 1}),
+            Document(page_content="The transformer model uses multi-head attention for parallel processing of sequences", metadata={"chunk_index": 0}),
+            Document(page_content="The transformer model uses multi-head attention for parallel processing of sequences.", metadata={"chunk_index": 1}),
         ]
         result = _deduplicate_chunks(chunks)
         assert len(result) == 1
+
+    def test_similar_but_different_kept(self):
+        """Chunks with different content should be kept."""
+        chunks = [
+            Document(page_content="The cat sat on the mat in the morning sun", metadata={"chunk_index": 0}),
+            Document(page_content="The dog ran on the field in the evening rain", metadata={"chunk_index": 1}),
+        ]
+        result = _deduplicate_chunks(chunks)
+        assert len(result) == 2
 
     def test_empty_input(self):
         assert _deduplicate_chunks([]) == []
 
     def test_preserves_order(self):
         chunks = [
-            Document(page_content="AAA", metadata={"pos": 1}),
-            Document(page_content="BBB", metadata={"pos": 2}),
-            Document(page_content="AAA", metadata={"pos": 3}),
-            Document(page_content="CCC", metadata={"pos": 4}),
+            Document(page_content="AAA BBB CCC DDD EEE FFF GGG", metadata={"pos": 1}),
+            Document(page_content="HHH III JJJ KKK LLL MMM NNN", metadata={"pos": 2}),
+            Document(page_content="AAA BBB CCC DDD EEE FFF GGG", metadata={"pos": 3}),
+            Document(page_content="OOO PPP QQQ RRR SSS TTT UUU", metadata={"pos": 4}),
         ]
         result = _deduplicate_chunks(chunks)
         assert [c.metadata["pos"] for c in result] == [1, 2, 4]

@@ -97,6 +97,9 @@ class Settings(BaseSettings):
     # Open question detection (section-aware sampling for broad queries)
     open_question_detection: bool = False
 
+    # Dedup threshold for hybrid Jaccard similarity
+    dedup_threshold: float = 0.7
+
     # Visual proximity linking (replace blanket visual supplements)
     visual_proximity_enabled: bool = True
     visual_proximity_pages: int = 1  # pages before/after to search
