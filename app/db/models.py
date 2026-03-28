@@ -2,7 +2,7 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    String, Text, Integer, DateTime, ForeignKey, CheckConstraint, UniqueConstraint, Index,
+    String, Text, Integer, Float, DateTime, ForeignKey, CheckConstraint, UniqueConstraint, Index,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -134,3 +134,21 @@ class ChatMessageModel(Base):
     )
 
     session: Mapped["ChatSessionModel"] = relationship(back_populates="messages")
+
+
+class ChunkEdgeModel(Base):
+    __tablename__ = "chunk_edges"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_doc_id: Mapped[str] = mapped_column(String(12), nullable=False)
+    source_chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    target_doc_id: Mapped[str] = mapped_column(String(12), nullable=False)
+    target_chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    relation: Mapped[str] = mapped_column(String(20), nullable=False)
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    __table_args__ = (
+        Index("ix_edges_source", "source_doc_id", "source_chunk_index"),
+        Index("ix_edges_target", "target_doc_id", "target_chunk_index"),
+        Index("ix_edges_relation", "relation"),
+    )
