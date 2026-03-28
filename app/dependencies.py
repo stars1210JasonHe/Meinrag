@@ -4,7 +4,7 @@ from fastapi import Depends, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.db.repositories import DocumentRepository, UserRepository, ChatSessionRepository
+from app.db.repositories import DocumentRepository, UserRepository, ChatSessionRepository, EdgeRepository
 from app.vectorstore.base import VectorStoreManager
 from langchain_core.language_models import BaseChatModel
 from langchain_core.embeddings import Embeddings
@@ -67,3 +67,7 @@ async def get_current_user(
     user_id = x_user_id if x_user_id else settings.default_user
     await user_registry.ensure_exists(user_id, user_id.capitalize())
     return user_id
+
+
+async def get_edge_repository(db: AsyncSession = Depends(get_db)) -> EdgeRepository:
+    return EdgeRepository(db)

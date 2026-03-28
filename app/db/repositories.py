@@ -18,6 +18,7 @@ from app.db.models import (
     UserModel,
     ChatSessionModel,
     ChatMessageModel,
+    ChunkEdgeModel,
 )
 
 logger = logging.getLogger(__name__)
@@ -353,3 +354,77 @@ class ChatSessionRepository:
                 ChatSessionModel.last_access < cutoff_dt
             )
         )
+
+
+class EdgeRepository:
+    """Async PostgreSQL-backed chunk edge (relationship) store."""
+
+    def __init__(self, db: AsyncSession):
+        self._db = db
+
+    async def bulk_insert(self, edges: list[dict]) -> int:
+        """Insert multiple edges at once. Returns count inserted."""
+        if not edges:
+            return 0
+        objects = [ChunkEdgeModel(**e) for e in edges]
+        self._db.add_all(objects)
+        await self._db.flush()
+        return len(objects)
+
+    async def get_edges_from(
+        self, doc_id: str, chunk_index: int, relations: list[str] | None = None,
+    ) -> list[dict]:
+        """Get all edges originating from a specific chunk."""
+        stmt = select(ChunkEdgeModel).where(
+            ChunkEdgeModel.source_doc_id == doc_id,
+            ChunkEdgeModel.source_chunk_index == chunk_index,
+        )
+        if relations:
+            stmt = stmt.where(ChunkEdgeModel.relation.in_(relations))
+        result = await self._db.execute(stmt)
+        return [
+            {
+                "source_doc_id": e.source_doc_id,
+                "source_chunk_index": e.source_chunk_index,
+                "target_doc_id": e.target_doc_id,
+                "target_chunk_index": e.target_chunk_index,
+                "relation": e.relation,
+                "score": e.score,
+            }
+            for e in result.scalars().all()
+        ]
+
+    async def get_edges_to(
+        self, doc_id: str, chunk_index: int, relations: list[str] | None = None,
+    ) -> list[dict]:
+        """Get all edges pointing to a specific chunk."""
+        stmt = select(ChunkEdgeModel).where(
+            ChunkEdgeModel.target_doc_id == doc_id,
+            ChunkEdgeModel.target_chunk_index == chunk_index,
+        )
+        if relations:
+            stmt = stmt.where(ChunkEdgeModel.relation.in_(relations))
+        result = await self._db.execute(stmt)
+        return [
+            {
+                "source_doc_id": e.source_doc_id,
+                "source_chunk_index": e.source_chunk_index,
+                "target_doc_id": e.target_doc_id,
+                "target_chunk_index": e.target_chunk_index,
+                "relation": e.relation,
+                "score": e.score,
+            }
+            for e in result.scalars().all()
+        ]
+
+    async def delete_by_doc(self, doc_id: str) -> int:
+        """Delete all edges involving a document (source or target)."""
+        from sqlalchemy import or_
+        stmt = delete(ChunkEdgeModel).where(
+            or_(
+                ChunkEdgeModel.source_doc_id == doc_id,
+                ChunkEdgeModel.target_doc_id == doc_id,
+            )
+        )
+        result = await self._db.execute(stmt)
+        return result.rowcount
