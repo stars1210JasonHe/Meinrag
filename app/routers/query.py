@@ -198,6 +198,9 @@ def _lookup_by_label(
 ) -> list:
     """Find chunks with a matching label in metadata.
 
+    If no exact label match, falls back to Nth chunk of that type by document order.
+    E.g., "Table 1" → first table chunk, "Figure 3" → third image chunk.
+
     Returns list of Documents with matching label.
     """
     if not doc_ids or not label:
@@ -211,7 +214,36 @@ def _lookup_by_label(
             chunk_label = chunk.metadata.get("label", "")
             if chunk_label and chunk_label.lower() == label_lower:
                 matches.append(chunk)
-    return matches
+
+    if matches:
+        return matches
+
+    # Fallback: parse type + number from label, find Nth chunk of that type
+    import re
+    m = re.match(r'(table|figure|equation)\s+(\d+)', label_lower)
+    if not m:
+        return []
+
+    label_type = m.group(1)
+    label_num = int(m.group(2))
+
+    # Map label type to chunk_type
+    type_map = {"table": "table", "figure": "image", "equation": "formula"}
+    chunk_type = type_map.get(label_type)
+    if not chunk_type:
+        return []
+
+    for did in doc_ids:
+        chunks = vector_store.get_chunks_by_doc(did)
+        typed = sorted(
+            [c for c in chunks if c.metadata.get("chunk_type") == chunk_type],
+            key=lambda c: c.metadata.get("chunk_index", 0),
+        )
+        if 1 <= label_num <= len(typed):
+            logger.info("Label fallback: %s → %dth %s chunk", label, label_num, chunk_type)
+            return [typed[label_num - 1]]
+
+    return []
 
 
 async def _expand_via_edges(
