@@ -42,13 +42,15 @@ export default function GraphPage() {
     queryFn: () => fetchDocuments(USER_ID),
   })
 
+  // Build active edge types string for API request
+  const activeEdgeTypes = EDGE_TYPES.filter(t => edgeFilter[t]).join(',')
+
   const { data: graphData, isLoading } = useQuery({
-    queryKey: ['graph', scope],
+    queryKey: ['graph', scope, activeEdgeTypes],
     queryFn: () =>
       scope
-        ? fetchGraphNodes(scope, EDGE_TYPES.filter(t => edgeFilter[t]).join(','), USER_ID)
+        ? fetchGraphNodes(scope, activeEdgeTypes || 'follows', USER_ID)
         : fetchGraphDocuments(USER_ID),
-    enabled: true,
   })
 
   // Store DataSets as refs so filters can update without rebuild
@@ -137,11 +139,10 @@ export default function GraphPage() {
     return () => { network.destroy(); networkRef.current = null }
   }, [graphData])
 
-  // Apply filters by hiding/showing nodes and edges (batch update, no rebuild)
+  // Apply node type filters (edge filtering is done server-side via queryKey)
   useEffect(() => {
     if (!nodesRef.current || !edgesRef.current) return
 
-    // Batch compute visibility
     const visibleNodeIds = new Set()
     const nodeUpdates = allNodesRef.current.map(n => {
       const visible = n._nodeType === 'document' || nodeFilter[n._chunkType] !== false
@@ -149,15 +150,15 @@ export default function GraphPage() {
       return { id: n.id, hidden: !visible }
     })
 
+    // Hide edges whose endpoints are hidden
     const edgeUpdates = allEdgesRef.current.map(e => ({
       id: e.id,
-      hidden: !(edgeFilter[e._relation] !== false && visibleNodeIds.has(e.from) && visibleNodeIds.has(e.to)),
+      hidden: !(visibleNodeIds.has(e.from) && visibleNodeIds.has(e.to)),
     }))
 
-    // Single batch update each
     nodesRef.current.update(nodeUpdates)
     edgesRef.current.update(edgeUpdates)
-  }, [nodeFilter, edgeFilter])
+  }, [nodeFilter])
 
   // Keyboard shortcuts: F to fit, Escape to close preview
   useEffect(() => {
