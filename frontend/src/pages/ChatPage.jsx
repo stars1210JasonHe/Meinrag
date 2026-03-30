@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Send, FileText, Table2, Image, Calculator, ChevronLeft,
-  ExternalLink, Loader2,
+  ExternalLink, Loader2, X,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -156,6 +156,10 @@ const markdownComponents = {
 // ── Main ChatPage ───────────────────────────────────────────────────────────
 
 export default function ChatPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const scopeDocId = searchParams.get('doc')
+  const scopeDocName = searchParams.get('name') || scopeDocId
+
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -166,6 +170,10 @@ export default function ChatPage() {
 
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
+
+  const clearScope = () => {
+    setSearchParams({})
+  }
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -209,7 +217,7 @@ export default function ChatPage() {
       const resp = await fetch(`${API_BASE}/query/stream`, {
         method: 'POST',
         headers: { 'X-User-Id': USER_ID, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, top_k: 8 }),
+        body: JSON.stringify({ question, top_k: 8, ...(scopeDocId ? { doc_ids: [scopeDocId] } : {}) }),
       })
 
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
@@ -362,8 +370,16 @@ export default function ChatPage() {
           )}
         </div>
 
-        {/* Input bar */}
+        {/* Scope indicator + Input bar */}
         <div className="px-4 py-3 border-t shrink-0" style={{ borderColor: 'hsl(217 33% 17%)' }}>
+          {scopeDocId && (
+            <div className="max-w-3xl mx-auto mb-2 flex items-center gap-2 text-xs"
+                 style={{ color: 'hsl(215 20% 65%)' }}>
+              <FileText size={12} />
+              <span>Searching in: <strong style={{ color: 'hsl(210 40% 98%)' }}>{scopeDocName}</strong></span>
+              <button onClick={clearScope} className="opacity-40 hover:opacity-100"><X size={12} /></button>
+            </div>
+          )}
           <div className="max-w-3xl mx-auto flex items-center gap-2">
             <input
               ref={inputRef}

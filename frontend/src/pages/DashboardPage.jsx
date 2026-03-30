@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { Search, Upload, MoreVertical, Trash2, Download, RefreshCw, FileText, X } from 'lucide-react'
+import { Search, Upload, MoreVertical, Trash2, Download, RefreshCw, FileText, X, MessageSquare } from 'lucide-react'
 import { fetchDocuments, fetchCollections, deleteDocument } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
@@ -196,6 +196,15 @@ export default function DashboardPage() {
                 </div>
                 <span className="text-xs opacity-40 shrink-0">{formatDate(doc.uploaded_at)}</span>
                 <span className="text-xs opacity-40 shrink-0">{doc.chunk_count} chunks</span>
+
+                {/* Chat button */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); navigate(`/chat?doc=${doc.doc_id}&name=${encodeURIComponent(doc.filename)}`) }}
+                  className="p-1 rounded opacity-0 group-hover:opacity-60 hover:opacity-100 transition-opacity"
+                  title="Chat about this document"
+                >
+                  <MessageSquare size={14} />
+                </button>
 
                 {/* Actions menu */}
                 <div className="relative">
