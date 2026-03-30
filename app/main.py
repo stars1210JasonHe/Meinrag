@@ -110,12 +110,13 @@ def create_app() -> FastAPI:
             content={"detail": "Internal server error. Check server logs."},
         )
 
-    from app.routers import documents, query, health, users, sessions
+    from app.routers import documents, query, health, users, sessions, graph
     app.include_router(health.router, tags=["Health"])
     app.include_router(users.router, prefix="/users", tags=["Users"])
     app.include_router(documents.router, prefix="/documents", tags=["Documents"])
     app.include_router(query.router, tags=["Query"])
     app.include_router(sessions.router, tags=["Sessions"])
+    app.include_router(graph.router)
 
     return app
 
