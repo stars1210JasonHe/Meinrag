@@ -48,15 +48,15 @@ Left sidebar, collapsed by default (icons only), expandable on hover:
 ┌──────────────────────────────────────────────┐
 │  🔍 Search documents, domains, topics...     │
 ├──────────────────────────────────────────────┤
-│  CATEGORIES          DOCUMENTS               │
-│  ▸ Technical (24)    📄 attention_is_all...  │
-│  ▸ Research (18)       Deep Learning · 12 Oct│
-│  ▸ Internal (32)     📄 data-anonymization.. │
-│                        Security · 20 Mar     │
-│  DOMAINS             📄 spintronic_sources.. │
-│  ▸ Deep Learning       Physics · 15 Mar     │
-│  ▸ Physics           📄 ...                  │
-│  ▸ Quantum                                   │
+│  Filters: [Technical] [Research] [Physics] ✕ │
+├──────────────────────────────────────────────┤
+│  📄 attention_is_all_you_need.pdf            │
+│     Deep Learning · Technical · 12 Oct       │
+│  📄 data-anonymization-rag.pdf               │
+│     Security · Technical · 20 Mar            │
+│  📄 spintronic_sources.pdf                   │
+│     Physics · Research · 15 Mar              │
+│  ...                                         │
 │                                              │
 │         [ + Upload Document ]                │
 └──────────────────────────────────────────────┘
@@ -64,11 +64,11 @@ Left sidebar, collapsed by default (icons only), expandable on hover:
 
 **Components:**
 - `SearchBar` — full-text search across document names, collections, domains
-- `CategoryTree` — left column: taxonomy categories + domains, clickable to filter
-- `DocumentList` — right column: filtered document rows. Clean: filename, domain tag, date. `...` menu for actions (delete, reclassify, download, edit)
+- `FilterTags` — clickable tag pills for category/domain filtering. Click to add filter, ✕ to remove. Each document only appears once — filters narrow the list, not group it.
+- `DocumentList` — flat list of documents. Each row: filename, domain/category tags, date. `...` menu for actions (delete, reclassify, download, edit)
 - `UploadButton` — bottom or floating, drag-drop support
 
-**Placeholder for future:** Space below stats for additional info (trending topics, recent activity, etc.) — left empty for now.
+**Placeholder for future:** Space for additional info (trending topics, recent activity, etc.) — left empty for now.
 
 ---
 
@@ -84,7 +84,7 @@ Left sidebar, collapsed by default (icons only), expandable on hover:
 │  Ask anything about your documents...       │
 │                                             │
 │ ┌─────────────────────────────────────────┐ │
-│ │ Ask anything...              [Analyze →]│ │
+│ │ Ask anything...              [→]│ │
 │ └─────────────────────────────────────────┘ │
 └─────────────────────────────────────────────┘
 ```
@@ -126,10 +126,10 @@ Left sidebar, collapsed by default (icons only), expandable on hover:
   - 🖼️ image: label "Figure 2" + small thumbnail
   - 📐 formula: label "Equation 3" or rendered equation
   - Click source → shows PDF preview below with bbox highlight
-- `PdfPreview` — embedded in source panel (bottom half):
-  - Compact PDF view of the selected source's page
-  - Bbox highlight on the source chunk
-  - "Open full PDF" button → navigates to PDF Viewer page, preserving page + highlight state
+- `PdfPreview` — replaces source list when a source is clicked (full panel):
+  - "← Back to sources" link at top to return to source list
+  - PDF view of the selected source's page with bbox highlight
+  - "Open full PDF" button → navigates to PDF Viewer page, preserving state
   - Page navigation within preview (◀ ▶)
 - `InputBar` — text input + Analyze button. Web search as small toggle icon.
 
@@ -239,6 +239,44 @@ Left sidebar, collapsed by default (icons only), expandable on hover:
 
 ---
 
+## Cross-Page Interactions
+
+**Chat → Graph:** Source panel has "View in Graph" button → Graph page opens with these source nodes highlighted.
+
+**Chat → PDF:** Click source → PDF preview in panel. "Open full PDF" → PDF Viewer page. State preserved.
+
+**Dashboard → PDF:** Click document → PDF Viewer opens.
+
+**Dashboard → Chat:** PDF Viewer has "Ask about this document" input → opens Chat with document scope pre-set.
+
+**Graph → PDF:** Node preview has "Open in PDF" → PDF Viewer at that page.
+
+**Graph → Chat:** Node preview "Ask about this" → inline answer in graph page (stays in graph).
+
+## Additional Design Details
+
+**Session history (7):** Backend stores source chunks per query in `chat_messages` (new field). Opening a session restores full conversation + sources. Session list accessible from Chat page (collapsible left panel or dropdown).
+
+**Source timing (8):** Sources display as soon as ready. Answer streams in parallel. If LLM is fast, they appear together. If slow, user sees sources first.
+
+**Graph initial state (9):** Default shows document-level nodes (one node per document, connected by cross-doc similar_to edges). Click a document node → expands into its chunks. Scope filters: by category, domain, or specific document. From Chat "View in Graph" → opens already expanded to chunk level.
+
+**PDF Viewer entry (10):** From sidebar → shows last opened document. No document → "Select a document from Dashboard" prompt.
+
+**Scope indicator (17):** Chat input bar shows current scope: "All documents" or "Searching in: filename.pdf [✕]". Scope selector as dropdown next to input.
+
+**Notifications (16):** Toast notifications (top-right, auto-dismiss): upload complete, processing status, errors. No notification center.
+
+**Loading states (15):** Skeleton loaders for document list, source panel. Spinner for graph loading. PDF loading indicator.
+
+**Error handling (14):** Connection banner (existing). Per-component error states with retry button.
+
+**i18n (12):** UI supports English and Chinese. Language toggle in Settings.
+
+**PageChunksPanel filter (5):** Only show visual chunks (table/image/formula) + current active text chunk. Not all text chunks on the page.
+
+---
+
 ## New Backend APIs
 
 | Endpoint | Method | Returns |
@@ -246,11 +284,15 @@ Left sidebar, collapsed by default (icons only), expandable on hover:
 | `/graph/nodes` | GET | Chunk nodes with metadata for vis-network |
 | `/graph/edges` | GET | Edges with type filtering |
 | `/graph/neighbors` | GET | 1-2 hop subgraph for a node |
+| `/graph/documents` | GET | Document-level nodes + cross-doc edges (for initial graph view) |
 | `/documents/{id}/chunks` | GET | Chunks by doc, filterable by `?page=N` |
 
 **Modified existing:**
 - `/query` response: add `query_types` field from analysis
 - `/query/stream`: add `query_analysis` SSE event with types + label
+- `chat_messages` table: add `sources_json` column to persist source chunks per message
+
+**Score normalization (1):** All scores normalized to 0-100% before sending to frontend. Composite scores rescaled: `display_score = score / max_score_in_result_set * 100`.
 
 ---
 
@@ -263,3 +305,5 @@ Left sidebar, collapsed by default (icons only), expandable on hover:
 5. **Keyboard-first for power users** — `1-9` sources, `F` fit graph, `Ctrl+F` search, `Esc` dismiss
 6. **Dark theme only**
 7. **Labels everywhere** — "Table 1", "Figure 2" not chunk_index numbers
+8. **Documents appear once** — filter by tags, don't duplicate in multiple categories
+9. **Scores as percentages** — normalized 0-100%, not raw floats
