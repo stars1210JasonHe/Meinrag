@@ -15,10 +15,11 @@ export default function DashboardPage() {
   const [menuOpen, setMenuOpen] = useState(null)
   const [uploading, setUploading] = useState(false)
 
-  const { data: documents = [], isLoading } = useQuery({
+  const { data: documentsData, isLoading } = useQuery({
     queryKey: ['documents', USER_ID],
     queryFn: () => fetchDocuments(USER_ID),
   })
+  const documents = documentsData?.documents || documentsData || []
 
   const { data: collectionsData } = useQuery({
     queryKey: ['collections', USER_ID],
