@@ -115,7 +115,7 @@ export default function GraphPage() {
           springConstant: 0.08,
         },
         solver: 'forceAtlas2Based',
-        stabilization: { iterations: 100 },
+        stabilization: { iterations: 30, fit: true },
       },
       interaction: {
         hover: true,
@@ -159,7 +159,8 @@ export default function GraphPage() {
     })
 
     network.once('stabilizationIterationsDone', () => {
-      network.fit({ animation: { duration: 500 } })
+      network.setOptions({ physics: false })
+      network.fit({ animation: { duration: 300 } })
     })
 
     return () => {
