@@ -79,6 +79,7 @@ class QueryResponse(BaseModel):
     question: str
     session_id: str | None = None
     web_search_used: bool = False
+    query_types: list[str] | None = None
 
 
 class UserInfo(BaseModel):
@@ -121,3 +122,46 @@ class ChunkContextRequest(BaseModel):
 class CollectionsResponse(BaseModel):
     taxonomy_categories: list[str]
     existing_collections: list[str]
+
+
+# --- Graph visualization ---
+
+class GraphNode(BaseModel):
+    doc_id: str
+    chunk_index: int | None = None
+    chunk_type: str | None = None
+    label: str | None = None
+    page: int | None = None
+    content_preview: str = ""
+    source_file: str = ""
+    node_type: Literal["document", "chunk"] = "chunk"
+
+
+class GraphEdge(BaseModel):
+    source_doc_id: str
+    source_chunk_index: int | None = None
+    target_doc_id: str
+    target_chunk_index: int | None = None
+    relation: str
+    score: float | None = None
+
+
+class GraphResponse(BaseModel):
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+
+
+class ChunkDetail(BaseModel):
+    doc_id: str
+    chunk_index: int
+    chunk_type: str | None = None
+    label: str | None = None
+    page: int | None = None
+    content: str
+    source_file: str = ""
+    bbox: list[float] | None = None
+
+
+class ChunkListResponse(BaseModel):
+    chunks: list[ChunkDetail]
+    total: int
