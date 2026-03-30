@@ -100,10 +100,10 @@ export default function GraphPage() {
       physics: {
         forceAtlas2Based: { gravitationalConstant: -80, centralGravity: 0.01, springLength: 120, springConstant: 0.08 },
         solver: 'forceAtlas2Based',
-        stabilization: { iterations: 30, fit: true },
+        stabilization: { iterations: 20, fit: true },
       },
-      interaction: { hover: true, tooltipDelay: 200, zoomView: true, dragView: true },
-      edges: { smooth: { type: 'continuous' }, width: 1, hoverWidth: 2, font: { align: 'middle' } },
+      interaction: { hover: true, tooltipDelay: 300, zoomView: true, dragView: true },
+      edges: { smooth: false, width: 1, hoverWidth: 2, font: { align: 'middle' } },
       nodes: { borderWidth: 0 },
     })
     networkRef.current = network
@@ -133,23 +133,26 @@ export default function GraphPage() {
     return () => { network.destroy(); networkRef.current = null }
   }, [graphData])
 
-  // Apply filters by hiding/showing nodes and edges (no rebuild, no physics)
+  // Apply filters by hiding/showing nodes and edges (batch update, no rebuild)
   useEffect(() => {
     if (!nodesRef.current || !edgesRef.current) return
 
-    // Filter nodes: hide/show based on nodeFilter
+    // Batch compute visibility
     const visibleNodeIds = new Set()
-    for (const n of allNodesRef.current) {
+    const nodeUpdates = allNodesRef.current.map(n => {
       const visible = n._nodeType === 'document' || nodeFilter[n._chunkType] !== false
-      nodesRef.current.update({ id: n.id, hidden: !visible })
       if (visible) visibleNodeIds.add(n.id)
-    }
+      return { id: n.id, hidden: !visible }
+    })
 
-    // Filter edges: hide/show based on edgeFilter + node visibility
-    for (const e of allEdgesRef.current) {
-      const visible = edgeFilter[e._relation] !== false && visibleNodeIds.has(e.from) && visibleNodeIds.has(e.to)
-      edgesRef.current.update({ id: e.id, hidden: !visible })
-    }
+    const edgeUpdates = allEdgesRef.current.map(e => ({
+      id: e.id,
+      hidden: !(edgeFilter[e._relation] !== false && visibleNodeIds.has(e.from) && visibleNodeIds.has(e.to)),
+    }))
+
+    // Single batch update each
+    nodesRef.current.update(nodeUpdates)
+    edgesRef.current.update(edgeUpdates)
   }, [nodeFilter, edgeFilter])
 
   // Keyboard shortcuts: F to fit, Escape to close preview
