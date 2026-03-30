@@ -28,9 +28,13 @@ export default function GraphPage() {
   const networkRef = useRef(null)
   const [selectedNode, setSelectedNode] = useState(null)
   const [nodeFilter, setNodeFilter] = useState({ text: true, table: true, formula: true, image: true })
-  const [edgeFilter, setEdgeFilter] = useState(
-    Object.fromEntries(EDGE_TYPES.map(t => [t, true]))
-  )
+  const [edgeFilter, setEdgeFilter] = useState({
+    follows: true,
+    describes: true,
+    references: true,
+    similar_to: false,  // off by default — too many edges
+    co_located: false,   // off by default — too many edges
+  })
   const [scope, setScope] = useState(docId || '')
 
   const { data: documents = [] } = useQuery({
