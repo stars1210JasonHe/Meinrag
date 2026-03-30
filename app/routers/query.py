@@ -348,6 +348,16 @@ async def _apply_composite_scoring(
     return rescored
 
 
+def _normalize_scores(retrieved: list[tuple]) -> list[tuple]:
+    """Normalize scores to 0-100 range for frontend display."""
+    if not retrieved:
+        return retrieved
+    max_score = max(score for _, score in retrieved)
+    if max_score <= 0:
+        return retrieved
+    return [(doc, round(score / max_score * 100, 1)) for doc, score in retrieved]
+
+
 async def _expand_via_edges(
     retrieved: list[tuple],
     edge_repo,
@@ -843,6 +853,9 @@ async def query_documents(
         # Sort by score descending
         retrieved.sort(key=lambda x: x[1], reverse=True)
 
+        # Normalize scores to 0-100%
+        retrieved = _normalize_scores(retrieved)
+
         # Prepend label-matched chunks at top of results
         if label_chunks:
             label_keys = set()
@@ -850,7 +863,7 @@ async def query_documents(
             for chunk in label_chunks:
                 key = (chunk.metadata.get("doc_id"), chunk.metadata.get("chunk_index"))
                 label_keys.add(key)
-                label_results.append((chunk, 1.0))
+                label_results.append((chunk, 100.0))
             retrieved = [(doc, score) for doc, score in retrieved
                          if (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index")) not in label_keys]
             retrieved = label_results + retrieved
@@ -859,13 +872,19 @@ async def query_documents(
 
         # Store exchange in session memory
         if request.session_id:
-            await memory_manager.add_exchange(request.session_id, request.question, answer, user_id=current_user)
+            sources_data = [s.model_dump() for s in _build_source_chunks(retrieved)]
+            await memory_manager.add_exchange(
+                request.session_id, request.question, answer,
+                user_id=current_user,
+                sources_json=json.dumps(sources_data),
+            )
 
         return QueryResponse(
             answer=answer,
             sources=_build_source_chunks(retrieved),
             question=request.question,
             session_id=request.session_id,
+            query_types=query_types,
         )
     except Exception as e:
         logger.exception("Query failed")
@@ -1067,6 +1086,9 @@ async def query_documents_stream(
             # Sort by score descending
             retrieved.sort(key=lambda x: x[1], reverse=True)
 
+            # Normalize scores to 0-100%
+            retrieved = _normalize_scores(retrieved)
+
             # Prepend label-matched chunks at top of results
             if label_chunks:
                 label_keys = set()
@@ -1074,7 +1096,7 @@ async def query_documents_stream(
                 for chunk in label_chunks:
                     key = (chunk.metadata.get("doc_id"), chunk.metadata.get("chunk_index"))
                     label_keys.add(key)
-                    label_results.append((chunk, 1.0))
+                    label_results.append((chunk, 100.0))
                 retrieved = [(doc, score) for doc, score in retrieved
                              if (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index")) not in label_keys]
                 retrieved = label_results + retrieved
@@ -1105,6 +1127,9 @@ async def query_documents_stream(
                     yield event
             else:
                 # Normal RAG path
+                # Send query analysis metadata
+                yield sse_event("query_analysis", {"types": query_types, "label": query_label})
+
                 sources_data = [s.model_dump() for s in _build_source_chunks(retrieved)]
 
                 async for event in stream_chain_response(
@@ -1130,8 +1155,11 @@ async def query_documents_stream(
         if request.session_id and full_answer_parts:
             try:
                 full_answer = "".join(full_answer_parts)
+                sources_data = [s.model_dump() for s in _build_source_chunks(retrieved)]
                 await memory_manager.add_exchange(
-                    request.session_id, request.question, full_answer, user_id=current_user,
+                    request.session_id, request.question, full_answer,
+                    user_id=current_user,
+                    sources_json=json.dumps(sources_data),
                 )
             except Exception:
                 logger.warning("Failed to persist streaming exchange to memory")
