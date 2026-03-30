@@ -26,6 +26,8 @@ from app.models.schemas import (
     DocumentUpdateRequest,
     DocumentUpdateResponse,
     CollectionsResponse,
+    ChunkDetail,
+    ChunkListResponse,
 )
 from app.services.document_processor import DocumentProcessor, SUPPORTED_EXTENSIONS
 from app.vectorstore.base import VectorStoreManager
@@ -424,6 +426,45 @@ async def get_document_info(
         "filename": doc.get("filename", ""),
         "total_pages": total_pages,
     }
+
+
+@router.get("/{doc_id}/chunks", response_model=ChunkListResponse)
+async def get_document_chunks(
+    doc_id: str,
+    page: int | None = None,
+    vector_store: VectorStoreManager = Depends(get_vector_store),
+    current_user: str = Depends(get_current_user),
+):
+    """Get chunks for a document, optionally filtered by page."""
+    chunks = vector_store.get_chunks_by_doc(doc_id)
+
+    result = []
+    for chunk in chunks:
+        m = chunk.metadata
+        if page is not None and m.get("page") != page:
+            continue
+
+        bbox_raw = m.get("bbox")
+        bbox = None
+        if bbox_raw:
+            import json as json_mod
+            try:
+                bbox = json_mod.loads(bbox_raw) if isinstance(bbox_raw, str) else bbox_raw
+            except (json_mod.JSONDecodeError, ValueError):
+                pass
+
+        result.append(ChunkDetail(
+            doc_id=doc_id,
+            chunk_index=m.get("chunk_index", 0),
+            chunk_type=m.get("chunk_type"),
+            label=m.get("label"),
+            page=m.get("page"),
+            content=chunk.page_content,
+            source_file=m.get("source_file", ""),
+            bbox=bbox,
+        ))
+
+    return ChunkListResponse(chunks=result, total=len(result))
 
 
 @router.get("/{doc_id}/download")
