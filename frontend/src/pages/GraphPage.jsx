@@ -47,31 +47,17 @@ export default function GraphPage() {
     enabled: true,
   })
 
-  // Build and render vis-network
+  // Store DataSets as refs so filters can update without rebuild
+  const nodesRef = useRef(null)
+  const edgesRef = useRef(null)
+  const allNodesRef = useRef([])
+  const allEdgesRef = useRef([])
+
+  // Build vis-network ONLY when graphData changes (new scope/document)
   useEffect(() => {
     if (!containerRef.current || !graphData) return
 
-    const filteredNodes = (graphData.nodes || []).filter(n => {
-      if (n.node_type === 'document') return true
-      return nodeFilter[n.chunk_type] !== false
-    })
-
-    const nodeIds = new Set(filteredNodes.map(n =>
-      n.node_type === 'document' ? `doc:${n.doc_id}` : `${n.doc_id}:${n.chunk_index}`
-    ))
-
-    const filteredEdges = (graphData.edges || []).filter(e => {
-      if (!edgeFilter[e.relation]) return false
-      const srcId = e.source_chunk_index != null
-        ? `${e.source_doc_id}:${e.source_chunk_index}`
-        : `doc:${e.source_doc_id}`
-      const tgtId = e.target_chunk_index != null
-        ? `${e.target_doc_id}:${e.target_chunk_index}`
-        : `doc:${e.target_doc_id}`
-      return nodeIds.has(srcId) && nodeIds.has(tgtId)
-    })
-
-    const nodes = new DataSet(filteredNodes.map(n => {
+    const allNodes = (graphData.nodes || []).map(n => {
       const id = n.node_type === 'document' ? `doc:${n.doc_id}` : `${n.doc_id}:${n.chunk_index}`
       const rawLabel = n.label || n.content_preview?.slice(0, 20) || n.source_file?.slice(0, 20) || id
       return {
@@ -83,62 +69,43 @@ export default function GraphPage() {
         font: { color: '#e2e8f0', size: 10 },
         title: n.content_preview || n.label || '',
         _data: n,
+        _chunkType: n.chunk_type,
+        _nodeType: n.node_type,
       }
+    })
+
+    const allEdges = (graphData.edges || []).map((e, i) => ({
+      id: `e${i}`,
+      from: e.source_chunk_index != null ? `${e.source_doc_id}:${e.source_chunk_index}` : `doc:${e.source_doc_id}`,
+      to: e.target_chunk_index != null ? `${e.target_doc_id}:${e.target_chunk_index}` : `doc:${e.target_doc_id}`,
+      label: e.relation,
+      font: { color: '#64748b', size: 8, strokeWidth: 0 },
+      color: { color: '#334155', highlight: '#64748b' },
+      arrows: e.relation === 'follows' ? 'to' : '',
+      dashes: e.relation === 'similar_to',
+      _relation: e.relation,
     }))
 
-    const edges = new DataSet(filteredEdges.map((e, i) => {
-      const from = e.source_chunk_index != null
-        ? `${e.source_doc_id}:${e.source_chunk_index}`
-        : `doc:${e.source_doc_id}`
-      const to = e.target_chunk_index != null
-        ? `${e.target_doc_id}:${e.target_chunk_index}`
-        : `doc:${e.target_doc_id}`
-      return {
-        id: `e${i}`,
-        from,
-        to,
-        label: e.relation,
-        font: { color: '#64748b', size: 8, strokeWidth: 0 },
-        color: { color: '#334155', highlight: '#64748b' },
-        arrows: e.relation === 'follows' ? 'to' : '',
-        dashes: e.relation === 'similar_to',
-        hidden: false,
-      }
-    }))
+    allNodesRef.current = allNodes
+    allEdgesRef.current = allEdges
 
-    const options = {
+    const nodes = new DataSet(allNodes)
+    const edges = new DataSet(allEdges)
+    nodesRef.current = nodes
+    edgesRef.current = edges
+
+    if (networkRef.current) networkRef.current.destroy()
+
+    const network = new Network(containerRef.current, { nodes, edges }, {
       physics: {
-        forceAtlas2Based: {
-          gravitationalConstant: -80,
-          centralGravity: 0.01,
-          springLength: 120,
-          springConstant: 0.08,
-        },
+        forceAtlas2Based: { gravitationalConstant: -80, centralGravity: 0.01, springLength: 120, springConstant: 0.08 },
         solver: 'forceAtlas2Based',
         stabilization: { iterations: 30, fit: true },
       },
-      interaction: {
-        hover: true,
-        tooltipDelay: 200,
-        zoomView: true,
-        dragView: true,
-      },
-      edges: {
-        smooth: { type: 'continuous' },
-        width: 1,
-        hoverWidth: 2,
-        font: { align: 'middle' },
-      },
-      nodes: {
-        borderWidth: 0,
-      },
-    }
-
-    if (networkRef.current) {
-      networkRef.current.destroy()
-    }
-
-    const network = new Network(containerRef.current, { nodes, edges }, options)
+      interaction: { hover: true, tooltipDelay: 200, zoomView: true, dragView: true },
+      edges: { smooth: { type: 'continuous' }, width: 1, hoverWidth: 2, font: { align: 'middle' } },
+      nodes: { borderWidth: 0 },
+    })
     networkRef.current = network
 
     network.on('click', (params) => {
@@ -163,11 +130,27 @@ export default function GraphPage() {
       network.fit({ animation: { duration: 300 } })
     })
 
-    return () => {
-      network.destroy()
-      networkRef.current = null
+    return () => { network.destroy(); networkRef.current = null }
+  }, [graphData])
+
+  // Apply filters by hiding/showing nodes and edges (no rebuild, no physics)
+  useEffect(() => {
+    if (!nodesRef.current || !edgesRef.current) return
+
+    // Filter nodes: hide/show based on nodeFilter
+    const visibleNodeIds = new Set()
+    for (const n of allNodesRef.current) {
+      const visible = n._nodeType === 'document' || nodeFilter[n._chunkType] !== false
+      nodesRef.current.update({ id: n.id, hidden: !visible })
+      if (visible) visibleNodeIds.add(n.id)
     }
-  }, [graphData, nodeFilter, edgeFilter])
+
+    // Filter edges: hide/show based on edgeFilter + node visibility
+    for (const e of allEdgesRef.current) {
+      const visible = edgeFilter[e._relation] !== false && visibleNodeIds.has(e.from) && visibleNodeIds.has(e.to)
+      edgesRef.current.update({ id: e.id, hidden: !visible })
+    }
+  }, [nodeFilter, edgeFilter])
 
   // Keyboard shortcuts: F to fit, Escape to close preview
   useEffect(() => {
