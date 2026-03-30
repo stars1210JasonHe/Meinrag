@@ -298,7 +298,10 @@ class ChatSessionRepository:
         await self._session.flush()
         return True
 
-    async def add_exchange(self, session_id: str, question: str, answer: str, user_id: str | None = None) -> None:
+    async def add_exchange(
+        self, session_id: str, question: str, answer: str,
+        user_id: str | None = None, sources_json: str | None = None,
+    ) -> None:
         # Ensure session exists
         result = await self._session.execute(
             select(ChatSessionModel).where(
@@ -317,7 +320,8 @@ class ChatSessionRepository:
             session_id=session_id, role="human", content=question, created_at=now,
         ))
         self._session.add(ChatMessageModel(
-            session_id=session_id, role="ai", content=answer, created_at=now,
+            session_id=session_id, role="ai", content=answer,
+            sources_json=sources_json, created_at=now,
         ))
         chat_session.last_access = now
         await self._session.flush()
