@@ -421,6 +421,27 @@ class EdgeRepository:
             for e in result.scalars().all()
         ]
 
+    async def get_cross_doc_edges(self, relation: str = "similar_to") -> list[dict]:
+        """Get all cross-document edges (source_doc != target_doc), deduplicated by doc pair."""
+        stmt = select(ChunkEdgeModel).where(
+            ChunkEdgeModel.relation == relation,
+            ChunkEdgeModel.source_doc_id != ChunkEdgeModel.target_doc_id,
+        )
+        result = await self._db.execute(stmt)
+        seen_pairs = set()
+        edges = []
+        for e in result.scalars().all():
+            pair = tuple(sorted([e.source_doc_id, e.target_doc_id]))
+            if pair not in seen_pairs:
+                seen_pairs.add(pair)
+                edges.append({
+                    "source_doc_id": e.source_doc_id,
+                    "target_doc_id": e.target_doc_id,
+                    "relation": e.relation,
+                    "score": e.score,
+                })
+        return edges
+
     async def delete_by_doc(self, doc_id: str) -> int:
         """Delete all edges involving a document (source or target)."""
         from sqlalchemy import or_

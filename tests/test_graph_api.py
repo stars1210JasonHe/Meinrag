@@ -81,9 +81,13 @@ def client(mock_settings, mock_vector_store, mock_llm):
     async def mock_get_edges_to(*args, **kwargs):
         return []
 
+    async def mock_get_cross_doc_edges(*args, **kwargs):
+        return []
+
     mock_edge_repo = MagicMock()
     mock_edge_repo.get_edges_from = mock_get_edges_from
     mock_edge_repo.get_edges_to = mock_get_edges_to
+    mock_edge_repo.get_cross_doc_edges = mock_get_cross_doc_edges
 
     app.dependency_overrides[get_settings] = lambda: mock_settings
     app.dependency_overrides[get_db] = override_get_db

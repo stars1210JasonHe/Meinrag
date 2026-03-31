@@ -48,27 +48,17 @@ async def get_document_graph(
             node_type="document",
         ))
 
-    # Get cross-doc similar_to edges (query all chunks, deduplicate to doc pairs)
-    edges = []
-    seen_pairs = set()
-    from sqlalchemy import select
-    from app.db.models import ChunkEdgeModel
-    result = await edge_repo._db.execute(
-        select(ChunkEdgeModel).where(
-            ChunkEdgeModel.relation == "similar_to",
-            ChunkEdgeModel.source_doc_id != ChunkEdgeModel.target_doc_id,
+    # Get cross-doc similar_to edges (deduplicated to doc pairs)
+    cross_edges = await edge_repo.get_cross_doc_edges(relation="similar_to")
+    edges = [
+        GraphEdge(
+            source_doc_id=e["source_doc_id"],
+            target_doc_id=e["target_doc_id"],
+            relation=e["relation"],
+            score=e.get("score"),
         )
-    )
-    for e in result.scalars().all():
-        pair = tuple(sorted([e.source_doc_id, e.target_doc_id]))
-        if pair not in seen_pairs:
-            seen_pairs.add(pair)
-            edges.append(GraphEdge(
-                source_doc_id=e.source_doc_id,
-                target_doc_id=e.target_doc_id,
-                relation="similar_to",
-                score=e.score,
-            ))
+        for e in cross_edges
+    ]
 
     return GraphResponse(nodes=nodes, edges=edges)
 
