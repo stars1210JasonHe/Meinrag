@@ -226,8 +226,9 @@ export default function GraphPage() {
             }}
             onNodeClick={handleNodeClick}
             onBackgroundClick={handleBackgroundClick}
-            linkColor={l => l.color || '#334155'}
-            linkWidth={0.5}
+            linkColor={() => '#64748b'}
+            linkWidth={1.5}
+            linkLineDash={l => l.relation === 'similar_to' ? [2, 2] : null}
             linkDirectionalArrowLength={l => l.relation === 'follows' ? 3 : 0}
             linkDirectionalArrowRelPos={1}
             cooldownTicks={30}

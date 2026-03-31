@@ -159,6 +159,7 @@ export default function ChatPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const scopeDocId = searchParams.get('doc')
   const scopeDocName = searchParams.get('name') || scopeDocId
+  const scopeCollection = searchParams.get('collection')
 
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
@@ -217,7 +218,11 @@ export default function ChatPage() {
       const resp = await fetch(`${API_BASE}/query/stream`, {
         method: 'POST',
         headers: { 'X-User-Id': USER_ID, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, top_k: 8, ...(scopeDocId ? { doc_ids: [scopeDocId] } : {}) }),
+        body: JSON.stringify({
+          question, top_k: 8,
+          ...(scopeDocId ? { doc_ids: [scopeDocId] } : {}),
+          ...(scopeCollection ? { collection: scopeCollection } : {}),
+        }),
       })
 
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
@@ -372,11 +377,13 @@ export default function ChatPage() {
 
         {/* Scope indicator + Input bar */}
         <div className="px-4 py-3 border-t shrink-0" style={{ borderColor: 'hsl(217 33% 17%)' }}>
-          {scopeDocId && (
+          {(scopeDocId || scopeCollection) && (
             <div className="max-w-3xl mx-auto mb-2 flex items-center gap-2 text-xs"
                  style={{ color: 'hsl(215 20% 65%)' }}>
               <FileText size={12} />
-              <span>Searching in: <strong style={{ color: 'hsl(210 40% 98%)' }}>{scopeDocName}</strong></span>
+              <span>Searching in: <strong style={{ color: 'hsl(210 40% 98%)' }}>
+                {scopeDocId ? scopeDocName : scopeCollection}
+              </strong></span>
               <button onClick={clearScope} className="opacity-40 hover:opacity-100"><X size={12} /></button>
             </div>
           )}

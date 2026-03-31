@@ -153,13 +153,22 @@ export default function DashboardPage() {
             </button>
           ))}
           {activeFilters.length > 0 && (
-            <button
-              onClick={() => setActiveFilters([])}
-              className="px-2 py-1 text-xs opacity-40 hover:opacity-100"
-              style={{ color: 'hsl(210 40% 98%)' }}
-            >
-              Clear all
-            </button>
+            <>
+              <button
+                onClick={() => navigate(`/chat?collection=${encodeURIComponent(activeFilters[0])}`)}
+                className="px-2.5 py-1 rounded-full text-xs flex items-center gap-1"
+                style={{ backgroundColor: 'hsl(168 84% 40%)', color: '#fff' }}
+              >
+                <MessageSquare size={10} /> Chat
+              </button>
+              <button
+                onClick={() => setActiveFilters([])}
+                className="px-2 py-1 text-xs opacity-40 hover:opacity-100"
+                style={{ color: 'hsl(210 40% 98%)' }}
+              >
+                Clear all
+              </button>
+            </>
           )}
         </div>
       )}
