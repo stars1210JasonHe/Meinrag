@@ -17,6 +17,13 @@ const NODE_COLORS = {
 }
 
 const EDGE_TYPES = ['follows', 'co_located', 'describes', 'references', 'similar_to']
+const EDGE_COLORS = {
+  follows: '#64748b',     // gray — sequential order
+  co_located: '#6366f1',  // indigo — same page
+  describes: '#10b981',   // green — text explains visual
+  references: '#f59e0b',  // amber — cross-reference
+  similar_to: '#ec4899',  // pink — semantic similarity
+}
 const TYPE_ICONS = { text: FileText, table: Table2, image: Image, formula: Calculator }
 
 export default function GraphPage() {
@@ -167,7 +174,7 @@ export default function GraphPage() {
           <button
             key={type}
             onClick={() => setEdgeFilter(f => ({ ...f, [type]: !f[type] }))}
-            className={cn('text-xs px-1.5 py-0.5 rounded transition-opacity',
+            className={cn('flex items-center gap-1 text-xs px-1.5 py-0.5 rounded transition-opacity',
               edgeFilter[type] ? 'opacity-100' : 'opacity-30'
             )}
             style={{
@@ -175,6 +182,7 @@ export default function GraphPage() {
               color: 'hsl(210 40% 98%)',
             }}
           >
+            <span className="w-3 h-0.5 inline-block rounded" style={{ backgroundColor: EDGE_COLORS[type] }} />
             {type}
           </button>
         ))}
@@ -226,9 +234,9 @@ export default function GraphPage() {
             }}
             onNodeClick={handleNodeClick}
             onBackgroundClick={handleBackgroundClick}
-            linkColor={() => '#64748b'}
-            linkWidth={1.5}
-            linkLineDash={l => l.relation === 'similar_to' ? [2, 2] : null}
+            linkColor={l => EDGE_COLORS[l.relation] || '#64748b'}
+            linkWidth={l => l.relation === 'follows' ? 1 : 2}
+            linkLineDash={l => l.relation === 'similar_to' ? [4, 4] : null}
             linkDirectionalArrowLength={l => l.relation === 'follows' ? 3 : 0}
             linkDirectionalArrowRelPos={1}
             cooldownTicks={30}
