@@ -209,10 +209,11 @@ async def _analyze_query(
         parsed = json.loads(text)
 
         types = parsed.get("types", [])
-        valid_types = {"fact", "overview", "reference", "exploratory"}
+        from app.services.query_types import load_query_types, get_type_names
+        valid_types = set(get_type_names(load_query_types()))
         types = [t for t in types if t in valid_types]
         if not types:
-            types = ["exploratory"]
+            types = [get_type_names(load_query_types())[-1]]  # last type as default
 
         label = parsed.get("label")
         if label and len(label) > 30:
@@ -310,17 +311,15 @@ async def _apply_composite_scoring(
 ) -> list[tuple]:
     """Replace raw similarity scores with composite scores.
 
-    Uses per-query-type weights from settings.
+    Uses per-query-type weights from query_types.json config.
     """
-    # Select weights based on query type
-    weights_map = {
-        "fact": settings.scoring_fact_weights,
-        "overview": settings.scoring_overview_weights,
-        "reference": settings.scoring_reference_weights,
-        "exploratory": settings.scoring_exploratory_weights,
-    }
-    weights_str = weights_map.get(query_type, settings.scoring_exploratory_weights)
-    weights = _parse_weights(weights_str)
+    from app.services.query_types import load_query_types, get_type_config
+    qt_config = load_query_types(settings.query_types_file)
+    type_cfg = get_type_config(qt_config, query_type)
+    if type_cfg and type_cfg.get("weights"):
+        weights = tuple(type_cfg["weights"])
+    else:
+        weights = (0.7, 0.15, 0.05, 0.1)
 
     rescored = []
     for doc, similarity in retrieved:
@@ -801,9 +800,14 @@ async def query_documents(
             if label_chunks:
                 logger.info("Label lookup: found %d chunks for %r", len(label_chunks), query_label)
 
-        # Determine fetch size
-        is_overview = "overview" in query_types
-        fetch_k = int(request.top_k * 25) if is_overview else int(request.top_k * 1.5)
+        # Determine strategy from config
+        from app.services.query_types import load_query_types, get_type_config, get_strategy
+        qt_config = load_query_types(settings.query_types_file)
+        primary_cfg = get_type_config(qt_config, primary_type) or {}
+        strategy_name = primary_cfg.get("strategy", "top_k")
+        strategy = get_strategy(qt_config, strategy_name)
+
+        fetch_k = int(request.top_k * strategy.get("fetch_multiplier", 1.5))
 
         # Get source docs with similarity scores
         retrieved = vector_store.similarity_search_with_scores(
@@ -817,11 +821,11 @@ async def query_documents(
         )
 
         # Apply type-specific retrieval strategies
-        if is_overview:
+        if strategy.get("text_only"):
             text_only = [(doc, score) for doc, score in retrieved
                          if doc.metadata.get("chunk_type") == "text"]
             retrieved = _section_aware_sample(text_only)
-        else:
+        elif strategy.get("demote_references"):
             retrieved = _demote_reference_results(retrieved, request.top_k)
 
         retrieved = _apply_reference_penalty(retrieved)
@@ -1041,9 +1045,14 @@ async def query_documents_stream(
             if label_chunks:
                 logger.info("Label lookup: found %d chunks for %r", len(label_chunks), query_label)
 
-        # Determine fetch size
-        is_overview = "overview" in query_types
-        fetch_k = int(request.top_k * 25) if is_overview else int(request.top_k * 1.5)
+        # Determine strategy from config
+        from app.services.query_types import load_query_types, get_type_config, get_strategy
+        qt_config = load_query_types(settings.query_types_file)
+        primary_cfg = get_type_config(qt_config, primary_type) or {}
+        strategy_name = primary_cfg.get("strategy", "top_k")
+        strategy = get_strategy(qt_config, strategy_name)
+
+        fetch_k = int(request.top_k * strategy.get("fetch_multiplier", 1.5))
 
         retrieved = vector_store.similarity_search_with_scores(
             request.question, k=fetch_k, doc_ids=doc_ids,
@@ -1056,11 +1065,11 @@ async def query_documents_stream(
         )
 
         # Apply type-specific retrieval strategies
-        if is_overview:
+        if strategy.get("text_only"):
             text_only = [(doc, score) for doc, score in retrieved
                          if doc.metadata.get("chunk_type") == "text"]
             retrieved = _section_aware_sample(text_only)
-        else:
+        elif strategy.get("demote_references"):
             retrieved = _demote_reference_results(retrieved, request.top_k)
 
         retrieved = _apply_reference_penalty(retrieved)

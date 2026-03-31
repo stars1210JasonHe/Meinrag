@@ -100,11 +100,8 @@ class Settings(BaseSettings):
     # Dedup threshold for hybrid Jaccard similarity
     dedup_threshold: float = 0.7
 
-    # Composite scoring weights per query type (similarity, graph, recency, authority)
-    scoring_fact_weights: str = "0.8,0.1,0.0,0.1"
-    scoring_overview_weights: str = "0.5,0.2,0.1,0.2"
-    scoring_reference_weights: str = "0.3,0.3,0.0,0.4"
-    scoring_exploratory_weights: str = "0.6,0.2,0.1,0.1"
+    # Query types config file (defines types, strategies, scoring weights)
+    query_types_file: str = "data/query_types.json"
     scoring_recency_decay: float = 0.001
 
     # Visual proximity linking (replace blanket visual supplements)
