@@ -1,8 +1,7 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Network } from 'vis-network'
-import { DataSet } from 'vis-data'
+import ForceGraph2D from 'react-force-graph-2d'
 import { FileText, Table2, Image, Calculator, ExternalLink, MessageSquare, X } from 'lucide-react'
 import { fetchGraphDocuments, fetchGraphNodes, fetchDocuments } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -18,31 +17,30 @@ const NODE_COLORS = {
 }
 
 const EDGE_TYPES = ['follows', 'co_located', 'describes', 'references', 'similar_to']
-
 const TYPE_ICONS = { text: FileText, table: Table2, image: Image, formula: Calculator }
 
 export default function GraphPage() {
   const { docId } = useParams()
   const navigate = useNavigate()
+  const graphRef = useRef(null)
   const containerRef = useRef(null)
-  const networkRef = useRef(null)
   const [selectedNode, setSelectedNode] = useState(null)
   const [nodeFilter, setNodeFilter] = useState({ text: true, table: true, formula: true, image: true })
   const [edgeFilter, setEdgeFilter] = useState({
     follows: true,
     describes: true,
     references: true,
-    similar_to: false,  // off by default — too many edges
-    co_located: false,   // off by default — too many edges
+    similar_to: false,
+    co_located: false,
   })
   const [scope, setScope] = useState(docId || '')
+  const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
 
   const { data: documents = [] } = useQuery({
     queryKey: ['documents', USER_ID],
     queryFn: () => fetchDocuments(USER_ID),
   })
 
-  // Build active edge types string for API request
   const activeEdgeTypes = EDGE_TYPES.filter(t => edgeFilter[t]).join(',')
 
   const { data: graphData, isLoading } = useQuery({
@@ -53,119 +51,86 @@ export default function GraphPage() {
         : fetchGraphDocuments(USER_ID),
   })
 
-  // Store DataSets as refs so filters can update without rebuild
-  const nodesRef = useRef(null)
-  const edgesRef = useRef(null)
-  const allNodesRef = useRef([])
-  const allEdgesRef = useRef([])
-
-  // Build vis-network ONLY when graphData changes (new scope/document)
+  // Measure container size
   useEffect(() => {
-    if (!containerRef.current || !graphData) return
+    const el = containerRef.current
+    if (!el) return
+    const measure = () => setDimensions({ width: el.clientWidth, height: el.clientHeight })
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
 
-    const allNodes = (graphData.nodes || []).map(n => {
-      const id = n.node_type === 'document' ? `doc:${n.doc_id}` : `${n.doc_id}:${n.chunk_index}`
-      const rawLabel = n.label || n.content_preview?.slice(0, 20) || n.source_file?.slice(0, 20) || id
-      return {
-        id,
-        label: rawLabel.length > 25 ? rawLabel.slice(0, 22) + '...' : rawLabel,
+  // Transform backend data to react-force-graph format
+  const graphFormatted = useMemo(() => {
+    if (!graphData) return { nodes: [], links: [] }
+
+    const nodes = (graphData.nodes || [])
+      .filter(n => n.node_type === 'document' || nodeFilter[n.chunk_type] !== false)
+      .map(n => ({
+        id: n.node_type === 'document' ? `doc:${n.doc_id}` : `${n.doc_id}:${n.chunk_index}`,
+        label: n.label || n.content_preview?.slice(0, 25) || n.source_file?.slice(0, 25) || '?',
         color: NODE_COLORS[n.chunk_type] || NODE_COLORS.document,
-        shape: n.node_type === 'document' ? 'box' : 'dot',
-        size: n.node_type === 'document' ? 20 : 12,
-        font: { color: '#e2e8f0', size: 10 },
-        title: n.content_preview || n.label || '',
+        size: n.node_type === 'document' ? 8 : 4,
         _data: n,
-        _chunkType: n.chunk_type,
-        _nodeType: n.node_type,
-      }
-    })
+      }))
 
-    const allEdges = (graphData.edges || []).map((e, i) => ({
-      id: `e${i}`,
-      from: e.source_chunk_index != null ? `${e.source_doc_id}:${e.source_chunk_index}` : `doc:${e.source_doc_id}`,
-      to: e.target_chunk_index != null ? `${e.target_doc_id}:${e.target_chunk_index}` : `doc:${e.target_doc_id}`,
-      label: e.relation,
-      font: { color: '#64748b', size: 8, strokeWidth: 0 },
-      color: { color: '#334155', highlight: '#64748b' },
-      arrows: e.relation === 'follows' ? 'to' : '',
-      dashes: e.relation === 'similar_to',
-      _relation: e.relation,
-    }))
+    const nodeIds = new Set(nodes.map(n => n.id))
 
-    allNodesRef.current = allNodes
-    allEdgesRef.current = allEdges
+    const links = (graphData.edges || [])
+      .map(e => ({
+        source: e.source_chunk_index != null ? `${e.source_doc_id}:${e.source_chunk_index}` : `doc:${e.source_doc_id}`,
+        target: e.target_chunk_index != null ? `${e.target_doc_id}:${e.target_chunk_index}` : `doc:${e.target_doc_id}`,
+        relation: e.relation,
+        color: '#334155',
+      }))
+      .filter(l => nodeIds.has(l.source) && nodeIds.has(l.target))
 
-    const nodes = new DataSet(allNodes)
-    const edges = new DataSet(allEdges)
-    nodesRef.current = nodes
-    edgesRef.current = edges
+    return { nodes, links }
+  }, [graphData, nodeFilter])
 
-    if (networkRef.current) networkRef.current.destroy()
+  const handleNodeClick = useCallback((node) => {
+    if (node._data?.node_type === 'document') {
+      setScope(node._data.doc_id)
+      setSelectedNode(null)
+    } else {
+      setSelectedNode(node._data)
+    }
+  }, [])
 
-    const network = new Network(containerRef.current, { nodes, edges }, {
-      physics: {
-        forceAtlas2Based: { gravitationalConstant: -80, centralGravity: 0.01, springLength: 120, springConstant: 0.08 },
-        solver: 'forceAtlas2Based',
-        stabilization: { iterations: 20, fit: true },
-      },
-      interaction: { hover: true, tooltipDelay: 300, zoomView: true, dragView: true },
-      edges: { smooth: false, width: 1, hoverWidth: 2, font: { align: 'middle' } },
-      nodes: { borderWidth: 0 },
-    })
-    networkRef.current = network
+  const handleBackgroundClick = useCallback(() => {
+    setSelectedNode(null)
+  }, [])
 
-    network.on('click', (params) => {
-      if (params.nodes.length > 0) {
-        const nodeId = params.nodes[0]
-        const node = nodes.get(nodeId)
-        if (node?._data) {
-          if (node._data.node_type === 'document') {
-            setScope(node._data.doc_id)
-            setSelectedNode(null)
-          } else {
-            setSelectedNode(node._data)
-          }
-        }
-      } else {
-        setSelectedNode(null)
-      }
-    })
+  // Custom node rendering
+  const paintNode = useCallback((node, ctx) => {
+    const r = node.size || 4
+    ctx.beginPath()
+    if (node._data?.node_type === 'document') {
+      // Square for documents
+      ctx.rect(node.x - r, node.y - r, r * 2, r * 2)
+    } else {
+      // Circle for chunks
+      ctx.arc(node.x, node.y, r, 0, Math.PI * 2)
+    }
+    ctx.fillStyle = node.color || '#6366f1'
+    ctx.fill()
 
-    network.once('stabilizationIterationsDone', () => {
-      network.setOptions({ physics: false })
-      network.fit({ animation: { duration: 300 } })
-    })
+    // Label
+    ctx.font = '3px sans-serif'
+    ctx.fillStyle = '#94a3b8'
+    ctx.textAlign = 'center'
+    const label = node.label?.length > 20 ? node.label.slice(0, 18) + '..' : node.label
+    ctx.fillText(label || '', node.x, node.y + r + 4)
+  }, [])
 
-    return () => { network.destroy(); networkRef.current = null }
-  }, [graphData])
-
-  // Apply node type filters (edge filtering is done server-side via queryKey)
-  useEffect(() => {
-    if (!nodesRef.current || !edgesRef.current) return
-
-    const visibleNodeIds = new Set()
-    const nodeUpdates = allNodesRef.current.map(n => {
-      const visible = n._nodeType === 'document' || nodeFilter[n._chunkType] !== false
-      if (visible) visibleNodeIds.add(n.id)
-      return { id: n.id, hidden: !visible }
-    })
-
-    // Hide edges whose endpoints are hidden
-    const edgeUpdates = allEdgesRef.current.map(e => ({
-      id: e.id,
-      hidden: !(visibleNodeIds.has(e.from) && visibleNodeIds.has(e.to)),
-    }))
-
-    nodesRef.current.update(nodeUpdates)
-    edgesRef.current.update(edgeUpdates)
-  }, [nodeFilter])
-
-  // Keyboard shortcuts: F to fit, Escape to close preview
+  // Keyboard shortcuts
   useEffect(() => {
     const handler = (e) => {
       if (document.activeElement?.tagName === 'INPUT') return
       if (e.key === 'f' || e.key === 'F') {
-        networkRef.current?.fit({ animation: { duration: 300 } })
+        graphRef.current?.zoomToFit(300)
       }
       if (e.key === 'Escape') {
         setSelectedNode(null)
@@ -175,34 +140,29 @@ export default function GraphPage() {
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  const docList = Array.isArray(documents) ? documents : []
+  const docList = Array.isArray(documents) ? (documents.documents || documents) : []
 
   return (
     <div className="flex flex-col h-full" style={{ backgroundColor: 'hsl(222 47% 4%)' }}>
       {/* Toolbar */}
-      <div
-        className="flex items-center gap-3 px-4 py-2 border-b flex-wrap"
-        style={{ borderColor: 'hsl(217 33% 17%)', backgroundColor: 'hsl(222 47% 8%)' }}
-      >
-        {/* Node type toggles */}
-        {Object.entries(NODE_COLORS)
-          .filter(([k]) => k !== 'document')
-          .map(([type, color]) => (
-            <button
-              key={type}
-              onClick={() => setNodeFilter(f => ({ ...f, [type]: !f[type] }))}
-              className={cn('flex items-center gap-1 text-xs transition-opacity',
-                nodeFilter[type] ? 'opacity-100' : 'opacity-30'
-              )}
-            >
-              <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
-              {type}
-            </button>
-          ))}
+      <div className="flex items-center gap-3 px-4 py-2 border-b flex-wrap"
+           style={{ borderColor: 'hsl(217 33% 17%)', backgroundColor: 'hsl(222 47% 8%)' }}>
+        {Object.entries(NODE_COLORS).filter(([k]) => k !== 'document').map(([type, color]) => (
+          <button
+            key={type}
+            onClick={() => setNodeFilter(f => ({ ...f, [type]: !f[type] }))}
+            className={cn('flex items-center gap-1 text-xs transition-opacity',
+              nodeFilter[type] ? 'opacity-100' : 'opacity-30'
+            )}
+            style={{ color: 'hsl(210 40% 98%)' }}
+          >
+            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
+            {type}
+          </button>
+        ))}
 
-        <span className="opacity-20">|</span>
+        <span className="opacity-20" style={{ color: 'hsl(210 40% 98%)' }}>|</span>
 
-        {/* Edge type toggles */}
         {EDGE_TYPES.map(type => (
           <button
             key={type}
@@ -219,9 +179,8 @@ export default function GraphPage() {
           </button>
         ))}
 
-        <span className="opacity-20">|</span>
+        <span className="opacity-20" style={{ color: 'hsl(210 40% 98%)' }}>|</span>
 
-        {/* Scope selector */}
         <select
           value={scope}
           onChange={e => { setScope(e.target.value); setSelectedNode(null) }}
@@ -229,29 +188,64 @@ export default function GraphPage() {
           style={{ backgroundColor: 'hsl(217 33% 17%)', color: 'hsl(210 40% 98%)', border: 'none' }}
         >
           <option value="">All Documents</option>
-          {docList.map(d => (
+          {(Array.isArray(docList) ? docList : []).map(d => (
             <option key={d.doc_id} value={d.doc_id}>{d.filename}</option>
           ))}
         </select>
+
+        {scope && (
+          <button onClick={() => { setScope(''); setSelectedNode(null) }}
+                  className="text-xs opacity-40 hover:opacity-100" style={{ color: 'hsl(210 40% 98%)' }}>
+            <X size={12} />
+          </button>
+        )}
       </div>
 
       {/* Graph canvas */}
-      <div className="flex-1 relative">
+      <div className="flex-1 relative" ref={containerRef}>
         {isLoading && (
-          <div className="absolute inset-0 flex items-center justify-center z-10"
-               style={{ color: 'hsl(215 20% 65%)' }}>
+          <div className="absolute inset-0 flex items-center justify-center z-10 opacity-40"
+               style={{ color: 'hsl(210 40% 98%)' }}>
             Loading graph...
           </div>
         )}
-        <div ref={containerRef} className="w-full h-full" />
+        {graphFormatted.nodes.length > 0 && (
+          <ForceGraph2D
+            ref={graphRef}
+            graphData={graphFormatted}
+            width={dimensions.width}
+            height={dimensions.height - (selectedNode ? 140 : 0)}
+            backgroundColor="hsl(222, 47%, 4%)"
+            nodeCanvasObject={paintNode}
+            nodePointerAreaPaint={(node, color, ctx) => {
+              const r = (node.size || 4) + 2
+              ctx.beginPath()
+              ctx.arc(node.x, node.y, r, 0, Math.PI * 2)
+              ctx.fillStyle = color
+              ctx.fill()
+            }}
+            onNodeClick={handleNodeClick}
+            onBackgroundClick={handleBackgroundClick}
+            linkColor={l => l.color || '#334155'}
+            linkWidth={0.5}
+            linkDirectionalArrowLength={l => l.relation === 'follows' ? 3 : 0}
+            linkDirectionalArrowRelPos={1}
+            cooldownTicks={30}
+            onEngineStop={() => graphRef.current?.zoomToFit(300, 20)}
+            enableNodeDrag={true}
+          />
+        )}
+        {!isLoading && graphFormatted.nodes.length === 0 && (
+          <div className="absolute inset-0 flex items-center justify-center opacity-40"
+               style={{ color: 'hsl(210 40% 98%)' }}>
+            No graph data. Select a document or upload one.
+          </div>
+        )}
       </div>
 
       {/* Node preview panel */}
       {selectedNode && (
-        <div
-          className="border-t px-4 py-3"
-          style={{ borderColor: 'hsl(217 33% 17%)', backgroundColor: 'hsl(222 47% 8%)' }}
-        >
+        <div className="border-t px-4 py-3" style={{ borderColor: 'hsl(217 33% 17%)', backgroundColor: 'hsl(222 47% 8%)' }}>
           <div className="flex items-start justify-between mb-2">
             <div className="flex items-center gap-2">
               {(() => {
@@ -259,11 +253,11 @@ export default function GraphPage() {
                 return <Icon size={16} style={{ color: NODE_COLORS[selectedNode.chunk_type] }} />
               })()}
               <span className="text-sm font-medium" style={{ color: 'hsl(210 40% 98%)' }}>
-                {selectedNode.label || selectedNode.chunk_type}
-                {selectedNode.source_file ? ` · ${selectedNode.source_file}` : ''}
+                {selectedNode.label || selectedNode.chunk_type} · {selectedNode.source_file}
               </span>
             </div>
-            <button onClick={() => setSelectedNode(null)} className="opacity-40 hover:opacity-100">
+            <button onClick={() => setSelectedNode(null)} className="opacity-40 hover:opacity-100"
+                    style={{ color: 'hsl(210 40% 98%)' }}>
               <X size={14} />
             </button>
           </div>
@@ -276,19 +270,19 @@ export default function GraphPage() {
               className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs"
               style={{ backgroundColor: 'hsl(217 33% 17%)', color: 'hsl(210 40% 98%)' }}
             >
-              <ExternalLink size={12} />
-              Open in PDF
+              <ExternalLink size={12} /> Open in PDF
             </button>
             <button
-              onClick={() => navigate('/chat')}
+              onClick={() => navigate(`/chat?doc=${selectedNode.doc_id}`)}
               className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs"
               style={{ backgroundColor: 'hsl(217 33% 17%)', color: 'hsl(210 40% 98%)' }}
             >
-              <MessageSquare size={12} />
-              Ask about this
+              <MessageSquare size={12} /> Ask about this
             </button>
             {selectedNode.page != null && (
-              <span className="text-xs opacity-40">Page {selectedNode.page + 1}</span>
+              <span className="text-xs opacity-40" style={{ color: 'hsl(210 40% 98%)' }}>
+                Page {selectedNode.page + 1}
+              </span>
             )}
           </div>
         </div>
