@@ -257,6 +257,17 @@ export default function DashboardPage() {
     setHoverNode(node || null)
   }, [])
 
+  const handleDelete = (docId) => {
+    if (confirm('Delete this document?')) deleteMutation.mutate(docId)
+    setMenuOpen(null)
+  }
+
+  const handleDownload = (docId) => {
+    const API_BASE = import.meta.env.VITE_API_URL
+    window.open(`${API_BASE}/documents/${docId}/download`, '_blank')
+    setMenuOpen(null)
+  }
+
   const handleGraphRightClick = useCallback((node, event) => {
     event.preventDefault()
 
@@ -322,17 +333,6 @@ export default function DashboardPage() {
       setUploading(false)
       e.target.value = ''
     }
-  }
-
-  const handleDelete = (docId) => {
-    if (confirm('Delete this document?')) deleteMutation.mutate(docId)
-    setMenuOpen(null)
-  }
-
-  const handleDownload = (docId) => {
-    const API_BASE = import.meta.env.VITE_API_URL
-    window.open(`${API_BASE}/documents/${docId}/download`, '_blank')
-    setMenuOpen(null)
   }
 
   const formatDate = (iso) => {
