@@ -30,6 +30,7 @@ export default function DashboardPage() {
   const [hoverNode, setHoverNode] = useState(null)
   const [dimensions, setDimensions] = useState({ width: 800, height: 500 })
   const [selectedDomain, setSelectedDomain] = useState(null)
+  const [showDomains, setShowDomains] = useState(true)
 
   const { data: documentsData, isLoading } = useQuery({
     queryKey: ['documents', USER_ID],
@@ -82,6 +83,8 @@ export default function DashboardPage() {
     collectionsData.existing_collections?.forEach(c => tags.add(c))
     return [...tags].sort()
   }, [collectionsData])
+
+  const formatName = (name) => name.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
 
   // Collections list with per-collection document counts
   const collectionList = useMemo(() => {
@@ -394,17 +397,40 @@ export default function DashboardPage() {
       {/* Main content: left sidebar + graph */}
       <div className="flex flex-1 min-h-0">
         {/* Left domain/collection sidebar */}
+        {showDomains && (
         <div
           className="w-48 shrink-0 flex flex-col border-r"
           style={{ backgroundColor: 'hsl(222 47% 8%)', borderColor: 'hsl(217 33% 17%)' }}
         >
           <div
-            className="px-3 py-2 text-xs font-semibold uppercase tracking-wider border-b"
-            style={{ color: 'hsl(215 20% 65%)', borderColor: 'hsl(217 33% 17%)' }}
+            className="flex items-center justify-between px-3 py-2 border-b"
+            style={{ borderColor: 'hsl(217 33% 17%)' }}
           >
-            Domains
+            <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'hsl(215 20% 65%)' }}>
+              Domains
+            </span>
+            <button onClick={() => setShowDomains(false)} className="opacity-40 hover:opacity-100"
+                    style={{ color: 'hsl(210 40% 98%)' }}>
+              <X size={12} />
+            </button>
           </div>
           <div className="flex-1 overflow-auto py-1">
+            {/* All option */}
+            <button
+              onClick={() => { setSelectedDomain(null); setActiveFilters([]) }}
+              className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-left transition-colors hover:bg-white/5"
+              style={{
+                color: !selectedDomain ? 'hsl(250 80% 65%)' : 'hsl(210 40% 98%)',
+                backgroundColor: !selectedDomain ? 'hsl(250 80% 65% / 0.12)' : 'transparent',
+                fontWeight: !selectedDomain ? 600 : 400,
+              }}
+            >
+              <span>All</span>
+              <span className="ml-1 shrink-0 tabular-nums" style={{ color: 'hsl(215 20% 65%)' }}>
+                {Array.isArray(documents) ? documents.length : 0}
+              </span>
+            </button>
+
             {collectionList.length === 0 ? (
               <div className="px-3 py-4 text-xs opacity-30" style={{ color: 'hsl(215 20% 65%)' }}>
                 No collections
@@ -421,11 +447,8 @@ export default function DashboardPage() {
                     fontWeight: selectedDomain === col.name ? 600 : 400,
                   }}
                 >
-                  <span className="truncate">{col.name}</span>
-                  <span
-                    className="ml-1 shrink-0 tabular-nums"
-                    style={{ color: 'hsl(215 20% 65%)' }}
-                  >
+                  <span className="truncate">{formatName(col.name)}</span>
+                  <span className="ml-1 shrink-0 tabular-nums" style={{ color: 'hsl(215 20% 65%)' }}>
                     {col.count}
                   </span>
                 </button>
@@ -446,6 +469,19 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
+        )}
+
+        {/* Toggle button when sidebar hidden */}
+        {!showDomains && (
+          <button
+            onClick={() => setShowDomains(true)}
+            className="absolute left-2 top-1/2 -translate-y-1/2 z-10 p-1.5 rounded-lg opacity-40 hover:opacity-100"
+            style={{ backgroundColor: 'hsl(222 47% 12%)', color: 'hsl(210 40% 98%)' }}
+            title="Show domains"
+          >
+            <Filter size={14} />
+          </button>
+        )}
 
         {/* Mini document graph — fills remaining space */}
         <div className="flex-1 relative min-h-0" ref={containerRef} style={{ backgroundColor: 'hsl(222 47% 4%)' }}>
