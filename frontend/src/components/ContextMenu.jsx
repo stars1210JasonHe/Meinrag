@@ -7,8 +7,19 @@ export default function ContextMenu({ x, y, items, onClose }) {
     const handler = (e) => {
       if (ref.current && !ref.current.contains(e.target)) onClose()
     }
+    const keyHandler = (e) => {
+      if (e.key === 'Escape') onClose()
+    }
     document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    document.addEventListener('click', handler)
+    document.addEventListener('contextmenu', handler)
+    document.addEventListener('keydown', keyHandler)
+    return () => {
+      document.removeEventListener('mousedown', handler)
+      document.removeEventListener('click', handler)
+      document.removeEventListener('contextmenu', handler)
+      document.removeEventListener('keydown', keyHandler)
+    }
   }, [onClose])
 
   if (!items || items.length === 0) return null
