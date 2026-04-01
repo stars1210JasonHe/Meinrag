@@ -155,7 +155,7 @@ export default function GraphPage() {
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  const docList = Array.isArray(documents) ? (documents.documents || documents) : []
+  const docList = documents?.documents || (Array.isArray(documents) ? documents : [])
   const collections = collectionsData?.existing_collections || []
 
   // Group documents by collection for the dropdown
