@@ -76,6 +76,34 @@ export default function GraphPage() {
     return () => observer.disconnect()
   }, [])
 
+  const docList = documents?.documents || (Array.isArray(documents) ? documents : [])
+  const collections = collectionsData?.existing_collections || []
+
+  // Group documents by collection for the dropdown
+  const docsByCollection = useMemo(() => {
+    const groups = {}
+    for (const d of (Array.isArray(docList) ? docList : [])) {
+      for (const c of (d.collections || [])) {
+        if (!groups[c]) groups[c] = []
+        if (!groups[c].find(x => x.doc_id === d.doc_id)) groups[c].push(d)
+      }
+    }
+    return groups
+  }, [docList])
+
+  // For collection scope, filter document-level graph to matching docs
+  const filteredGraphData = useMemo(() => {
+    if (scopeType !== 'collection' || !graphData) return graphData
+    const colDocs = docsByCollection[scopeLabel] || []
+    const colDocIds = new Set(colDocs.map(d => d.doc_id))
+    return {
+      nodes: (graphData.nodes || []).filter(n => colDocIds.has(n.doc_id)),
+      edges: (graphData.edges || []).filter(e =>
+        colDocIds.has(e.source_doc_id) && colDocIds.has(e.target_doc_id)
+      ),
+    }
+  }, [graphData, scopeType, scopeLabel, docsByCollection])
+
   // Transform backend data to react-force-graph format
   const graphFormatted = useMemo(() => {
     const data = scopeType === 'collection' ? filteredGraphData : graphData
@@ -155,20 +183,7 @@ export default function GraphPage() {
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  const docList = documents?.documents || (Array.isArray(documents) ? documents : [])
-  const collections = collectionsData?.existing_collections || []
-
-  // Group documents by collection for the dropdown
-  const docsByCollection = useMemo(() => {
-    const groups = {}
-    for (const d of (Array.isArray(docList) ? docList : [])) {
-      for (const c of (d.collections || [])) {
-        if (!groups[c]) groups[c] = []
-        if (!groups[c].find(x => x.doc_id === d.doc_id)) groups[c].push(d)
-      }
-    }
-    return groups
-  }, [docList])
+  // (docList and collections moved up before filteredGraphData)
 
   const handleScopeChange = (value) => {
     setSelectedNode(null)
@@ -182,19 +197,6 @@ export default function GraphPage() {
       setScopeType('doc'); setScopeLabel(doc?.filename || value); setScope(value)
     }
   }
-
-  // For collection scope, filter document-level graph to matching docs
-  const filteredGraphData = useMemo(() => {
-    if (scopeType !== 'collection' || !graphData) return graphData
-    const colDocs = docsByCollection[scopeLabel] || []
-    const colDocIds = new Set(colDocs.map(d => d.doc_id))
-    return {
-      nodes: (graphData.nodes || []).filter(n => colDocIds.has(n.doc_id)),
-      edges: (graphData.edges || []).filter(e =>
-        colDocIds.has(e.source_doc_id) && colDocIds.has(e.target_doc_id)
-      ),
-    }
-  }, [graphData, scopeType, scopeLabel, docsByCollection])
 
   return (
     <div className="flex flex-col h-full" style={{ backgroundColor: 'hsl(222 47% 4%)' }}>
