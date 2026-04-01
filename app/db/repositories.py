@@ -275,10 +275,13 @@ class ChatSessionRepository:
             .where(ChatMessageModel.session_id == session_id)
             .order_by(ChatMessageModel.created_at)
         )
-        return [
-            {"role": m.role, "content": m.content}
-            for m in msg_result.scalars().all()
-        ]
+        result_list = []
+        for m in msg_result.scalars().all():
+            entry = {"role": m.role, "content": m.content}
+            if m.sources_json:
+                entry["sources"] = m.sources_json
+            result_list.append(entry)
+        return result_list
 
     async def delete_session(self, session_id: str, user_id: str) -> bool:
         """Delete a session only if it belongs to user_id."""
