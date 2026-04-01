@@ -32,6 +32,9 @@ export default function GraphPage() {
   const graphRef = useRef(null)
   const containerRef = useRef(null)
   const [selectedNode, setSelectedNode] = useState(null)
+  const [hoverNode, setHoverNode] = useState(null)
+  const [highlightNodes, setHighlightNodes] = useState(new Set())
+  const [highlightLinks, setHighlightLinks] = useState(new Set())
   const [nodeFilter, setNodeFilter] = useState({ text: true, table: true, formula: true, image: true })
   const [edgeFilter, setEdgeFilter] = useState({
     follows: true,
@@ -115,7 +118,6 @@ export default function GraphPage() {
         id: n.node_type === 'document' ? `doc:${n.doc_id}` : `${n.doc_id}:${n.chunk_index}`,
         label: n.label || n.content_preview?.slice(0, 25) || n.source_file?.slice(0, 25) || '?',
         color: NODE_COLORS[n.chunk_type] || NODE_COLORS.document,
-        size: n.node_type === 'document' ? 8 : 4,
         _data: n,
       }))
 
@@ -130,9 +132,20 @@ export default function GraphPage() {
       }))
       .filter(l => nodeIds.has(l.source) && nodeIds.has(l.target))
 
-    // Deep copy to prevent react-force-graph from mutating cached data
+    // Compute connection count for node sizing
+    const connCount = {}
+    for (const l of links) {
+      connCount[l.source] = (connCount[l.source] || 0) + 1
+      connCount[l.target] = (connCount[l.target] || 0) + 1
+    }
+    const maxConn = Math.max(1, ...Object.values(connCount))
+
+    // Deep copy + add computed size
     return {
-      nodes: nodes.map(n => ({ ...n })),
+      nodes: nodes.map(n => ({
+        ...n,
+        val: n._data?.node_type === 'document' ? 8 : 1 + (connCount[n.id] || 0) / maxConn * 5,
+      })),
       links: links.map(l => ({ ...l })),
     }
   }, [graphData, filteredGraphData, scopeType, nodeFilter])
@@ -148,29 +161,76 @@ export default function GraphPage() {
 
   const handleBackgroundClick = useCallback(() => {
     setSelectedNode(null)
+    setHoverNode(null)
+    setHighlightNodes(new Set())
+    setHighlightLinks(new Set())
   }, [])
 
-  // Custom node rendering
+  const handleNodeHover = useCallback((node) => {
+    setHoverNode(node || null)
+    if (node) {
+      const neighbors = new Set([node.id])
+      const links = new Set()
+      for (const l of graphFormatted.links) {
+        const srcId = typeof l.source === 'object' ? l.source.id : l.source
+        const tgtId = typeof l.target === 'object' ? l.target.id : l.target
+        if (srcId === node.id) { neighbors.add(tgtId); links.add(l) }
+        if (tgtId === node.id) { neighbors.add(srcId); links.add(l) }
+      }
+      setHighlightNodes(neighbors)
+      setHighlightLinks(links)
+    } else {
+      setHighlightNodes(new Set())
+      setHighlightLinks(new Set())
+    }
+  }, [graphFormatted.links])
+
+  // Custom node rendering with hover glow
   const paintNode = useCallback((node, ctx) => {
-    const r = node.size || 4
+    const r = Math.sqrt(node.val || 4) * 2
+    const isHighlighted = !hoverNode || highlightNodes.has(node.id)
+    const opacity = isHighlighted ? 1.0 : 0.15
+
+    ctx.globalAlpha = opacity
+
+    // Glow for hovered node
+    if (hoverNode?.id === node.id) {
+      ctx.beginPath()
+      ctx.arc(node.x, node.y, r + 3, 0, Math.PI * 2)
+      ctx.fillStyle = node.color + '44'
+      ctx.fill()
+    }
+
+    // Node shape
     ctx.beginPath()
     if (node._data?.node_type === 'document') {
-      // Square for documents
-      ctx.rect(node.x - r, node.y - r, r * 2, r * 2)
+      const s = r * 1.2
+      ctx.roundRect?.(node.x - s, node.y - s, s * 2, s * 2, 2) ||
+        ctx.rect(node.x - s, node.y - s, s * 2, s * 2)
     } else {
-      // Circle for chunks
       ctx.arc(node.x, node.y, r, 0, Math.PI * 2)
     }
     ctx.fillStyle = node.color || '#6366f1'
     ctx.fill()
 
-    // Label
-    ctx.font = '3px sans-serif'
-    ctx.fillStyle = '#94a3b8'
-    ctx.textAlign = 'center'
-    const label = node.label?.length > 20 ? node.label.slice(0, 18) + '..' : node.label
-    ctx.fillText(label || '', node.x, node.y + r + 4)
-  }, [])
+    // Border ring for selected
+    if (selectedNode && node._data?.chunk_index === selectedNode.chunk_index && node._data?.doc_id === selectedNode.doc_id) {
+      ctx.strokeStyle = '#ffffff'
+      ctx.lineWidth = 1
+      ctx.stroke()
+    }
+
+    // Label (only show on hover or for documents)
+    if (hoverNode?.id === node.id || node._data?.node_type === 'document' || !hoverNode) {
+      ctx.font = `${Math.max(3, r * 0.8)}px sans-serif`
+      ctx.fillStyle = isHighlighted ? '#e2e8f0' : '#64748b'
+      ctx.textAlign = 'center'
+      const label = node.label?.length > 20 ? node.label.slice(0, 18) + '..' : node.label
+      ctx.fillText(label || '', node.x, node.y + r + 4)
+    }
+
+    ctx.globalAlpha = 1.0
+  }, [hoverNode, highlightNodes, selectedNode])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -312,9 +372,16 @@ export default function GraphPage() {
               ctx.fill()
             }}
             onNodeClick={handleNodeClick}
+            onNodeHover={handleNodeHover}
             onBackgroundClick={handleBackgroundClick}
-            linkColor={l => EDGE_COLORS[l.relation] || '#64748b'}
-            linkWidth={l => l.relation === 'follows' ? 1 : 2}
+            linkColor={l => {
+              if (hoverNode && !highlightLinks.has(l)) return '#1e293b'
+              return EDGE_COLORS[l.relation] || '#64748b'
+            }}
+            linkWidth={l => {
+              if (hoverNode && highlightLinks.has(l)) return 3
+              return l.relation === 'follows' ? 0.5 : 1.5
+            }}
             linkLineDash={l => l.relation === 'similar_to' ? [4, 4] : null}
             linkDirectionalArrowLength={l => l.relation === 'follows' ? 3 : 0}
             linkDirectionalArrowRelPos={1}
