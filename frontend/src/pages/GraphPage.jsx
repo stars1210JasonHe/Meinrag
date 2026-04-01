@@ -2,9 +2,10 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import ForceGraph2D from 'react-force-graph-2d'
-import { FileText, Table2, Image, Calculator, ExternalLink, MessageSquare, X } from 'lucide-react'
+import { FileText, Table2, Image, Calculator, ExternalLink, MessageSquare, X, Network } from 'lucide-react'
 import { fetchGraphDocuments, fetchGraphNodes, fetchDocuments, fetchCollections } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import ContextMenu from '@/components/ContextMenu'
 
 const USER_ID = 'admin'
 
@@ -49,6 +50,7 @@ export default function GraphPage() {
   const [scopeType, setScopeType] = useState(docId ? 'doc' : 'all') // 'all' | 'collection' | 'doc'
   const [scopeLabel, setScopeLabel] = useState('')
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
+  const [contextMenu, setContextMenu] = useState(null) // {x, y, items}
 
   const { data: documents = [] } = useQuery({
     queryKey: ['documents', USER_ID],
@@ -214,7 +216,33 @@ export default function GraphPage() {
     setPinnedNode(null)
     setHighlightNodes(new Set())
     setHighlightLinks(new Set())
+    setContextMenu(null)
   }, [])
+
+  const handleNodeRightClick = useCallback((node, event) => {
+    event.preventDefault()
+
+    const items = []
+
+    if (node._data?.node_type === 'document') {
+      items.push(
+        { label: 'Explore chunks', icon: Network, action: () => { setScope(node._data.doc_id); setSelectedNode(null) } },
+        { label: 'Chat about this', icon: MessageSquare, action: () => navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.source_file || '')}`) },
+        { label: 'Open in PDF', icon: ExternalLink, action: () => navigate(`/pdf/${node._data.doc_id}`) },
+      )
+    } else {
+      items.push(
+        { label: 'Chat about this', icon: MessageSquare, action: () => navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.source_file || '')}`) },
+        { label: 'Open in PDF', icon: ExternalLink, action: () => navigate(`/pdf/${node._data.doc_id}`) },
+        { label: 'View neighbors', icon: Network, action: () => { handleNodeClick(node) } },
+      )
+    }
+
+    items.push({ separator: true })
+    items.push({ label: 'Cancel', action: () => {} })
+
+    setContextMenu({ x: event.clientX, y: event.clientY, items })
+  }, [navigate, handleNodeClick])
 
   const handleNodeHover = useCallback((node) => {
     setHoverNode(node || null)
@@ -420,6 +448,7 @@ export default function GraphPage() {
             onNodeClick={handleNodeClick}
             onNodeHover={handleNodeHover}
             onBackgroundClick={handleBackgroundClick}
+            onNodeRightClick={handleNodeRightClick}
             linkColor={l => {
               if (activeNode && !highlightLinks.has(l)) return '#1e293b'
               return EDGE_COLORS[l.relation] || '#64748b'
@@ -443,6 +472,15 @@ export default function GraphPage() {
           </div>
         )}
       </div>
+
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenu.items}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
 
       {/* Node preview panel */}
       {selectedNode && (

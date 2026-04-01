@@ -4,10 +4,11 @@ import { useNavigate } from 'react-router-dom'
 import ForceGraph2D from 'react-force-graph-2d'
 import {
   Search, Upload, MoreVertical, Trash2, Download, RefreshCw,
-  FileText, X, MessageSquare, Filter, ChevronUp, ChevronDown, Menu
+  FileText, X, MessageSquare, Filter, ChevronUp, ChevronDown, Menu, Network
 } from 'lucide-react'
 import { fetchDocuments, fetchCollections, fetchGraphDocuments, deleteDocument } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import ContextMenu from '@/components/ContextMenu'
 
 const USER_ID = 'admin'
 
@@ -31,6 +32,7 @@ export default function DashboardPage() {
   const [dimensions, setDimensions] = useState({ width: 800, height: 500 })
   const [selectedDomain, setSelectedDomain] = useState(null)
   const [showDomains, setShowDomains] = useState(true)
+  const [contextMenu, setContextMenu] = useState(null)
 
   const { data: documentsData, isLoading } = useQuery({
     queryKey: ['documents', USER_ID],
@@ -254,6 +256,33 @@ export default function DashboardPage() {
   const handleNodeHover = useCallback((node) => {
     setHoverNode(node || null)
   }, [])
+
+  const handleGraphRightClick = useCallback((node, event) => {
+    event.preventDefault()
+
+    const items = []
+
+    if (node._type === 'document' && node._data) {
+      items.push(
+        { label: 'Chat about this', icon: MessageSquare, action: () => navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.filename || '')}`) },
+        { label: 'Open in PDF', icon: FileText, action: () => navigate(`/pdf/${node._data.doc_id}`) },
+        { label: 'View in Graph', icon: Network, action: () => navigate(`/graph/${node._data.doc_id}`) },
+        { separator: true },
+        { label: 'Download', icon: Download, action: () => handleDownload(node._data.doc_id) },
+        { label: 'Delete', icon: Trash2, action: () => handleDelete(node._data.doc_id), danger: true },
+      )
+    } else if (node._type === 'collection') {
+      items.push(
+        { label: 'Chat about collection', icon: MessageSquare, action: () => navigate(`/chat?collection=${encodeURIComponent(node.label)}`) },
+        { label: 'Filter by this', icon: Filter, action: () => handleDomainClick(node.label) },
+      )
+    }
+
+    items.push({ separator: true })
+    items.push({ label: 'Cancel', action: () => {} })
+
+    setContextMenu({ x: event.clientX, y: event.clientY, items })
+  }, [navigate, handleDownload, handleDelete, handleDomainClick])
 
   const toggleFilter = (tag) => {
     setActiveFilters(prev =>
@@ -502,6 +531,7 @@ export default function DashboardPage() {
               }}
               onNodeClick={handleNodeClick}
               onNodeHover={handleNodeHover}
+              onNodeRightClick={handleGraphRightClick}
               linkColor={l => l._type === 'similar_to' ? '#f59e0b99' : '#6366f133'}
               linkWidth={l => l._type === 'similar_to' ? 2.5 : 0.5}
               linkLineDash={l => l._type === 'similar_to' ? [4, 4] : null}
@@ -531,6 +561,10 @@ export default function DashboardPage() {
           </label>
         </div>
       </div>
+
+      {contextMenu && (
+        <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenu.items} onClose={() => setContextMenu(null)} />
+      )}
 
       {/* Collapsible document panel */}
       <div className="border-t shrink-0" style={{ borderColor: 'hsl(217 33% 17%)', backgroundColor: 'hsl(222 47% 8%)' }}>
