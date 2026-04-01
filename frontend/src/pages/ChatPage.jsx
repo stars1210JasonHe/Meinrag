@@ -2,11 +2,13 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Send, FileText, Table2, Image, Calculator, ChevronLeft,
-  ExternalLink, Loader2, X,
+  ExternalLink, Loader2, X, History, Plus,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { useQuery } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
+import { fetchSessions, fetchSessionMessages } from '@/lib/api'
 
 const API_BASE = import.meta.env.VITE_API_URL
 const USER_ID = 'admin'
@@ -161,6 +163,8 @@ export default function ChatPage() {
   const scopeDocName = searchParams.get('name') || scopeDocId
   const scopeCollection = searchParams.get('collection')
 
+  const [sessionId, setSessionId] = useState(null)
+  const [showHistory, setShowHistory] = useState(false)
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -169,11 +173,56 @@ export default function ChatPage() {
   const [selectedSource, setSelectedSource] = useState(null)
   const [showSources, setShowSources] = useState(false)
 
+  const { data: sessions = [] } = useQuery({
+    queryKey: ['sessions', USER_ID],
+    queryFn: () => fetchSessions(USER_ID),
+    enabled: showHistory,
+  })
+
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
 
   const clearScope = () => {
     setSearchParams({})
+  }
+
+  const startNewChat = () => {
+    setSessionId(null)
+    setMessages([])
+    setSources([])
+    setQueryTypes([])
+    setSelectedSource(null)
+    setShowSources(false)
+  }
+
+  const loadSession = async (sid) => {
+    setSessionId(sid)
+    try {
+      const msgs = await fetchSessionMessages(sid, USER_ID)
+      const restored = []
+      let lastSources = null
+      for (const m of msgs) {
+        const entry = { role: m.role === 'human' ? 'user' : 'ai', content: m.content }
+        restored.push(entry)
+        if (m.role === 'ai' && m.sources) {
+          try {
+            lastSources = JSON.parse(m.sources)
+          } catch { /* ignore malformed */ }
+        }
+      }
+      setMessages(restored)
+      if (lastSources) {
+        setSources(lastSources)
+        setShowSources(true)
+      } else {
+        setSources([])
+        setShowSources(false)
+      }
+      setQueryTypes([])
+      setSelectedSource(null)
+    } catch (err) {
+      console.error('Failed to load session:', err)
+    }
   }
 
   const scrollToBottom = useCallback(() => {
@@ -215,11 +264,15 @@ export default function ChatPage() {
       })
 
     try {
+      const newSessionId = sessionId || `session-${Date.now()}`
+      if (!sessionId) setSessionId(newSessionId)
+
       const resp = await fetch(`${API_BASE}/query/stream`, {
         method: 'POST',
         headers: { 'X-User-Id': USER_ID, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           question, top_k: 8,
+          session_id: newSessionId,
           ...(scopeDocId ? { doc_ids: [scopeDocId] } : {}),
           ...(scopeCollection ? { collection: scopeCollection } : {}),
         }),
@@ -318,6 +371,46 @@ export default function ChatPage() {
   return (
     // overflow-hidden so the inner areas control their own scrolling
     <div className="flex h-full overflow-hidden">
+      {/* ── Session history panel ────────────────────────────── */}
+      {showHistory && (
+        <div
+          className="w-56 border-r flex flex-col shrink-0"
+          style={{ borderColor: 'hsl(217 33% 17%)', backgroundColor: 'hsl(222 47% 8%)' }}
+        >
+          <div className="p-2 border-b" style={{ borderColor: 'hsl(217 33% 17%)' }}>
+            <button
+              onClick={startNewChat}
+              className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-xs"
+              style={{ backgroundColor: 'hsl(250 80% 65%)', color: '#fff' }}
+            >
+              <Plus size={14} /> New Chat
+            </button>
+          </div>
+          <div className="flex-1 overflow-auto py-1">
+            {sessions.length === 0 ? (
+              <p className="px-3 py-4 text-xs opacity-30 text-center">No sessions yet</p>
+            ) : (
+              sessions.map(s => (
+                <button
+                  key={s.session_id}
+                  onClick={() => loadSession(s.session_id)}
+                  className={cn(
+                    'w-full px-3 py-2 text-left text-xs truncate transition-colors',
+                    sessionId === s.session_id ? 'bg-white/10' : 'hover:bg-white/5'
+                  )}
+                  style={{ color: 'hsl(210 40% 98%)' }}
+                >
+                  <div className="truncate">{s.preview || '(empty)'}</div>
+                  <div className="opacity-30 mt-0.5">
+                    {new Date(s.last_access).toLocaleDateString()}
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── Chat area ───────────────────────────────────────── */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Message list */}
@@ -388,6 +481,17 @@ export default function ChatPage() {
             </div>
           )}
           <div className="max-w-3xl mx-auto flex items-center gap-2">
+            <button
+              onClick={() => setShowHistory(h => !h)}
+              className={cn(
+                'p-2.5 rounded-lg transition-opacity',
+                showHistory ? 'opacity-100' : 'opacity-40 hover:opacity-100'
+              )}
+              title="Chat history"
+              style={{ color: 'hsl(210 40% 98%)' }}
+            >
+              <History size={16} />
+            </button>
             <input
               ref={inputRef}
               type="text"
