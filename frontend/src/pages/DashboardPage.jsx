@@ -29,6 +29,7 @@ export default function DashboardPage() {
   const [uploading, setUploading] = useState(false)
   const [hoverNode, setHoverNode] = useState(null)
   const [dimensions, setDimensions] = useState({ width: 800, height: 500 })
+  const [selectedDomain, setSelectedDomain] = useState(null)
 
   const { data: documentsData, isLoading } = useQuery({
     queryKey: ['documents', USER_ID],
@@ -65,6 +66,15 @@ export default function DashboardPage() {
     return () => observer.disconnect()
   }, [])
 
+  // Sync selectedDomain → activeFilters
+  useEffect(() => {
+    if (selectedDomain) {
+      setActiveFilters([selectedDomain])
+    } else {
+      setActiveFilters([])
+    }
+  }, [selectedDomain])
+
   const availableTags = useMemo(() => {
     if (!collectionsData) return []
     const tags = new Set()
@@ -72,6 +82,16 @@ export default function DashboardPage() {
     collectionsData.existing_collections?.forEach(c => tags.add(c))
     return [...tags].sort()
   }, [collectionsData])
+
+  // Collections list with per-collection document counts
+  const collectionList = useMemo(() => {
+    const docs = Array.isArray(documents) ? documents : []
+    const collections = collectionsData?.existing_collections || []
+    return collections.map(col => ({
+      name: col,
+      count: docs.filter(d => d.collections?.includes(col)).length,
+    })).sort((a, b) => b.count - a.count)
+  }, [documents, collectionsData])
 
   // Filter documents
   const filtered = useMemo(() => {
@@ -90,6 +110,27 @@ export default function DashboardPage() {
     }
     return docs
   }, [documents, search, activeFilters])
+
+  // Displayed docs in the bottom panel:
+  // - collection selected → only that collection's docs
+  // - searching → matching results, max 50
+  // - neither → most recent 20
+  const displayedDocs = useMemo(() => {
+    const allDocs = Array.isArray(documents) ? documents : []
+    if (search) {
+      return filtered.slice(0, 50)
+    }
+    if (selectedDomain) {
+      return filtered
+    }
+    // Most recent 20 by upload date (or doc_id order as fallback)
+    const sorted = [...allDocs].sort((a, b) => {
+      const da = a.created_at || a.upload_date || ''
+      const db = b.created_at || b.upload_date || ''
+      return db.localeCompare(da)
+    })
+    return sorted.slice(0, 20)
+  }, [documents, filtered, search, selectedDomain])
 
   // Build graph data: document nodes + collection virtual nodes + links
   const graphData = useMemo(() => {
@@ -112,7 +153,7 @@ export default function DashboardPage() {
         id: `doc:${d.doc_id}`,
         label: d.filename?.replace(/\.[^.]+$/, '').slice(0, 30) || d.doc_id,
         color: NODE_COLORS.document,
-        val: Math.max(3, Math.sqrt(d.chunk_count || 10) * 1.5),
+        val: 4,
         _type: 'document',
         _data: d,
         _dimmed: (search && !matchesSearch) || (activeFilters.length > 0 && !matchesFilter),
@@ -131,7 +172,7 @@ export default function DashboardPage() {
         id: `col:${c}`,
         label: c,
         color: NODE_COLORS.collection,
-        val: 5,
+        val: 6,
         _type: 'collection',
         _dimmed: (search && !matchesSearch) || (activeFilters.length > 0 && !matchesFilter),
       })
@@ -202,7 +243,7 @@ export default function DashboardPage() {
     if (node._type === 'document' && node._data?.doc_id) {
       navigate(`/pdf/${node._data.doc_id}`)
     } else if (node._type === 'collection') {
-      setActiveFilters([node.label])
+      setSelectedDomain(prev => prev === node.label ? null : node.label)
       setShowPanel(true)
     }
   }, [navigate])
@@ -215,6 +256,15 @@ export default function DashboardPage() {
     setActiveFilters(prev =>
       prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
     )
+  }
+
+  const handleDomainClick = (col) => {
+    if (selectedDomain === col) {
+      setSelectedDomain(null)
+    } else {
+      setSelectedDomain(col)
+      setShowPanel(true)
+    }
   }
 
   const handleUpload = async (e) => {
@@ -262,6 +312,18 @@ export default function DashboardPage() {
   useEffect(() => {
     if (search) setShowPanel(true)
   }, [search])
+
+  // Panel title: show count info
+  const panelTitle = useMemo(() => {
+    const total = Array.isArray(documents) ? documents.length : 0
+    if (search) {
+      return `Documents (showing ${displayedDocs.length} of ${filtered.length} matches)`
+    }
+    if (selectedDomain) {
+      return `Documents in "${selectedDomain}" (${displayedDocs.length})`
+    }
+    return `Documents (showing ${displayedDocs.length} of ${total})`
+  }, [documents, displayedDocs, filtered, search, selectedDomain])
 
   return (
     <div className="flex flex-col h-full">
@@ -329,62 +391,119 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Mini document graph — fills remaining space */}
-      <div className="flex-1 relative min-h-0" ref={containerRef} style={{ backgroundColor: 'hsl(222 47% 4%)' }}>
-        {isLoading ? (
-          <div className="absolute inset-0 flex items-center justify-center opacity-40" style={{ color: 'hsl(210 40% 98%)' }}>
-            Loading...
-          </div>
-        ) : graphData.nodes.length === 0 ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center opacity-40" style={{ color: 'hsl(210 40% 98%)' }}>
-            <FileText size={48} className="mb-4" />
-            <p className="text-lg">Upload your first document</p>
-            <p className="text-sm mt-1">to start building your knowledge graph</p>
-          </div>
-        ) : (
-          <ForceGraph2D
-            ref={graphRef}
-            graphData={graphData}
-            width={dimensions.width}
-            height={dimensions.height}
-            backgroundColor="hsl(222, 47%, 4%)"
-            nodeCanvasObject={paintNode}
-            nodePointerAreaPaint={(node, color, ctx) => {
-              const r = Math.sqrt(node.val || 3) * 1.8 + 2
-              ctx.beginPath()
-              ctx.arc(node.x, node.y, r, 0, Math.PI * 2)
-              ctx.fillStyle = color
-              ctx.fill()
-            }}
-            onNodeClick={handleNodeClick}
-            onNodeHover={handleNodeHover}
-            linkColor={l => l._type === 'similar_to' ? '#f59e0b44' : '#6366f133'}
-            linkWidth={l => l._type === 'similar_to' ? 1.5 : 0.5}
-            linkLineDash={l => l._type === 'similar_to' ? [4, 4] : null}
-            cooldownTicks={20}
-            onEngineStop={() => graphRef.current?.zoomToFit(300, 40)}
-            enableNodeDrag={true}
-          />
-        )}
-
-        {/* Floating upload button */}
-        <label
-          className={cn(
-            'absolute bottom-4 right-4 flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm cursor-pointer shadow-lg transition-opacity z-10',
-            uploading ? 'opacity-50 pointer-events-none' : 'hover:opacity-90'
-          )}
-          style={{ backgroundColor: 'hsl(250 80% 65%)', color: 'hsl(210 40% 98%)' }}
+      {/* Main content: left sidebar + graph */}
+      <div className="flex flex-1 min-h-0">
+        {/* Left domain/collection sidebar */}
+        <div
+          className="w-48 shrink-0 flex flex-col border-r"
+          style={{ backgroundColor: 'hsl(222 47% 8%)', borderColor: 'hsl(217 33% 17%)' }}
         >
-          {uploading ? <RefreshCw size={16} className="animate-spin" /> : <Upload size={16} />}
-          {uploading ? 'Uploading...' : 'Upload'}
-          <input
-            type="file"
-            className="hidden"
-            onChange={handleUpload}
-            disabled={uploading}
-            accept=".pdf,.docx,.txt,.md,.html,.xlsx,.pptx"
-          />
-        </label>
+          <div
+            className="px-3 py-2 text-xs font-semibold uppercase tracking-wider border-b"
+            style={{ color: 'hsl(215 20% 65%)', borderColor: 'hsl(217 33% 17%)' }}
+          >
+            Domains
+          </div>
+          <div className="flex-1 overflow-auto py-1">
+            {collectionList.length === 0 ? (
+              <div className="px-3 py-4 text-xs opacity-30" style={{ color: 'hsl(215 20% 65%)' }}>
+                No collections
+              </div>
+            ) : (
+              collectionList.map(col => (
+                <button
+                  key={col.name}
+                  onClick={() => handleDomainClick(col.name)}
+                  className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-left transition-colors hover:bg-white/5"
+                  style={{
+                    color: selectedDomain === col.name ? 'hsl(250 80% 65%)' : 'hsl(210 40% 98%)',
+                    backgroundColor: selectedDomain === col.name ? 'hsl(250 80% 65% / 0.12)' : 'transparent',
+                    fontWeight: selectedDomain === col.name ? 600 : 400,
+                  }}
+                >
+                  <span className="truncate">{col.name}</span>
+                  <span
+                    className="ml-1 shrink-0 tabular-nums"
+                    style={{ color: 'hsl(215 20% 65%)' }}
+                  >
+                    {col.count}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+
+          {/* Chat button — only shown when a domain is selected */}
+          {selectedDomain && (
+            <div className="p-3 border-t" style={{ borderColor: 'hsl(217 33% 17%)' }}>
+              <button
+                onClick={() => navigate(`/chat?collection=${encodeURIComponent(selectedDomain)}`)}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-opacity hover:opacity-90"
+                style={{ backgroundColor: 'hsl(250 80% 65%)', color: 'hsl(210 40% 98%)' }}
+              >
+                <MessageSquare size={12} /> Chat
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Mini document graph — fills remaining space */}
+        <div className="flex-1 relative min-h-0" ref={containerRef} style={{ backgroundColor: 'hsl(222 47% 4%)' }}>
+          {isLoading ? (
+            <div className="absolute inset-0 flex items-center justify-center opacity-40" style={{ color: 'hsl(210 40% 98%)' }}>
+              Loading...
+            </div>
+          ) : graphData.nodes.length === 0 ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center opacity-40" style={{ color: 'hsl(210 40% 98%)' }}>
+              <FileText size={48} className="mb-4" />
+              <p className="text-lg">Upload your first document</p>
+              <p className="text-sm mt-1">to start building your knowledge graph</p>
+            </div>
+          ) : (
+            <ForceGraph2D
+              ref={graphRef}
+              graphData={graphData}
+              width={dimensions.width}
+              height={dimensions.height}
+              backgroundColor="hsl(222, 47%, 4%)"
+              nodeCanvasObject={paintNode}
+              nodePointerAreaPaint={(node, color, ctx) => {
+                const r = Math.sqrt(node.val || 3) * 1.8 + 2
+                ctx.beginPath()
+                ctx.arc(node.x, node.y, r, 0, Math.PI * 2)
+                ctx.fillStyle = color
+                ctx.fill()
+              }}
+              onNodeClick={handleNodeClick}
+              onNodeHover={handleNodeHover}
+              linkColor={l => l._type === 'similar_to' ? '#f59e0b99' : '#6366f133'}
+              linkWidth={l => l._type === 'similar_to' ? 2.5 : 0.5}
+              linkLineDash={l => l._type === 'similar_to' ? [4, 4] : null}
+              cooldownTicks={20}
+              onEngineStop={() => graphRef.current?.zoomToFit(300, 40)}
+              enableNodeDrag={true}
+            />
+          )}
+
+          {/* Floating upload button */}
+          <label
+            className={cn(
+              'absolute bottom-4 right-4 flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm cursor-pointer shadow-lg transition-opacity z-10',
+              uploading ? 'opacity-50 pointer-events-none' : 'hover:opacity-90'
+            )}
+            style={{ backgroundColor: 'hsl(250 80% 65%)', color: 'hsl(210 40% 98%)' }}
+          >
+            {uploading ? <RefreshCw size={16} className="animate-spin" /> : <Upload size={16} />}
+            {uploading ? 'Uploading...' : 'Upload'}
+            <input
+              type="file"
+              className="hidden"
+              onChange={handleUpload}
+              disabled={uploading}
+              accept=".pdf,.docx,.txt,.md,.html,.xlsx,.pptx"
+            />
+          </label>
+        </div>
       </div>
 
       {/* Collapsible document panel */}
@@ -394,16 +513,16 @@ export default function DashboardPage() {
           className="flex items-center justify-between w-full px-4 py-2 text-xs"
           style={{ color: 'hsl(215 20% 65%)' }}
         >
-          <span>Documents ({filtered.length})</span>
+          <span>{panelTitle}</span>
           {showPanel ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
         </button>
 
         {showPanel && (
           <div className="max-h-48 overflow-auto border-t" style={{ borderColor: 'hsl(217 33% 12%)' }}>
-            {filtered.length === 0 ? (
+            {displayedDocs.length === 0 ? (
               <div className="p-4 text-xs text-center opacity-30">No documents match</div>
             ) : (
-              filtered.map(doc => (
+              displayedDocs.map(doc => (
                 <div
                   key={doc.doc_id}
                   className="flex items-center gap-3 px-4 py-2 hover:bg-white/5 cursor-pointer transition-colors group text-xs"
