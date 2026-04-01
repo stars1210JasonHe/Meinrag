@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import ForceGraph2D from 'react-force-graph-2d'
 import { FileText, Table2, Image, Calculator, ExternalLink, MessageSquare, X } from 'lucide-react'
-import { fetchGraphDocuments, fetchGraphNodes, fetchDocuments } from '@/lib/api'
+import { fetchGraphDocuments, fetchGraphNodes, fetchDocuments, fetchCollections } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 const USER_ID = 'admin'
@@ -41,11 +41,18 @@ export default function GraphPage() {
     co_located: false,
   })
   const [scope, setScope] = useState(docId || '')
+  const [scopeType, setScopeType] = useState(docId ? 'doc' : 'all') // 'all' | 'collection' | 'doc'
+  const [scopeLabel, setScopeLabel] = useState('')
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
 
   const { data: documents = [] } = useQuery({
     queryKey: ['documents', USER_ID],
     queryFn: () => fetchDocuments(USER_ID),
+  })
+
+  const { data: collectionsData } = useQuery({
+    queryKey: ['collections', USER_ID],
+    queryFn: () => fetchCollections(USER_ID),
   })
 
   const activeEdgeTypes = EDGE_TYPES.filter(t => edgeFilter[t]).join(',')
@@ -71,9 +78,10 @@ export default function GraphPage() {
 
   // Transform backend data to react-force-graph format
   const graphFormatted = useMemo(() => {
-    if (!graphData) return { nodes: [], links: [] }
+    const data = scopeType === 'collection' ? filteredGraphData : graphData
+    if (!data) return { nodes: [], links: [] }
 
-    const nodes = (graphData.nodes || [])
+    const nodes = (data.nodes || [])
       .filter(n => n.node_type === 'document' || nodeFilter[n.chunk_type] !== false)
       .map(n => ({
         id: n.node_type === 'document' ? `doc:${n.doc_id}` : `${n.doc_id}:${n.chunk_index}`,
@@ -85,7 +93,7 @@ export default function GraphPage() {
 
     const nodeIds = new Set(nodes.map(n => n.id))
 
-    const links = (graphData.edges || [])
+    const links = (data.edges || [])
       .map(e => ({
         source: e.source_chunk_index != null ? `${e.source_doc_id}:${e.source_chunk_index}` : `doc:${e.source_doc_id}`,
         target: e.target_chunk_index != null ? `${e.target_doc_id}:${e.target_chunk_index}` : `doc:${e.target_doc_id}`,
@@ -95,7 +103,7 @@ export default function GraphPage() {
       .filter(l => nodeIds.has(l.source) && nodeIds.has(l.target))
 
     return { nodes, links }
-  }, [graphData, nodeFilter])
+  }, [graphData, filteredGraphData, scopeType, nodeFilter])
 
   const handleNodeClick = useCallback((node) => {
     if (node._data?.node_type === 'document') {
@@ -148,9 +156,65 @@ export default function GraphPage() {
   }, [])
 
   const docList = Array.isArray(documents) ? (documents.documents || documents) : []
+  const collections = collectionsData?.existing_collections || []
+
+  // Group documents by collection for the dropdown
+  const docsByCollection = useMemo(() => {
+    const groups = {}
+    for (const d of (Array.isArray(docList) ? docList : [])) {
+      for (const c of (d.collections || [])) {
+        if (!groups[c]) groups[c] = []
+        if (!groups[c].find(x => x.doc_id === d.doc_id)) groups[c].push(d)
+      }
+    }
+    return groups
+  }, [docList])
+
+  const handleScopeChange = (value) => {
+    setSelectedNode(null)
+    if (!value) {
+      setScope(''); setScopeType('all'); setScopeLabel('')
+    } else if (value.startsWith('col:')) {
+      const col = value.slice(4)
+      setScopeType('collection'); setScopeLabel(col); setScope('')
+    } else {
+      const doc = docList.find(d => d.doc_id === value)
+      setScopeType('doc'); setScopeLabel(doc?.filename || value); setScope(value)
+    }
+  }
+
+  // For collection scope, filter document-level graph to matching docs
+  const filteredGraphData = useMemo(() => {
+    if (scopeType !== 'collection' || !graphData) return graphData
+    const colDocs = docsByCollection[scopeLabel] || []
+    const colDocIds = new Set(colDocs.map(d => d.doc_id))
+    return {
+      nodes: (graphData.nodes || []).filter(n => colDocIds.has(n.doc_id)),
+      edges: (graphData.edges || []).filter(e =>
+        colDocIds.has(e.source_doc_id) && colDocIds.has(e.target_doc_id)
+      ),
+    }
+  }, [graphData, scopeType, scopeLabel, docsByCollection])
 
   return (
     <div className="flex flex-col h-full" style={{ backgroundColor: 'hsl(222 47% 4%)' }}>
+      {/* Breadcrumb */}
+      {(scopeType !== 'all') && (
+        <div className="flex items-center gap-1 px-4 py-1.5 text-xs border-b"
+             style={{ borderColor: 'hsl(217 33% 12%)', color: 'hsl(215 20% 65%)' }}>
+          <button onClick={() => handleScopeChange('')} className="hover:underline opacity-60 hover:opacity-100">
+            All Documents
+          </button>
+          <span className="opacity-30">→</span>
+          {scopeType === 'collection' && (
+            <span style={{ color: 'hsl(210 40% 98%)' }}>{scopeLabel}</span>
+          )}
+          {scopeType === 'doc' && (
+            <span style={{ color: 'hsl(210 40% 98%)' }}>{scopeLabel}</span>
+          )}
+        </div>
+      )}
+
       {/* Toolbar */}
       <div className="flex items-center gap-3 px-4 py-2 border-b flex-wrap"
            style={{ borderColor: 'hsl(217 33% 17%)', backgroundColor: 'hsl(222 47% 8%)' }}>
@@ -190,19 +254,28 @@ export default function GraphPage() {
         <span className="opacity-20" style={{ color: 'hsl(210 40% 98%)' }}>|</span>
 
         <select
-          value={scope}
-          onChange={e => { setScope(e.target.value); setSelectedNode(null) }}
+          value={scopeType === 'collection' ? `col:${scopeLabel}` : scope}
+          onChange={e => handleScopeChange(e.target.value)}
           className="text-xs rounded px-2 py-1 outline-none"
           style={{ backgroundColor: 'hsl(217 33% 17%)', color: 'hsl(210 40% 98%)', border: 'none' }}
         >
           <option value="">All Documents</option>
-          {(Array.isArray(docList) ? docList : []).map(d => (
-            <option key={d.doc_id} value={d.doc_id}>{d.filename}</option>
-          ))}
+          {collections.length > 0 && (
+            <optgroup label="Collections">
+              {collections.map(c => (
+                <option key={`col:${c}`} value={`col:${c}`}>{c}</option>
+              ))}
+            </optgroup>
+          )}
+          <optgroup label="Documents">
+            {(Array.isArray(docList) ? docList : []).map(d => (
+              <option key={d.doc_id} value={d.doc_id}>{d.filename}</option>
+            ))}
+          </optgroup>
         </select>
 
-        {scope && (
-          <button onClick={() => { setScope(''); setSelectedNode(null) }}
+        {scopeType !== 'all' && (
+          <button onClick={() => handleScopeChange('')}
                   className="text-xs opacity-40 hover:opacity-100" style={{ color: 'hsl(210 40% 98%)' }}>
             <X size={12} />
           </button>
