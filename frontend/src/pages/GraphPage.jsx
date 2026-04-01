@@ -36,7 +36,7 @@ export default function GraphPage() {
   const [pinnedNode, setPinnedNode] = useState(null)  // click-locked highlight
   const [highlightNodes, setHighlightNodes] = useState(new Set())
   const [highlightLinks, setHighlightLinks] = useState(new Set())
-  const lastClickRef = useRef({ time: 0, nodeId: null })
+  const clickTimerRef = useRef(null)
   const [nodeFilter, setNodeFilter] = useState({ text: true, table: true, formula: true, image: true })
   const [edgeFilter, setEdgeFilter] = useState({
     follows: true,
@@ -165,39 +165,46 @@ export default function GraphPage() {
   }, [graphFormatted.links])
 
   const handleNodeClick = useCallback((node) => {
-    const now = Date.now()
-    const last = lastClickRef.current
-
-    // Double-click detection (same node within 1000ms)
-    if (last.nodeId === node.id && now - last.time < 1000) {
-      lastClickRef.current = { time: 0, nodeId: null }
-      if (node._data?.doc_id) {
-        navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.source_file || '')}`)
-      }
-      return
-    }
-    lastClickRef.current = { time: now, nodeId: node.id }
-
+    // Document node: always drill-down immediately
     if (node._data?.node_type === 'document') {
+      clearTimeout(clickTimerRef.current)
       setScope(node._data.doc_id)
       setSelectedNode(null)
       setPinnedNode(null)
       setHighlightNodes(new Set())
       setHighlightLinks(new Set())
-    } else {
-      // Toggle pin: click same node again → unpin
-      if (pinnedNode?.id === node.id) {
-        setPinnedNode(null)
-        setSelectedNode(null)
-        setHighlightNodes(new Set())
-        setHighlightLinks(new Set())
+      return
+    }
+
+    // Chunk node: if already pinned on this node, check for double-click
+    if (pinnedNode?.id === node.id) {
+      // Second click on pinned node — is it double-click or unpin?
+      if (clickTimerRef.current) {
+        // Double-click: navigate to chat
+        clearTimeout(clickTimerRef.current)
+        clickTimerRef.current = null
+        if (node._data?.doc_id) {
+          navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.source_file || '')}`)
+        }
       } else {
-        setSelectedNode(node._data)
-        setPinnedNode(node)
-        const { neighbors, links } = computeNeighbors(node)
-        setHighlightNodes(neighbors)
-        setHighlightLinks(links)
+        // Single click on pinned node: unpin after delay (to allow double-click)
+        clickTimerRef.current = setTimeout(() => {
+          clickTimerRef.current = null
+          setPinnedNode(null)
+          setSelectedNode(null)
+          setHighlightNodes(new Set())
+          setHighlightLinks(new Set())
+        }, 400)
       }
+    } else {
+      // Click new node: pin it immediately
+      clearTimeout(clickTimerRef.current)
+      clickTimerRef.current = setTimeout(() => { clickTimerRef.current = null }, 400)
+      setSelectedNode(node._data)
+      setPinnedNode(node)
+      const { neighbors, links } = computeNeighbors(node)
+      setHighlightNodes(neighbors)
+      setHighlightLinks(links)
     }
   }, [graphFormatted.links, pinnedNode, navigate, computeNeighbors])
 
