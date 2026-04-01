@@ -414,10 +414,11 @@ export default function DashboardPage() {
             <>
               <button
                 onClick={() => navigate(`/chat?collection=${encodeURIComponent(activeFilters[0])}`)}
-                className="px-2 py-0.5 rounded-full text-xs flex items-center gap-1"
-                style={{ backgroundColor: 'hsl(168 84% 40%)', color: '#fff' }}
+                className="p-1 rounded opacity-60 hover:opacity-100 transition-opacity"
+                style={{ color: 'hsl(250 80% 65%)' }}
+                title="Chat about this collection"
               >
-                <MessageSquare size={8} /> Chat
+                <MessageSquare size={14} />
               </button>
               <button
                 onClick={() => setActiveFilters([])}
@@ -593,10 +594,10 @@ export default function DashboardPage() {
                   <span className="opacity-30 shrink-0">{doc.chunk_count}</span>
                   <button
                     onClick={(e) => { e.stopPropagation(); navigate(`/chat?doc=${doc.doc_id}&name=${encodeURIComponent(doc.filename)}`) }}
-                    className="p-1 rounded opacity-0 group-hover:opacity-60 hover:opacity-100 transition-opacity"
+                    className="p-1 rounded opacity-20 group-hover:opacity-80 hover:opacity-100 transition-opacity"
                     title="Chat about this document"
                   >
-                    <MessageSquare size={10} />
+                    <MessageSquare size={14} />
                   </button>
                   <div className="relative">
                     <button

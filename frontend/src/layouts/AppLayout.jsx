@@ -1,6 +1,45 @@
-import { Outlet, NavLink } from 'react-router-dom'
+import { Outlet, NavLink, useLocation, useSearchParams } from 'react-router-dom'
 import { LayoutDashboard, MessageSquare, Network, Settings, HelpCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
+
+function Breadcrumb() {
+  const location = useLocation()
+  const [searchParams] = useSearchParams()
+  const path = location.pathname
+
+  if (path === '/') return null
+
+  const crumbs = [{ label: 'Dashboard', to: '/' }]
+
+  if (path.startsWith('/chat')) {
+    const docName = searchParams.get('name')
+    const collection = searchParams.get('collection')
+    const suffix = docName ? `: ${docName}` : collection ? `: ${collection}` : ''
+    crumbs.push({ label: `Chat${suffix}` })
+  } else if (path.startsWith('/graph')) {
+    crumbs.push({ label: 'Graph' })
+    const docId = path.replace('/graph/', '').replace('/graph', '')
+    if (docId) crumbs.push({ label: docId })
+  } else if (path.startsWith('/pdf')) {
+    crumbs.push({ label: 'PDF Viewer' })
+  }
+
+  return (
+    <div className="flex items-center gap-1.5 px-4 py-1.5 text-xs border-b shrink-0"
+         style={{ borderColor: 'hsl(217 33% 12%)', color: 'hsl(215 20% 65%)' }}>
+      {crumbs.map((c, i) => (
+        <span key={i} className="flex items-center gap-1.5">
+          {i > 0 && <span className="opacity-30">›</span>}
+          {c.to ? (
+            <NavLink to={c.to} className="hover:underline opacity-60 hover:opacity-100">{c.label}</NavLink>
+          ) : (
+            <span style={{ color: 'hsl(210 40% 98%)' }}>{c.label}</span>
+          )}
+        </span>
+      ))}
+    </div>
+  )
+}
 
 const NAV_ITEMS = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -62,8 +101,11 @@ export default function AppLayout() {
       </nav>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto">
-        <Outlet />
+      <main className="flex-1 flex flex-col overflow-hidden">
+        <Breadcrumb />
+        <div className="flex-1 overflow-auto">
+          <Outlet />
+        </div>
       </main>
     </div>
   )
