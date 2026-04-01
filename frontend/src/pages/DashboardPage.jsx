@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import ForceGraph2D from 'react-force-graph-2d'
 import {
   Search, Upload, MoreVertical, Trash2, Download, RefreshCw,
-  FileText, X, MessageSquare, Filter, ChevronUp, ChevronDown
+  FileText, X, MessageSquare, Filter, ChevronUp, ChevronDown, Menu
 } from 'lucide-react'
 import { fetchDocuments, fetchCollections, fetchGraphDocuments, deleteDocument } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -332,6 +332,14 @@ export default function DashboardPage() {
     <div className="flex flex-col h-full">
       {/* Search + Filter toggle bar */}
       <div className="flex items-center gap-2 p-3 border-b" style={{ borderColor: 'hsl(217 33% 17%)' }}>
+        <button
+          onClick={() => setShowDomains(d => !d)}
+          className="p-2 rounded-lg opacity-40 hover:opacity-100"
+          style={{ backgroundColor: 'hsl(217 33% 17%)', color: 'hsl(210 40% 98%)' }}
+          title={showDomains ? 'Hide domains' : 'Show domains'}
+        >
+          <Menu size={14} />
+        </button>
         <div className="relative flex-1">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 opacity-40" />
           <input
@@ -403,16 +411,10 @@ export default function DashboardPage() {
           style={{ backgroundColor: 'hsl(222 47% 8%)', borderColor: 'hsl(217 33% 17%)' }}
         >
           <div
-            className="flex items-center justify-between px-3 py-2 border-b"
-            style={{ borderColor: 'hsl(217 33% 17%)' }}
+            className="px-3 py-2 text-xs font-semibold uppercase tracking-wider border-b"
+            style={{ color: 'hsl(215 20% 65%)', borderColor: 'hsl(217 33% 17%)' }}
           >
-            <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'hsl(215 20% 65%)' }}>
-              Domains
-            </span>
-            <button onClick={() => setShowDomains(false)} className="opacity-40 hover:opacity-100"
-                    style={{ color: 'hsl(210 40% 98%)' }}>
-              <X size={12} />
-            </button>
+            Domains
           </div>
           <div className="flex-1 overflow-auto py-1">
             {/* All option */}
@@ -469,18 +471,6 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
-        )}
-
-        {/* Toggle button when sidebar hidden */}
-        {!showDomains && (
-          <button
-            onClick={() => setShowDomains(true)}
-            className="absolute left-2 top-1/2 -translate-y-1/2 z-10 p-1.5 rounded-lg opacity-40 hover:opacity-100"
-            style={{ backgroundColor: 'hsl(222 47% 12%)', color: 'hsl(210 40% 98%)' }}
-            title="Show domains"
-          >
-            <Filter size={14} />
-          </button>
         )}
 
         {/* Mini document graph — fills remaining space */}
