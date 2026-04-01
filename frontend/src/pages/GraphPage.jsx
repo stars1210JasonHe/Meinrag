@@ -33,8 +33,10 @@ export default function GraphPage() {
   const containerRef = useRef(null)
   const [selectedNode, setSelectedNode] = useState(null)
   const [hoverNode, setHoverNode] = useState(null)
+  const [pinnedNode, setPinnedNode] = useState(null)  // click-locked highlight
   const [highlightNodes, setHighlightNodes] = useState(new Set())
   const [highlightLinks, setHighlightLinks] = useState(new Set())
+  const lastClickRef = useRef({ time: 0, nodeId: null })
   const [nodeFilter, setNodeFilter] = useState({ text: true, table: true, formula: true, image: true })
   const [edgeFilter, setEdgeFilter] = useState({
     follows: true,
@@ -150,72 +152,88 @@ export default function GraphPage() {
     }
   }, [graphData, filteredGraphData, scopeType, nodeFilter])
 
+  const computeNeighbors = useCallback((node) => {
+    const neighbors = new Set([node.id])
+    const links = new Set()
+    for (const l of graphFormatted.links) {
+      const srcId = typeof l.source === 'object' ? l.source.id : l.source
+      const tgtId = typeof l.target === 'object' ? l.target.id : l.target
+      if (srcId === node.id) { neighbors.add(tgtId); links.add(l) }
+      if (tgtId === node.id) { neighbors.add(srcId); links.add(l) }
+    }
+    return { neighbors, links }
+  }, [graphFormatted.links])
+
   const handleNodeClick = useCallback((node) => {
+    const now = Date.now()
+    const last = lastClickRef.current
+
+    // Double-click detection (same node within 300ms)
+    if (last.nodeId === node.id && now - last.time < 300) {
+      lastClickRef.current = { time: 0, nodeId: null }
+      if (node._data?.doc_id) {
+        navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.source_file || '')}`)
+      }
+      return
+    }
+    lastClickRef.current = { time: now, nodeId: node.id }
+
     if (node._data?.node_type === 'document') {
       setScope(node._data.doc_id)
       setSelectedNode(null)
-      setHoverNode(null)
+      setPinnedNode(null)
       setHighlightNodes(new Set())
       setHighlightLinks(new Set())
     } else {
-      setSelectedNode(node._data)
-      // Persist highlight on click (same as hover)
-      const neighbors = new Set([node.id])
-      const links = new Set()
-      for (const l of graphFormatted.links) {
-        const srcId = typeof l.source === 'object' ? l.source.id : l.source
-        const tgtId = typeof l.target === 'object' ? l.target.id : l.target
-        if (srcId === node.id) { neighbors.add(tgtId); links.add(l) }
-        if (tgtId === node.id) { neighbors.add(srcId); links.add(l) }
+      // Toggle pin: click same node again → unpin
+      if (pinnedNode?.id === node.id) {
+        setPinnedNode(null)
+        setSelectedNode(null)
+        setHighlightNodes(new Set())
+        setHighlightLinks(new Set())
+      } else {
+        setSelectedNode(node._data)
+        setPinnedNode(node)
+        const { neighbors, links } = computeNeighbors(node)
+        setHighlightNodes(neighbors)
+        setHighlightLinks(links)
       }
-      setHoverNode(node)
-      setHighlightNodes(neighbors)
-      setHighlightLinks(links)
     }
-  }, [graphFormatted.links])
-
-  const handleNodeDoubleClick = useCallback((node) => {
-    if (node._data?.doc_id) {
-      navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.source_file || '')}`)
-    }
-  }, [navigate])
+  }, [graphFormatted.links, pinnedNode, navigate, computeNeighbors])
 
   const handleBackgroundClick = useCallback(() => {
     setSelectedNode(null)
     setHoverNode(null)
+    setPinnedNode(null)
     setHighlightNodes(new Set())
     setHighlightLinks(new Set())
   }, [])
 
   const handleNodeHover = useCallback((node) => {
     setHoverNode(node || null)
+    // Don't override highlights if a node is pinned
+    if (pinnedNode) return
     if (node) {
-      const neighbors = new Set([node.id])
-      const links = new Set()
-      for (const l of graphFormatted.links) {
-        const srcId = typeof l.source === 'object' ? l.source.id : l.source
-        const tgtId = typeof l.target === 'object' ? l.target.id : l.target
-        if (srcId === node.id) { neighbors.add(tgtId); links.add(l) }
-        if (tgtId === node.id) { neighbors.add(srcId); links.add(l) }
-      }
+      const { neighbors, links } = computeNeighbors(node)
       setHighlightNodes(neighbors)
       setHighlightLinks(links)
     } else {
       setHighlightNodes(new Set())
       setHighlightLinks(new Set())
     }
-  }, [graphFormatted.links])
+  }, [pinnedNode, computeNeighbors])
 
-  // Custom node rendering with hover glow
+  // Custom node rendering with hover/pin glow
+  const activeNode = pinnedNode || hoverNode
   const paintNode = useCallback((node, ctx) => {
     const r = Math.sqrt(node.val || 4) * 2
-    const isHighlighted = !hoverNode || highlightNodes.has(node.id)
+    const isHighlighted = !activeNode || highlightNodes.has(node.id)
     const opacity = isHighlighted ? 1.0 : 0.15
 
     ctx.globalAlpha = opacity
 
-    // Glow for hovered node
-    if (hoverNode?.id === node.id) {
+    // Glow for active (hovered or pinned) node
+    if (activeNode?.id === node.id) {
       ctx.beginPath()
       ctx.arc(node.x, node.y, r + 3, 0, Math.PI * 2)
       ctx.fillStyle = node.color + '44'
@@ -241,8 +259,8 @@ export default function GraphPage() {
       ctx.stroke()
     }
 
-    // Label (only show on hover or for documents)
-    if (hoverNode?.id === node.id || node._data?.node_type === 'document' || !hoverNode) {
+    // Label (only show for active/highlighted nodes or documents)
+    if (activeNode?.id === node.id || node._data?.node_type === 'document' || !activeNode) {
       ctx.font = `${Math.max(3, r * 0.8)}px sans-serif`
       ctx.fillStyle = isHighlighted ? '#e2e8f0' : '#64748b'
       ctx.textAlign = 'center'
@@ -251,7 +269,7 @@ export default function GraphPage() {
     }
 
     ctx.globalAlpha = 1.0
-  }, [hoverNode, highlightNodes, selectedNode])
+  }, [activeNode, highlightNodes, selectedNode])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -393,15 +411,14 @@ export default function GraphPage() {
               ctx.fill()
             }}
             onNodeClick={handleNodeClick}
-            onNodeDblClick={handleNodeDoubleClick}
             onNodeHover={handleNodeHover}
             onBackgroundClick={handleBackgroundClick}
             linkColor={l => {
-              if (hoverNode && !highlightLinks.has(l)) return '#1e293b'
+              if (activeNode && !highlightLinks.has(l)) return '#1e293b'
               return EDGE_COLORS[l.relation] || '#64748b'
             }}
             linkWidth={l => {
-              if (hoverNode && highlightLinks.has(l)) return 3
+              if (activeNode && highlightLinks.has(l)) return 3
               return l.relation === 'follows' ? 0.5 : 1.5
             }}
             linkLineDash={l => l.relation === 'similar_to' ? [4, 4] : null}
