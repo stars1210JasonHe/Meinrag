@@ -130,7 +130,11 @@ export default function GraphPage() {
       }))
       .filter(l => nodeIds.has(l.source) && nodeIds.has(l.target))
 
-    return { nodes, links }
+    // Deep copy to prevent react-force-graph from mutating cached data
+    return {
+      nodes: nodes.map(n => ({ ...n })),
+      links: links.map(l => ({ ...l })),
+    }
   }, [graphData, filteredGraphData, scopeType, nodeFilter])
 
   const handleNodeClick = useCallback((node) => {
