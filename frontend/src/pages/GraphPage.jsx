@@ -168,8 +168,8 @@ export default function GraphPage() {
     const now = Date.now()
     const last = lastClickRef.current
 
-    // Double-click detection (same node within 300ms)
-    if (last.nodeId === node.id && now - last.time < 300) {
+    // Double-click detection (same node within 1000ms)
+    if (last.nodeId === node.id && now - last.time < 1000) {
       lastClickRef.current = { time: 0, nodeId: null }
       if (node._data?.doc_id) {
         navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.source_file || '')}`)
