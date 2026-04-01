@@ -154,10 +154,31 @@ export default function GraphPage() {
     if (node._data?.node_type === 'document') {
       setScope(node._data.doc_id)
       setSelectedNode(null)
+      setHoverNode(null)
+      setHighlightNodes(new Set())
+      setHighlightLinks(new Set())
     } else {
       setSelectedNode(node._data)
+      // Persist highlight on click (same as hover)
+      const neighbors = new Set([node.id])
+      const links = new Set()
+      for (const l of graphFormatted.links) {
+        const srcId = typeof l.source === 'object' ? l.source.id : l.source
+        const tgtId = typeof l.target === 'object' ? l.target.id : l.target
+        if (srcId === node.id) { neighbors.add(tgtId); links.add(l) }
+        if (tgtId === node.id) { neighbors.add(srcId); links.add(l) }
+      }
+      setHoverNode(node)
+      setHighlightNodes(neighbors)
+      setHighlightLinks(links)
     }
-  }, [])
+  }, [graphFormatted.links])
+
+  const handleNodeDoubleClick = useCallback((node) => {
+    if (node._data?.doc_id) {
+      navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.source_file || '')}`)
+    }
+  }, [navigate])
 
   const handleBackgroundClick = useCallback(() => {
     setSelectedNode(null)
@@ -372,6 +393,7 @@ export default function GraphPage() {
               ctx.fill()
             }}
             onNodeClick={handleNodeClick}
+            onNodeDblClick={handleNodeDoubleClick}
             onNodeHover={handleNodeHover}
             onBackgroundClick={handleBackgroundClick}
             linkColor={l => {
