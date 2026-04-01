@@ -259,8 +259,8 @@ export default function GraphPage() {
       ctx.stroke()
     }
 
-    // Label (only show for active/highlighted nodes or documents)
-    if (activeNode?.id === node.id || node._data?.node_type === 'document' || !activeNode) {
+    // Label: show for active node, its neighbors, documents, or when nothing is active
+    if (activeNode?.id === node.id || (activeNode && highlightNodes.has(node.id)) || node._data?.node_type === 'document' || !activeNode) {
       ctx.font = `${Math.max(3, r * 0.8)}px sans-serif`
       ctx.fillStyle = isHighlighted ? '#e2e8f0' : '#64748b'
       ctx.textAlign = 'center'
