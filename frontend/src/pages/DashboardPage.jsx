@@ -268,6 +268,21 @@ export default function DashboardPage() {
     setMenuOpen(null)
   }
 
+  const toggleFilter = (tag) => {
+    setActiveFilters(prev =>
+      prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
+    )
+  }
+
+  const handleDomainClick = (col) => {
+    if (selectedDomain === col) {
+      setSelectedDomain(null)
+    } else {
+      setSelectedDomain(col)
+      setShowPanel(true)
+    }
+  }
+
   const handleGraphRightClick = useCallback((node, event) => {
     event.preventDefault()
 
@@ -294,21 +309,6 @@ export default function DashboardPage() {
 
     setContextMenu({ x: event.clientX, y: event.clientY, items })
   }, [navigate, handleDownload, handleDelete, handleDomainClick])
-
-  const toggleFilter = (tag) => {
-    setActiveFilters(prev =>
-      prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
-    )
-  }
-
-  const handleDomainClick = (col) => {
-    if (selectedDomain === col) {
-      setSelectedDomain(null)
-    } else {
-      setSelectedDomain(col)
-      setShowPanel(true)
-    }
-  }
 
   const handleUpload = async (e) => {
     const file = e.target.files?.[0]
