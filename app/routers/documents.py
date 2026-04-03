@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 
 import numpy as np
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Query
 from fastapi.responses import FileResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,6 +45,7 @@ def _get_user_filter(settings: Settings, user_id: str) -> str | None:
 
 @router.post("/upload", response_model=UploadResponse)
 async def upload_document(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     collections: str | None = Query(default=None, description="Comma-separated collection names"),
     auto_suggest: bool = True,
@@ -139,6 +140,16 @@ async def upload_document(
 
         edge_repo = EdgeRepository(db)
         await edge_repo.bulk_insert(intra_edges + cross_edges)
+
+        # Enqueue background summary generation
+        if settings.summary_enabled:
+            from app.services.summary_generator import generate_all_summaries
+            await registry.update_status(doc_id, "summarizing")
+            background_tasks.add_task(
+                generate_all_summaries,
+                doc_id, settings,
+                vector_store=vector_store,
+            )
 
         # Register metadata
         await registry.add(
@@ -425,6 +436,23 @@ async def get_document_info(
         "doc_id": doc_id,
         "filename": doc.get("filename", ""),
         "total_pages": total_pages,
+    }
+
+
+@router.get("/{doc_id}/status")
+async def get_document_status(
+    doc_id: str,
+    registry: DocumentRepository = Depends(get_registry),
+    current_user: str = Depends(get_current_user),
+):
+    """Return processing status and summary availability for a document."""
+    doc = await registry.get_by_id(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {
+        "doc_id": doc_id,
+        "status": doc.get("status", "ready"),
+        "has_summary": doc.get("summary") is not None,
     }
 
 

@@ -43,6 +43,8 @@ class DocumentModel(Base):
         index=True,
     )
     file_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="ready")
     uploaded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -63,9 +65,12 @@ class DocumentModel(Base):
             "collections": [dc.collection for dc in self.collections],
             "user_id": self.user_id,
             "uploaded_at": self.uploaded_at.isoformat(),
+            "status": self.status,
         }
         if self.file_hash:
             result["file_hash"] = self.file_hash
+        if self.summary is not None:
+            result["summary"] = self.summary
         return result
 
 

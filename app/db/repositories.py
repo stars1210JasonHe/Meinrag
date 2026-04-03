@@ -118,6 +118,17 @@ class DocumentRepository:
         result = await self._session.execute(stmt)
         return sorted(result.scalars().all())
 
+    async def get_by_id(self, doc_id: str) -> dict | None:
+        """Alias for get() — returns document as dict or None."""
+        return await self.get(doc_id)
+
+    async def update_status(self, doc_id: str, status: str) -> None:
+        """Update the processing status of a document."""
+        await self._session.execute(
+            update(DocumentModel).where(DocumentModel.doc_id == doc_id).values(status=status)
+        )
+        await self._session.flush()
+
     async def count(self) -> int:
         result = await self._session.execute(
             select(func.count()).select_from(DocumentModel)
