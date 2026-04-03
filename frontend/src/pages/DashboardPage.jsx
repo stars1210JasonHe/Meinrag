@@ -246,7 +246,7 @@ export default function DashboardPage() {
 
   const handleNodeClick = useCallback((node) => {
     if (node._type === 'document' && node._data?.doc_id) {
-      navigate(`/pdf/${node._data.doc_id}`)
+      navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.filename || node._data.source_file || '')}`)
     } else if (node._type === 'collection') {
       setSelectedDomain(prev => prev === node.label ? null : node.label)
       setShowPanel(true)
@@ -587,17 +587,17 @@ export default function DashboardPage() {
                 <div
                   key={doc.doc_id}
                   className="flex items-center gap-3 px-4 py-2 hover:bg-white/5 cursor-pointer transition-colors group text-xs"
-                  onClick={() => navigate(`/pdf/${doc.doc_id}`)}
+                  onClick={() => navigate(`/chat?doc=${doc.doc_id}&name=${encodeURIComponent(doc.filename)}`)}
                 >
                   <FileText size={12} className="shrink-0 opacity-40" />
                   <span className="flex-1 truncate" style={{ color: 'hsl(210 40% 98%)' }}>{doc.filename}</span>
                   <span className="opacity-30 shrink-0">{doc.chunk_count}</span>
                   <button
-                    onClick={(e) => { e.stopPropagation(); navigate(`/chat?doc=${doc.doc_id}&name=${encodeURIComponent(doc.filename)}`) }}
+                    onClick={(e) => { e.stopPropagation(); navigate(`/pdf/${doc.doc_id}`) }}
                     className="p-1 rounded opacity-20 group-hover:opacity-80 hover:opacity-100 transition-opacity"
-                    title="Chat about this document"
+                    title="View PDF"
                   >
-                    <MessageSquare size={14} />
+                    <FileText size={14} />
                   </button>
                   <div className="relative">
                     <button
