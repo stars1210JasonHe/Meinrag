@@ -139,7 +139,7 @@ class TestGraphExpansion:
 
     @pytest.mark.asyncio
     async def test_expands_describes_edge(self):
-        from app.routers.query import _expand_via_edges
+        from app.services.retrieval import _expand_via_edges
 
         text_chunk = Document(
             page_content="The model architecture",
@@ -172,7 +172,7 @@ class TestGraphExpansion:
 
     @pytest.mark.asyncio
     async def test_no_duplicates(self):
-        from app.routers.query import _expand_via_edges
+        from app.services.retrieval import _expand_via_edges
 
         chunk = Document(
             page_content="Text",
@@ -193,7 +193,7 @@ class TestGraphExpansion:
 
     @pytest.mark.asyncio
     async def test_empty_retrieved(self):
-        from app.routers.query import _expand_via_edges
+        from app.services.retrieval import _expand_via_edges
 
         class MockEdgeRepo:
             async def get_edges_from(self, doc_id, chunk_index, relations=None):
@@ -208,7 +208,7 @@ class TestGraphExpansion:
 
     @pytest.mark.asyncio
     async def test_max_expansion_limit(self):
-        from app.routers.query import _expand_via_edges
+        from app.services.retrieval import _expand_via_edges
 
         text_chunk = Document(
             page_content="Text",

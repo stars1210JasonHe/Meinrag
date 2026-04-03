@@ -151,7 +151,7 @@ class TestReferenceTagging:
 
 class TestReferenceScorePenalty:
     def test_reference_chunk_penalized(self):
-        from app.routers.query import _apply_reference_penalty
+        from app.services.retrieval import _apply_reference_penalty
         results = [
             (Document(page_content="Real content", metadata={}), 0.6),
             (Document(page_content="[1] Author et al.", metadata={"section": "references"}), 0.5),
@@ -161,7 +161,7 @@ class TestReferenceScorePenalty:
         assert penalized[1][1] == pytest.approx(0.5 * 0.3)
 
     def test_non_reference_unchanged(self):
-        from app.routers.query import _apply_reference_penalty
+        from app.services.retrieval import _apply_reference_penalty
         results = [
             (Document(page_content="Normal text", metadata={}), 0.8),
             (Document(page_content="Another chunk", metadata={"section": "introduction"}), 0.7),
@@ -171,7 +171,7 @@ class TestReferenceScorePenalty:
         assert penalized[1][1] == 0.7
 
     def test_empty_results(self):
-        from app.routers.query import _apply_reference_penalty
+        from app.services.retrieval import _apply_reference_penalty
         assert _apply_reference_penalty([]) == []
 
 
@@ -288,7 +288,7 @@ class TestSectionMetadata:
 
 class TestSectionScoreWeighting:
     def test_acknowledgment_penalized(self):
-        from app.routers.query import _apply_section_weights
+        from app.services.retrieval import _apply_section_weights
         results = [
             (Document(page_content="Thanks to...", metadata={"section_type": "acknowledgment"}), 0.5),
         ]
@@ -296,7 +296,7 @@ class TestSectionScoreWeighting:
         assert weighted[0][1] == pytest.approx(0.5 * 0.4)
 
     def test_appendix_penalized(self):
-        from app.routers.query import _apply_section_weights
+        from app.services.retrieval import _apply_section_weights
         results = [
             (Document(page_content="Appendix content", metadata={"section_type": "appendix"}), 0.5),
         ]
@@ -304,7 +304,7 @@ class TestSectionScoreWeighting:
         assert weighted[0][1] == pytest.approx(0.5 * 0.7)
 
     def test_body_sections_unchanged(self):
-        from app.routers.query import _apply_section_weights
+        from app.services.retrieval import _apply_section_weights
         results = [
             (Document(page_content="Methods", metadata={"section_type": "methods"}), 0.7),
             (Document(page_content="Results", metadata={"section_type": "results"}), 0.6),
@@ -316,7 +316,7 @@ class TestSectionScoreWeighting:
         assert weighted[2][1] == 0.5
 
     def test_references_not_double_penalized(self):
-        from app.routers.query import _apply_section_weights
+        from app.services.retrieval import _apply_section_weights
         results = [
             (Document(page_content="[1] Author", metadata={"section_type": "references", "section": "references"}), 0.15),
         ]
@@ -373,7 +373,7 @@ class TestQuestionClassification:
 
     @pytest.mark.asyncio
     async def test_open_question(self):
-        from app.routers.query import _classify_question
+        from app.services.retrieval import _classify_question
 
         class MockLLM:
             async def ainvoke(self, input):
@@ -386,7 +386,7 @@ class TestQuestionClassification:
 
     @pytest.mark.asyncio
     async def test_closed_question(self):
-        from app.routers.query import _classify_question
+        from app.services.retrieval import _classify_question
 
         class MockLLM:
             async def ainvoke(self, input):
@@ -399,7 +399,7 @@ class TestQuestionClassification:
 
     @pytest.mark.asyncio
     async def test_llm_failure_defaults_to_closed(self):
-        from app.routers.query import _classify_question
+        from app.services.retrieval import _classify_question
 
         class MockLLM:
             async def ainvoke(self, input):
@@ -410,7 +410,7 @@ class TestQuestionClassification:
 
     @pytest.mark.asyncio
     async def test_unexpected_response_defaults_to_closed(self):
-        from app.routers.query import _classify_question
+        from app.services.retrieval import _classify_question
 
         class MockLLM:
             async def ainvoke(self, input):
@@ -429,7 +429,7 @@ class TestSectionAwareSampling:
     """Test _section_aware_sample() picks best chunk per section."""
 
     def test_one_per_section(self):
-        from app.routers.query import _section_aware_sample
+        from app.services.retrieval import _section_aware_sample
         results = [
             (Document(page_content="Intro text 1", metadata={"section_type": "introduction"}), 0.8),
             (Document(page_content="Intro text 2", metadata={"section_type": "introduction"}), 0.6),
@@ -446,7 +446,7 @@ class TestSectionAwareSampling:
         assert "Methods text" in contents
 
     def test_sorted_by_score_descending(self):
-        from app.routers.query import _section_aware_sample
+        from app.services.retrieval import _section_aware_sample
         results = [
             (Document(page_content="A", metadata={"section_type": "introduction"}), 0.3),
             (Document(page_content="B", metadata={"section_type": "methods"}), 0.9),
@@ -457,7 +457,7 @@ class TestSectionAwareSampling:
         assert scores == sorted(scores, reverse=True)
 
     def test_missing_section_type_uses_body(self):
-        from app.routers.query import _section_aware_sample
+        from app.services.retrieval import _section_aware_sample
         results = [
             (Document(page_content="No section", metadata={}), 0.5),
             (Document(page_content="Has section", metadata={"section_type": "methods"}), 0.6),
@@ -466,11 +466,11 @@ class TestSectionAwareSampling:
         assert len(sampled) == 2
 
     def test_empty_results(self):
-        from app.routers.query import _section_aware_sample
+        from app.services.retrieval import _section_aware_sample
         assert _section_aware_sample([]) == []
 
     def test_single_section_returns_one(self):
-        from app.routers.query import _section_aware_sample
+        from app.services.retrieval import _section_aware_sample
         results = [
             (Document(page_content="A", metadata={"section_type": "introduction"}), 0.8),
             (Document(page_content="B", metadata={"section_type": "introduction"}), 0.6),
@@ -497,7 +497,7 @@ class TestVisualProximityLinking:
         return MockStore(chunks_by_doc)
 
     def test_links_table_on_same_page(self):
-        from app.routers.query import _link_nearby_visuals
+        from app.services.retrieval import _link_nearby_visuals
 
         text_chunk = Document(
             page_content="As shown in Table 1...",
@@ -515,7 +515,7 @@ class TestVisualProximityLinking:
         assert result[1][0].page_content == table_chunk.page_content
 
     def test_links_image_on_adjacent_page(self):
-        from app.routers.query import _link_nearby_visuals
+        from app.services.retrieval import _link_nearby_visuals
 
         text_chunk = Document(
             page_content="See Figure 1...",
@@ -532,7 +532,7 @@ class TestVisualProximityLinking:
         assert len(result) == 2
 
     def test_skips_distant_page(self):
-        from app.routers.query import _link_nearby_visuals
+        from app.services.retrieval import _link_nearby_visuals
 
         text_chunk = Document(
             page_content="Some text",
@@ -549,7 +549,7 @@ class TestVisualProximityLinking:
         assert len(result) == 1  # no visuals linked
 
     def test_skips_already_retrieved(self):
-        from app.routers.query import _link_nearby_visuals
+        from app.services.retrieval import _link_nearby_visuals
 
         text_chunk = Document(
             page_content="Text",
@@ -567,7 +567,7 @@ class TestVisualProximityLinking:
         assert len(result) == 2  # no duplicates added
 
     def test_skips_image_without_image_path(self):
-        from app.routers.query import _link_nearby_visuals
+        from app.services.retrieval import _link_nearby_visuals
 
         text_chunk = Document(
             page_content="Text",
@@ -584,7 +584,7 @@ class TestVisualProximityLinking:
         assert len(result) == 1  # image without image_path skipped
 
     def test_filters_garbage_tables(self):
-        from app.routers.query import _link_nearby_visuals
+        from app.services.retrieval import _link_nearby_visuals
 
         text_chunk = Document(
             page_content="Text",
@@ -601,7 +601,7 @@ class TestVisualProximityLinking:
         assert len(result) == 1  # garbage table filtered
 
     def test_no_doc_ids_returns_unchanged(self):
-        from app.routers.query import _link_nearby_visuals
+        from app.services.retrieval import _link_nearby_visuals
 
         text_chunk = Document(
             page_content="Text",
@@ -612,7 +612,7 @@ class TestVisualProximityLinking:
         assert len(result) == 1
 
     def test_empty_retrieved(self):
-        from app.routers.query import _link_nearby_visuals
+        from app.services.retrieval import _link_nearby_visuals
 
         class MockStore:
             def get_chunks_by_doc(self, doc_id):
@@ -699,7 +699,7 @@ class TestQueryLabelDetection:
 
     @pytest.mark.asyncio
     async def test_table_reference(self):
-        from app.routers.query import _extract_query_label
+        from app.services.retrieval import _extract_query_label
 
         class MockLLM:
             async def ainvoke(self, input):
@@ -712,7 +712,7 @@ class TestQueryLabelDetection:
 
     @pytest.mark.asyncio
     async def test_no_reference(self):
-        from app.routers.query import _extract_query_label
+        from app.services.retrieval import _extract_query_label
 
         class MockLLM:
             async def ainvoke(self, input):
@@ -725,7 +725,7 @@ class TestQueryLabelDetection:
 
     @pytest.mark.asyncio
     async def test_llm_failure(self):
-        from app.routers.query import _extract_query_label
+        from app.services.retrieval import _extract_query_label
 
         class MockLLM:
             async def ainvoke(self, input):
@@ -750,7 +750,7 @@ class TestLabelLookup:
         return MockStore(chunks_by_doc)
 
     def test_finds_table_by_label(self):
-        from app.routers.query import _lookup_by_label
+        from app.services.retrieval import _lookup_by_label
 
         table = Document(
             page_content="Table 1: Max path lengths",
@@ -766,7 +766,7 @@ class TestLabelLookup:
         assert result[0].page_content == "Table 1: Max path lengths"
 
     def test_case_insensitive(self):
-        from app.routers.query import _lookup_by_label
+        from app.services.retrieval import _lookup_by_label
 
         table = Document(
             page_content="Table 1: data",
@@ -777,7 +777,7 @@ class TestLabelLookup:
         assert len(result) == 1
 
     def test_no_match(self):
-        from app.routers.query import _lookup_by_label
+        from app.services.retrieval import _lookup_by_label
 
         table = Document(
             page_content="Table 2: data",
@@ -788,7 +788,7 @@ class TestLabelLookup:
         assert len(result) == 0
 
     def test_no_doc_ids(self):
-        from app.routers.query import _lookup_by_label
+        from app.services.retrieval import _lookup_by_label
 
         class MockStore:
             def get_chunks_by_doc(self, doc_id):
@@ -803,7 +803,7 @@ class TestLabelLookup:
 
 class TestCompositeScoring:
     def test_basic_scoring(self):
-        from app.routers.query import _composite_score
+        from app.services.retrieval import _composite_score
         score = _composite_score(
             similarity=0.8, graph_score=0.5, recency=1.0, authority=1.0,
             weights=(0.7, 0.15, 0.05, 0.1),
@@ -812,7 +812,7 @@ class TestCompositeScoring:
         assert abs(score - expected) < 0.001
 
     def test_zero_similarity_still_scores(self):
-        from app.routers.query import _composite_score
+        from app.services.retrieval import _composite_score
         score = _composite_score(
             similarity=0.0, graph_score=1.0, recency=1.0, authority=1.0,
             weights=(0.7, 0.15, 0.05, 0.1),
@@ -820,15 +820,15 @@ class TestCompositeScoring:
         assert score > 0
 
     def test_parse_weights(self):
-        from app.routers.query import _parse_weights
+        from app.services.retrieval import _parse_weights
         assert _parse_weights("0.8,0.1,0.0,0.1") == (0.8, 0.1, 0.0, 0.1)
 
     def test_parse_weights_invalid_falls_back(self):
-        from app.routers.query import _parse_weights
+        from app.services.retrieval import _parse_weights
         assert _parse_weights("invalid") == (0.7, 0.15, 0.05, 0.1)
 
     def test_different_type_weights(self):
-        from app.routers.query import _composite_score
+        from app.services.retrieval import _composite_score
         # With graph_score=0.0, recency=0.0, authority=0.0, only similarity matters.
         # Fact weights similarity at 0.8 vs overview at 0.5, so fact_score > overview_score.
         fact_score = _composite_score(0.8, 0.0, 0.0, 0.0, weights=(0.8, 0.1, 0.0, 0.1))
@@ -843,7 +843,7 @@ class TestCompositeScoring:
 class TestQueryAnalysis:
     @pytest.mark.asyncio
     async def test_fact_query(self):
-        from app.routers.query import _analyze_query
+        from app.services.retrieval import _analyze_query
 
         class MockLLM:
             async def ainvoke(self, input):
@@ -857,7 +857,7 @@ class TestQueryAnalysis:
 
     @pytest.mark.asyncio
     async def test_overview_with_reference(self):
-        from app.routers.query import _analyze_query
+        from app.services.retrieval import _analyze_query
 
         class MockLLM:
             async def ainvoke(self, input):
@@ -872,7 +872,7 @@ class TestQueryAnalysis:
 
     @pytest.mark.asyncio
     async def test_llm_failure_defaults_to_exploratory(self):
-        from app.routers.query import _analyze_query
+        from app.services.retrieval import _analyze_query
 
         class MockLLM:
             async def ainvoke(self, input):
@@ -884,7 +884,7 @@ class TestQueryAnalysis:
 
     @pytest.mark.asyncio
     async def test_invalid_json_defaults(self):
-        from app.routers.query import _analyze_query
+        from app.services.retrieval import _analyze_query
 
         class MockLLM:
             async def ainvoke(self, input):
