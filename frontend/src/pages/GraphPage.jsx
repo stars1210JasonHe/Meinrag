@@ -518,7 +518,15 @@ export default function GraphPage() {
               <ExternalLink size={12} /> Open in PDF
             </button>
             <button
-              onClick={() => navigate(`/chat?doc=${selectedNode.doc_id}`)}
+              onClick={() => {
+                const label = selectedNode.label || selectedNode.content_preview?.slice(0, 40) || ''
+                const ct = selectedNode.chunk_type
+                const q = ct === 'image' ? `What does ${label || 'this figure'} show?`
+                        : ct === 'table' ? `Explain the data in ${label || 'this table'}`
+                        : ct === 'formula' ? `Explain ${label || 'this equation'}`
+                        : label ? `Tell me about: ${label}` : ''
+                navigate(`/chat?doc=${selectedNode.doc_id}&name=${encodeURIComponent(selectedNode.source_file || '')}${q ? `&q=${encodeURIComponent(q)}` : ''}`)
+              }}
               className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs"
               style={{ backgroundColor: 'hsl(217 33% 17%)', color: 'hsl(210 40% 98%)' }}
             >
