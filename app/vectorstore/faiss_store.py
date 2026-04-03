@@ -40,16 +40,15 @@ class FAISSStoreManager(VectorStoreManager):
     def delete_document(self, doc_id: str) -> None:
         if self._store is None:
             return
-        # FAISS lacks metadata-filtered deletion — rebuild without target doc's chunks
-        all_docs = []
-        for doc_store_id in list(self._store.docstore._dict.keys()):
-            doc = self._store.docstore._dict[doc_store_id]
-            if doc.metadata.get("doc_id") != doc_id:
-                all_docs.append(doc)
-
-        if all_docs:
-            self._store = FAISS.from_documents(all_docs, self._embeddings)
-        else:
+        # Find docstore IDs for this document's chunks
+        ids_to_delete = [
+            store_id for store_id, doc in self._store.docstore._dict.items()
+            if doc.metadata.get("doc_id") == doc_id
+        ]
+        if ids_to_delete:
+            self._store.delete(ids_to_delete)
+        # If all documents deleted, reset store
+        if not self._store.docstore._dict:
             self._store = None
         self.persist()
 
@@ -110,16 +109,13 @@ class FAISSStoreManager(VectorStoreManager):
             self._store.save_local(str(self._persist_dir), index_name="index")
 
     def update_document_metadata(self, doc_id: str, metadata_updates: dict) -> None:
-        """Update metadata on all chunks — FAISS requires rebuild."""
+        """Update metadata on all chunks — direct docstore update, no rebuild."""
         if self._store is None:
             return
-        all_docs = []
-        for doc_store_id in list(self._store.docstore._dict.keys()):
-            doc = self._store.docstore._dict[doc_store_id]
+        updated = False
+        for doc in self._store.docstore._dict.values():
             if doc.metadata.get("doc_id") == doc_id:
                 doc.metadata.update(metadata_updates)
-            all_docs.append(doc)
-
-        if all_docs:
-            self._store = FAISS.from_documents(all_docs, self._embeddings)
+                updated = True
+        if updated:
             self.persist()
