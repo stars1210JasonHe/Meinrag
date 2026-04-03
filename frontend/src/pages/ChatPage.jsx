@@ -300,11 +300,12 @@ export default function ChatPage() {
   const scopeDocId = searchParams.get('doc')
   const scopeDocName = searchParams.get('name') || scopeDocId
   const scopeCollection = searchParams.get('collection')
+  const prefillQuestion = searchParams.get('q')
 
   const [sessionId, setSessionId] = useState(null)
   const [showHistory, setShowHistory] = useState(false)
   const [messages, setMessages] = useState([])
-  const [input, setInput] = useState('')
+  const [input, setInput] = useState(prefillQuestion || '')
   const [loading, setLoading] = useState(false)
   const [sources, setSources] = useState([])
   const [queryTypes, setQueryTypes] = useState([])

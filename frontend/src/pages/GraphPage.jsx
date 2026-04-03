@@ -186,7 +186,8 @@ export default function GraphPage() {
         clearTimeout(clickTimerRef.current)
         clickTimerRef.current = null
         if (node._data?.doc_id) {
-          navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.source_file || '')}`)
+          const q = node._data.content_preview ? `Tell me about: ${node._data.content_preview.slice(0, 80)}` : ''
+          navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.source_file || '')}${q ? `&q=${encodeURIComponent(q)}` : ''}`)
         }
       } else {
         // Single click on pinned node: unpin after delay (to allow double-click)
