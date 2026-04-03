@@ -223,7 +223,7 @@ function SourceViewer({ source, sourceIndex, sources, onBack, onSelectSource }) 
                       error={<div className="p-8 text-center opacity-40 text-xs">Failed to load PDF</div>}>
               <Page pageNumber={currentPage}
                     width={containerWidth * zoom * 0.95}
-                    renderTextLayer={false}
+                    renderTextLayer={true}
                     renderAnnotationLayer={false}
                     onLoadSuccess={(info) => setPageSize(info)}
                     loading="">
