@@ -186,7 +186,12 @@ export default function GraphPage() {
         clearTimeout(clickTimerRef.current)
         clickTimerRef.current = null
         if (node._data?.doc_id) {
-          const q = node._data.content_preview ? `Tell me about: ${node._data.content_preview.slice(0, 80)}` : ''
+          const label = node._data.label || node._data.content_preview?.slice(0, 40) || ''
+          const ct = node._data.chunk_type
+          const q = ct === 'image' ? `What does ${label || 'this figure'} show?`
+                  : ct === 'table' ? `Explain the data in ${label || 'this table'}`
+                  : ct === 'formula' ? `Explain ${label || 'this equation'}`
+                  : label ? `Tell me about: ${label}` : ''
           navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.source_file || '')}${q ? `&q=${encodeURIComponent(q)}` : ''}`)
         }
       } else {
