@@ -196,7 +196,10 @@ async def generate_all_summaries(doc_id: str, settings, vector_store=None, summa
 
     for attempt in range(5):
         try:
-            engine = create_async_engine(settings.database_url)
+            engine = create_async_engine(
+                settings.database_url,
+                connect_args={"timeout": 30},  # wait up to 30s for SQLite lock
+            )
             session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
             async with session_factory() as session:
                 await session.execute(
@@ -214,7 +217,7 @@ async def generate_all_summaries(doc_id: str, settings, vector_store=None, summa
         except Exception as e:
             if attempt < 4 and "locked" in str(e).lower():
                 logger.warning("DB locked, retry %d/5 for %s", attempt + 1, doc_id)
-                await asyncio.sleep(2)
+                await asyncio.sleep(5)
                 continue
         logger.error("Failed to update document %s summary in DB: %s", doc_id, e)
 

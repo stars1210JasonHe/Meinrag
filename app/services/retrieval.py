@@ -656,7 +656,11 @@ async def retrieve_and_rank(
             summary_results = summary_store.similarity_search_with_scores(
                 question, k=fetch_k, doc_ids=doc_ids,
             )
-            retrieved = _merge_dual_results(retrieved, summary_results)
+            if summary_results:
+                before = len(retrieved)
+                retrieved = _merge_dual_results(retrieved, summary_results)
+                logger.info("Dual-index: merged %d raw + %d summary -> %d results",
+                           before, len(summary_results), len(retrieved))
         except Exception as e:
             logger.warning("Summary search failed: %s", e)
 
