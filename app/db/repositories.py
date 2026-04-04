@@ -456,6 +456,27 @@ class EdgeRepository:
                 })
         return edges
 
+    async def get_edge_counts_batch(
+        self, doc_id: str, chunk_indices: list[int],
+    ) -> dict[int, int]:
+        """Get edge count per chunk in a single query. Returns {chunk_index: count}."""
+        from sqlalchemy import func
+        if not chunk_indices:
+            return {}
+        stmt = (
+            select(
+                ChunkEdgeModel.source_chunk_index,
+                func.count().label("cnt"),
+            )
+            .where(
+                ChunkEdgeModel.source_doc_id == doc_id,
+                ChunkEdgeModel.source_chunk_index.in_(chunk_indices),
+            )
+            .group_by(ChunkEdgeModel.source_chunk_index)
+        )
+        result = await self._db.execute(stmt)
+        return {row[0]: row[1] for row in result.all()}
+
     async def delete_by_doc(self, doc_id: str) -> int:
         """Delete all edges involving a document (source or target)."""
         from sqlalchemy import or_

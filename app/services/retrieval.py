@@ -293,26 +293,31 @@ async def _apply_composite_scoring(
     else:
         weights = (0.7, 0.15, 0.05, 0.1)
 
+    # Batch fetch edge counts for graph score
+    edge_counts = {}
+    if edge_repo:
+        # Group chunks by doc_id
+        doc_chunks = {}
+        for doc, _ in retrieved:
+            did = doc.metadata.get("doc_id")
+            cidx = doc.metadata.get("chunk_index")
+            if did is not None and cidx is not None:
+                doc_chunks.setdefault(did, []).append(cidx)
+        # Single query per doc
+        for did, indices in doc_chunks.items():
+            try:
+                counts = await edge_repo.get_edge_counts_batch(did, indices)
+                for cidx, count in counts.items():
+                    edge_counts[(did, cidx)] = count
+            except Exception:
+                pass
+
     rescored = []
     for doc, similarity in retrieved:
-        # Graph score: count edges for this chunk (normalized)
-        graph_score = 0.0
-        if edge_repo:
-            doc_id = doc.metadata.get("doc_id")
-            chunk_index = doc.metadata.get("chunk_index")
-            if doc_id is not None and chunk_index is not None:
-                try:
-                    edges = await edge_repo.get_edges_from(doc_id, chunk_index)
-                    graph_score = min(len(edges) / 10.0, 1.0)
-                except Exception:
-                    pass
-
-        # Recency: default 1.0 (could use document upload date in future)
+        key = (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index"))
+        graph_score = min(edge_counts.get(key, 0) / 10.0, 1.0)
         recency = 1.0
-
-        # Authority: default 1.0 (user-configurable per document in future)
         authority = 1.0
-
         new_score = _composite_score(similarity, graph_score, recency, authority, weights)
         rescored.append((doc, new_score))
 
