@@ -87,6 +87,17 @@ def _build_filtered_retriever(
     return RunnableLambda(_search)
 
 
+# BM25 index cache — invalidated on document add/delete
+_bm25_cache: dict = {"doc_count": 0, "retriever": None, "doc_ids_key": None}
+
+
+def invalidate_bm25_cache():
+    """Call after document add/delete to rebuild BM25 on next query."""
+    _bm25_cache["doc_count"] = 0
+    _bm25_cache["retriever"] = None
+    _bm25_cache["doc_ids_key"] = None
+
+
 def _build_hybrid_retriever(
     vector_store: VectorStoreManager,
     top_k: int,
@@ -104,7 +115,18 @@ def _build_hybrid_retriever(
     if not all_docs:
         return RunnableLambda(lambda query: [])
 
-    bm25_retriever = BM25Retriever.from_documents(all_docs, k=top_k)
+    # Use cached BM25 if doc set hasn't changed
+    cache_key = tuple(sorted(doc_ids)) if doc_ids else None
+    if (_bm25_cache["retriever"] is not None
+            and _bm25_cache["doc_count"] == len(all_docs)
+            and _bm25_cache["doc_ids_key"] == cache_key):
+        bm25_retriever = _bm25_cache["retriever"]
+        bm25_retriever.k = top_k
+    else:
+        bm25_retriever = BM25Retriever.from_documents(all_docs, k=top_k)
+        _bm25_cache["retriever"] = bm25_retriever
+        _bm25_cache["doc_count"] = len(all_docs)
+        _bm25_cache["doc_ids_key"] = cache_key
 
     if doc_ids:
         vector_retriever = _build_filtered_retriever(vector_store, doc_ids, top_k)

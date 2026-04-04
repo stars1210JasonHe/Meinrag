@@ -120,6 +120,8 @@ async def upload_document(
             chunk.metadata["collections_csv"] = collections_csv
 
         vector_store.add_documents(chunks, doc_id=doc_id)
+        from app.rag.chain import invalidate_bm25_cache
+        invalidate_bm25_cache()
 
         # Build graph edges between chunks
         from app.services.edge_builder import build_intra_doc_edges, build_cross_doc_edges
@@ -603,6 +605,8 @@ async def delete_document(
 
     try:
         vector_store.delete_document(doc_id)
+        from app.rag.chain import invalidate_bm25_cache
+        invalidate_bm25_cache()
     except Exception as e:
         logger.warning(f"Vector store delete failed for {doc_id} (continuing): {e}")
 
