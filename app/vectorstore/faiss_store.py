@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 from langchain_community.vectorstores import FAISS
@@ -6,6 +7,24 @@ from langchain_core.embeddings import Embeddings
 
 from app.vectorstore.base import VectorStoreManager, l2sq_to_score
 
+logger = logging.getLogger(__name__)
+
+
+def _try_gpu_index(store: FAISS) -> bool:
+    """Attempt to move FAISS index to GPU. Returns True if successful."""
+    try:
+        import faiss as faiss_lib
+        if not hasattr(faiss_lib, 'StandardGpuResources'):
+            return False
+        gpu_res = faiss_lib.StandardGpuResources()
+        gpu_index = faiss_lib.index_cpu_to_gpu(gpu_res, 0, store.index)
+        store.index = gpu_index
+        logger.info("FAISS index moved to GPU")
+        return True
+    except Exception as e:
+        logger.info("FAISS GPU not available, using CPU: %s", e)
+        return False
+
 
 class FAISSStoreManager(VectorStoreManager):
     def __init__(self, persist_directory: Path):
@@ -13,6 +32,7 @@ class FAISSStoreManager(VectorStoreManager):
         self._persist_dir.mkdir(parents=True, exist_ok=True)
         self._store: FAISS | None = None
         self._embeddings: Embeddings | None = None
+        self._gpu_enabled: bool = False
 
     def initialize(self, embeddings: Embeddings) -> None:
         self._embeddings = embeddings
@@ -24,6 +44,7 @@ class FAISSStoreManager(VectorStoreManager):
                 index_name="index",
                 allow_dangerous_deserialization=True,
             )
+            self._gpu_enabled = _try_gpu_index(self._store)
 
     def add_documents(self, documents: list[Document], doc_id: str) -> list[str]:
         for doc in documents:
@@ -31,8 +52,18 @@ class FAISSStoreManager(VectorStoreManager):
 
         if self._store is None:
             self._store = FAISS.from_documents(documents, self._embeddings)
+            self._gpu_enabled = _try_gpu_index(self._store)
         else:
+            # GPU index doesn't support add — copy back to CPU, add, then move back
+            if self._gpu_enabled:
+                try:
+                    import faiss as faiss_lib
+                    self._store.index = faiss_lib.index_gpu_to_cpu(self._store.index)
+                except Exception:
+                    pass
             self._store.add_documents(documents)
+            if self._gpu_enabled:
+                _try_gpu_index(self._store)
 
         self.persist()
         return [f"{doc_id}_chunk_{i}" for i in range(len(documents))]
@@ -106,6 +137,18 @@ class FAISSStoreManager(VectorStoreManager):
 
     def persist(self) -> None:
         if self._store is not None:
+            # GPU index can't be saved directly — copy to CPU first
+            if self._gpu_enabled:
+                try:
+                    import faiss as faiss_lib
+                    cpu_index = faiss_lib.index_gpu_to_cpu(self._store.index)
+                    self._store.index = cpu_index
+                    self._store.save_local(str(self._persist_dir), index_name="index")
+                    # Move back to GPU
+                    _try_gpu_index(self._store)
+                    return
+                except Exception as e:
+                    logger.warning("GPU→CPU persist failed, saving as-is: %s", e)
             self._store.save_local(str(self._persist_dir), index_name="index")
 
     def update_document_metadata(self, doc_id: str, metadata_updates: dict) -> None:
