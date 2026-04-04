@@ -103,6 +103,18 @@ async def generate_all_summaries(doc_id: str, settings, vector_store=None) -> No
         logger.warning("No vector store provided for summary generation")
         return
 
+    # Create LLM instance for openai provider (BackgroundTasks can't receive Depends objects)
+    llm = None
+    if settings.summary_provider == "openai":
+        try:
+            from langchain_openai import ChatOpenAI
+            llm = ChatOpenAI(
+                model=settings.openai_model,
+                api_key=settings.openai_api_key,
+            )
+        except Exception as e:
+            logger.warning("Failed to create OpenAI LLM for summaries: %s", e)
+
     chunks = vector_store.get_chunks_by_doc(doc_id)
     if not chunks:
         logger.warning("No chunks found for doc %s", doc_id)
@@ -120,7 +132,7 @@ async def generate_all_summaries(doc_id: str, settings, vector_store=None) -> No
     for i in range(0, len(eligible), batch_size):
         batch = eligible[i:i + batch_size]
         results = await asyncio.gather(
-            *[generate_chunk_summary(c.page_content, settings) for c in batch],
+            *[generate_chunk_summary(c.page_content, settings, llm=llm) for c in batch],
             return_exceptions=True,
         )
         for chunk, result in zip(batch, results):
@@ -158,29 +170,35 @@ async def generate_all_summaries(doc_id: str, settings, vector_store=None) -> No
         if chunk.metadata.get("summary") and st not in section_sums:
             section_sums[st] = chunk.metadata["summary"]
 
-    doc_summary = await generate_doc_summary(section_sums, settings)
+    doc_summary = await generate_doc_summary(section_sums, settings, llm=llm)
 
     # Update document status and summary in DB using a self-contained session
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
     from sqlalchemy import update
     from app.db.models import DocumentModel
 
-    try:
-        engine = create_async_engine(settings.database_url)
-        session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-        async with session_factory() as session:
-            await session.execute(
-                update(DocumentModel)
-                .where(DocumentModel.doc_id == doc_id)
-                .values(
-                    status="ready",
-                    summary=doc_summary,
+    for attempt in range(5):
+        try:
+            engine = create_async_engine(settings.database_url)
+            session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with session_factory() as session:
+                await session.execute(
+                    update(DocumentModel)
+                    .where(DocumentModel.doc_id == doc_id)
+                    .values(
+                        status="ready",
+                        summary=doc_summary,
+                    )
                 )
-            )
-            await session.commit()
-        await engine.dispose()
-        logger.info("Document %s summary saved: %s", doc_id, (doc_summary or "")[:80])
-    except Exception as e:
+                await session.commit()
+            await engine.dispose()
+            logger.info("Document %s summary saved: %s", doc_id, (doc_summary or "")[:80])
+            break
+        except Exception as e:
+            if attempt < 4 and "locked" in str(e).lower():
+                logger.warning("DB locked, retry %d/5 for %s", attempt + 1, doc_id)
+                await asyncio.sleep(2)
+                continue
         logger.error("Failed to update document %s summary in DB: %s", doc_id, e)
 
     logger.info("Summary generation complete for %s", doc_id)

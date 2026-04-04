@@ -102,6 +102,12 @@ class Settings(BaseSettings):
 
     # Query types config file (defines types, strategies, scoring weights)
     query_types_file: str = "data/query_types.json"
+
+    # Summary generation (compiled layer)
+    summary_enabled: bool = False
+    summary_provider: str = "openrouter"  # "openrouter" or "openai"
+    summary_model: str = "qwen/qwen3.5-9b"
+    summary_min_chars: int = 200
     scoring_recency_decay: float = 0.001
 
     # Visual proximity linking (replace blanket visual supplements)
