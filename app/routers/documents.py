@@ -14,6 +14,7 @@ from app.config import Settings
 from app.classification import PRIMARY_CATEGORIES
 from app.dependencies import (
     get_settings, get_vector_store, get_registry, get_llm, get_embeddings, get_current_user, get_db,
+    get_summary_store,
 )
 from app.db.repositories import DocumentRepository
 from langchain_core.embeddings import Embeddings
@@ -56,6 +57,7 @@ async def upload_document(
     registry: DocumentRepository = Depends(get_registry),
     current_user: str = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    summary_store=Depends(get_summary_store),
 ):
     filename = file.filename or "unknown"
     suffix = Path(filename).suffix.lower()
@@ -149,6 +151,7 @@ async def upload_document(
                 generate_all_summaries,
                 doc_id, settings,
                 vector_store=vector_store,
+                summary_store=summary_store,
             )
 
         # Register metadata
@@ -593,6 +596,7 @@ async def delete_document(
     vector_store: VectorStoreManager = Depends(get_vector_store),
     registry: DocumentRepository = Depends(get_registry),
     db: AsyncSession = Depends(get_db),
+    summary_store=Depends(get_summary_store),
 ):
     if not await registry.get(doc_id):
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
@@ -601,6 +605,12 @@ async def delete_document(
         vector_store.delete_document(doc_id)
     except Exception as e:
         logger.warning(f"Vector store delete failed for {doc_id} (continuing): {e}")
+
+    if summary_store:
+        try:
+            summary_store.delete_document(doc_id)
+        except Exception:
+            pass
 
     # Remove all edges involving this document
     from app.db.repositories import EdgeRepository

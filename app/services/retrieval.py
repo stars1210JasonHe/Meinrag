@@ -586,6 +586,24 @@ def _lookup_by_label(
 # Main pipeline orchestrator
 # ---------------------------------------------------------------------------
 
+def _merge_dual_results(raw_results: list[tuple], summary_results: list[tuple]) -> list[tuple]:
+    """Merge raw and summary search results, keeping best score per chunk."""
+    best: dict = {}  # (doc_id, chunk_index) -> (doc, score)
+    for doc, score in raw_results:
+        key = (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index"))
+        if key not in best or score > best[key][1]:
+            best[key] = (doc, score)
+    for doc, score in summary_results:
+        key = (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index"))
+        if key not in best or score > best[key][1]:
+            # Keep raw doc object if available (has full content), use higher score
+            if key in best:
+                best[key] = (best[key][0], score)
+            else:
+                best[key] = (doc, score)
+    return list(best.values())
+
+
 async def retrieve_and_rank(
     question: str,
     top_k: int,
@@ -597,6 +615,7 @@ async def retrieve_and_rank(
     edge_repo,
     settings: Settings,
     force_web_search: bool = False,
+    summary_store=None,
 ) -> RetrievalResult:
     """Full retrieval pipeline — single source of truth.
 
@@ -630,6 +649,16 @@ async def retrieve_and_rank(
     retrieved = vector_store.similarity_search_with_scores(
         question, k=fetch_k, doc_ids=doc_ids,
     )
+
+    # 4b. Summary index search (dual-index)
+    if summary_store:
+        try:
+            summary_results = summary_store.similarity_search_with_scores(
+                question, k=fetch_k, doc_ids=doc_ids,
+            )
+            retrieved = _merge_dual_results(retrieved, summary_results)
+        except Exception as e:
+            logger.warning("Summary search failed: %s", e)
 
     # 5. Query expansion
     _, retrieved = await _maybe_expand_query(

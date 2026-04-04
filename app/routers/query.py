@@ -8,7 +8,7 @@ from sse_starlette.sse import EventSourceResponse
 from app.config import Settings
 from app.dependencies import (
     get_settings, get_vector_store, get_llm, get_embeddings, get_memory_manager,
-    get_registry, get_current_user, get_edge_repository,
+    get_registry, get_current_user, get_edge_repository, get_summary_store,
 )
 from app.db.repositories import DocumentRepository, ChatSessionRepository, EdgeRepository
 from app.models.schemas import QueryRequest, QueryResponse, SourceChunk, ChunkContextRequest, AskAIRequest, AskAIResponse
@@ -248,6 +248,7 @@ async def query_documents(
     registry: DocumentRepository = Depends(get_registry),
     current_user: str = Depends(get_current_user),
     edge_repo: EdgeRepository = Depends(get_edge_repository),
+    summary_store=Depends(get_summary_store),
 ):
     doc_ids, user_scoped = await _resolve_doc_ids(request, settings, registry, current_user)
 
@@ -286,6 +287,7 @@ async def query_documents(
             edge_repo=edge_repo,
             settings=settings,
             force_web_search=False,
+            summary_store=summary_store,
         )
 
         if result.web_search_needed:
@@ -427,6 +429,7 @@ async def query_documents_stream(
     registry: DocumentRepository = Depends(get_registry),
     current_user: str = Depends(get_current_user),
     edge_repo: EdgeRepository = Depends(get_edge_repository),
+    summary_store=Depends(get_summary_store),
 ):
     """Streaming version of /query. Returns SSE events."""
     doc_ids, user_scoped = await _resolve_doc_ids(request, settings, registry, current_user)
@@ -461,6 +464,7 @@ async def query_documents_stream(
             edge_repo=edge_repo,
             settings=settings,
             force_web_search=False,
+            summary_store=summary_store,
         )
         needs_web_search = result.web_search_needed
         query_types = result.query_types

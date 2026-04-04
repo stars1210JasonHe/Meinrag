@@ -93,7 +93,7 @@ async def generate_doc_summary(section_summaries: dict, settings, llm=None) -> s
     return None
 
 
-async def generate_all_summaries(doc_id: str, settings, vector_store=None) -> None:
+async def generate_all_summaries(doc_id: str, settings, vector_store=None, summary_store=None) -> None:
     """Orchestrator: generate chunk + doc summaries for a document.
 
     This is a standalone async function — can be called from BackgroundTasks
@@ -162,6 +162,23 @@ async def generate_all_summaries(doc_id: str, settings, vector_store=None) -> No
                 vector_store.persist()
         except Exception as e:
             logger.warning("Failed to persist summaries to vector store: %s", e)
+
+    # Add summaries to summary FAISS store for dual-index search
+    if summary_store and generated > 0:
+        from langchain_core.documents import Document as LCDocument
+        summary_docs = []
+        for chunk in chunks:
+            if chunk.metadata.get("summary"):
+                summary_docs.append(LCDocument(
+                    page_content=chunk.metadata["summary"],
+                    metadata=chunk.metadata,
+                ))
+        if summary_docs:
+            try:
+                summary_store.add_documents(summary_docs, doc_id=doc_id)
+                logger.info("Added %d summary embeddings for %s", len(summary_docs), doc_id)
+            except Exception as e:
+                logger.warning("Failed to add summary embeddings: %s", e)
 
     # Generate document-level summary from section summaries
     section_sums = {}

@@ -12,6 +12,7 @@ from app.db.session import create_engine_and_session
 from app.db.repositories import UserRepository
 from app.llm.provider import create_chat_model, create_embeddings
 from app.vectorstore.factory import create_vector_store_manager
+from app.vectorstore.faiss_store import FAISSStoreManager
 
 logger = logging.getLogger("meinrag")
 
@@ -37,6 +38,7 @@ async def lifespan(app: FastAPI):
     # Ensure directories exist (for uploaded files and vectorstore)
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
     settings.vectorstore_dir.mkdir(parents=True, exist_ok=True)
+    (settings.vectorstore_dir.parent / "vectorstore_summary").mkdir(parents=True, exist_ok=True)
 
     # Database setup
     engine, session_factory = create_engine_and_session(
@@ -61,11 +63,17 @@ async def lifespan(app: FastAPI):
     vector_store.initialize(embeddings)
     llm = create_chat_model(settings)
 
+    # Summary vector store (dual-index for compiled layer)
+    from pathlib import Path
+    summary_store = FAISSStoreManager(Path(settings.vectorstore_dir) / ".." / "vectorstore_summary")
+    summary_store.initialize(embeddings)
+
     # Store in app.state for dependency injection
     app.state.settings = settings
     app.state.db_engine = engine
     app.state.db_session_factory = session_factory
     app.state.vector_store = vector_store
+    app.state.summary_store = summary_store
     app.state.llm = llm
     app.state.embeddings = embeddings
 

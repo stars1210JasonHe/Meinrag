@@ -18,6 +18,10 @@ def get_vector_store(request: Request) -> VectorStoreManager:
     return request.app.state.vector_store
 
 
+def get_summary_store(request: Request) -> VectorStoreManager | None:
+    return getattr(request.app.state, "summary_store", None)
+
+
 def get_llm(request: Request) -> BaseChatModel:
     return request.app.state.llm
 
