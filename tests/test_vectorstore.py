@@ -22,16 +22,17 @@ def vector_env():
     store = ChromaStoreManager(persist_directory=store_dir)
     store.initialize(embeddings)
 
+    import asyncio
     processor = DocumentProcessor(settings)
 
     # Index AI safety paper as "research" collection
-    chunks_ai = processor.load_and_split(PDF_AI_SAFETY)
+    chunks_ai = asyncio.run(processor.load_and_split(PDF_AI_SAFETY))
     for chunk in chunks_ai:
         chunk.metadata["collection"] = "research"
     store.add_documents(chunks_ai, doc_id="doc_ai_safety")
 
     # Index patterns paper as "computer-science" collection
-    chunks_pat = processor.load_and_split(PDF_PATTERNS)
+    chunks_pat = asyncio.run(processor.load_and_split(PDF_PATTERNS))
     for chunk in chunks_pat:
         chunk.metadata["collection"] = "computer-science"
     store.add_documents(chunks_pat, doc_id="doc_patterns")

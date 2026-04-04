@@ -1,4 +1,5 @@
 """B1: Document Processing tests - Requires API key."""
+import asyncio
 import base64
 import shutil
 from pathlib import Path
@@ -22,7 +23,7 @@ class TestDocumentProcessing:
     def test_process_pdf(self, settings):
         """B1.1: PDF produces chunks with correct metadata."""
         processor = DocumentProcessor(settings)
-        chunks = processor.load_and_split(PDF_AI_SAFETY)
+        chunks = asyncio.run(processor.load_and_split(PDF_AI_SAFETY))
 
         assert len(chunks) > 0
         for chunk in chunks:
@@ -33,7 +34,7 @@ class TestDocumentProcessing:
     def test_chunk_size_within_limits(self, settings):
         """B1.4: All chunks within configured chunk_size."""
         processor = DocumentProcessor(settings)
-        chunks = processor.load_and_split(PDF_AI_SAFETY)
+        chunks = asyncio.run(processor.load_and_split(PDF_AI_SAFETY))
 
         # Allow some tolerance (chunk_size + overlap)
         max_allowed = settings.chunk_size + settings.chunk_overlap
@@ -45,7 +46,7 @@ class TestDocumentProcessing:
     def test_large_pdf_produces_many_chunks(self, settings):
         """B1.5: 142-page law PDF produces significant number of chunks."""
         processor = DocumentProcessor(settings)
-        chunks = processor.load_and_split(PDF_LAW)
+        chunks = asyncio.run(processor.load_and_split(PDF_LAW))
 
         # 142 pages should produce a lot of chunks
         assert len(chunks) > 50, f"Expected many chunks from 142-page PDF, got {len(chunks)}"
@@ -53,7 +54,7 @@ class TestDocumentProcessing:
     def test_chunk_metadata_has_source(self, settings):
         """B1.1: Each chunk has source_file in metadata."""
         processor = DocumentProcessor(settings)
-        chunks = processor.load_and_split(PDF_AI_SAFETY)
+        chunks = asyncio.run(processor.load_and_split(PDF_AI_SAFETY))
 
         for chunk in chunks:
             assert chunk.metadata.get("source_file"), "Missing source_file in metadata"
@@ -159,7 +160,7 @@ class TestContentSegmentation:
 
         try:
             processor = DocumentProcessor(settings)
-            chunks = processor.load_and_split(test_pdf)
+            chunks = asyncio.run(processor.load_and_split(test_pdf))
             assert len(chunks) > 0
             for chunk in chunks:
                 assert chunk.metadata.get("chunk_type") == "text"
@@ -256,7 +257,7 @@ class TestVisionMode:
 
         if not _check_libreoffice_available():
             with pytest.raises(ValueError, match="LibreOffice"):
-                processor.load_and_split(doc_file)
+                asyncio.run(processor.load_and_split(doc_file))
 
 
 # ================================
@@ -302,7 +303,7 @@ class TestLibreOfficeConversion:
         # Note: a plain text .doc may work or fail depending on LibreOffice
         # This tests the pipeline works
         try:
-            chunks = processor.load_and_split(real_doc)
+            chunks = asyncio.run(processor.load_and_split(real_doc))
             assert len(chunks) > 0
             for chunk in chunks:
                 assert chunk.metadata["source_file"] == "test.doc"
@@ -342,7 +343,7 @@ class TestVisionModePDF:
                 vision_page_dpi=100,  # lower DPI for faster test
             )
             processor = DocumentProcessor(settings)
-            chunks = processor.load_and_split(test_pdf, doc_id="testvision")
+            chunks = asyncio.run(processor.load_and_split(test_pdf, doc_id="testvision"))
             assert len(chunks) > 0
             for chunk in chunks:
                 assert chunk.metadata.get("chunk_type") in ("text", "table", "image")

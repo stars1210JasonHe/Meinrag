@@ -24,14 +24,15 @@ def rag_env():
     store.initialize(embeddings)
     llm = create_chat_model(settings)
 
+    import asyncio
     processor = DocumentProcessor(settings)
 
-    chunks_ai = processor.load_and_split(PDF_AI_SAFETY)
+    chunks_ai = asyncio.run(processor.load_and_split(PDF_AI_SAFETY))
     for c in chunks_ai:
         c.metadata["collection"] = "research"
     store.add_documents(chunks_ai, doc_id="doc_ai")
 
-    chunks_pat = processor.load_and_split(PDF_PATTERNS)
+    chunks_pat = asyncio.run(processor.load_and_split(PDF_PATTERNS))
     for c in chunks_pat:
         c.metadata["collection"] = "computer-science"
     store.add_documents(chunks_pat, doc_id="doc_pat")

@@ -1,4 +1,5 @@
 """B4: AI Collection Suggestion tests - Requires API key."""
+import asyncio
 from unittest.mock import MagicMock
 
 import pytest
@@ -19,7 +20,7 @@ class TestAISuggestion:
         """B4.1: AI safety research paper gets taxonomy-based suggestions."""
         llm = create_chat_model(settings)
         processor = DocumentProcessor(settings)
-        chunks = processor.load_and_split(PDF_AI_SAFETY)
+        chunks = asyncio.run(processor.load_and_split(PDF_AI_SAFETY))
 
         suggestions = suggest_collections(chunks, llm)
         assert isinstance(suggestions, list)
@@ -32,7 +33,7 @@ class TestAISuggestion:
         """B4.2: CS patterns paper gets taxonomy-based suggestions."""
         llm = create_chat_model(settings)
         processor = DocumentProcessor(settings)
-        chunks = processor.load_and_split(PDF_PATTERNS)
+        chunks = asyncio.run(processor.load_and_split(PDF_PATTERNS))
 
         suggestions = suggest_collections(chunks, llm)
         assert isinstance(suggestions, list)
@@ -43,7 +44,7 @@ class TestAISuggestion:
         """B4.3: German Basic Law gets a legal suggestion."""
         llm = create_chat_model(settings)
         processor = DocumentProcessor(settings)
-        chunks = processor.load_and_split(PDF_LAW)
+        chunks = asyncio.run(processor.load_and_split(PDF_LAW))
 
         suggestions = suggest_collections(chunks, llm)
         assert isinstance(suggestions, list)
@@ -54,7 +55,7 @@ class TestAISuggestion:
         """B4.4: Suggestions are lowercase, no spaces, <= 50 chars each."""
         llm = create_chat_model(settings)
         processor = DocumentProcessor(settings)
-        chunks = processor.load_and_split(PDF_AI_SAFETY)
+        chunks = asyncio.run(processor.load_and_split(PDF_AI_SAFETY))
 
         suggestions = suggest_collections(chunks, llm)
         for suggestion in suggestions:
@@ -66,7 +67,7 @@ class TestAISuggestion:
         """B4.5: Suggestions aware of existing collections."""
         llm = create_chat_model(settings)
         processor = DocumentProcessor(settings)
-        chunks = processor.load_and_split(PDF_AI_SAFETY)
+        chunks = asyncio.run(processor.load_and_split(PDF_AI_SAFETY))
 
         existing = ["research-scientific", "computer-science-ai"]
         suggestions = suggest_collections(chunks, llm, existing_collections=existing)
@@ -89,7 +90,7 @@ class TestEmbeddingClassification:
             openai_api_key=settings.openai_api_key,
         )
         processor = DocumentProcessor(settings)
-        chunks = processor.load_and_split(PDF_AI_SAFETY)
+        chunks = asyncio.run(processor.load_and_split(PDF_AI_SAFETY))
 
         # LLM fallback mock (in case embedding threshold isn't met)
         fallback_llm = MagicMock()
