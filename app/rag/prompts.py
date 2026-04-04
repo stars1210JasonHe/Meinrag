@@ -87,16 +87,6 @@ ASK_AI_PROMPT = ChatPromptTemplate.from_messages([
     ("human", "{question}"),
 ])
 
-QUESTION_CLASSIFY_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", "Classify this question as 'open' or 'closed'.\n"
-     "Open = needs broad coverage across a document (summarize, overview, opinion, "
-     "explain the paper, what is this about, compare sections).\n"
-     "Closed = needs specific facts from a narrow part of a document (what score, "
-     "which method, how many layers, what equation).\n"
-     "Answer with EXACTLY one word: open or closed"),
-    ("human", "{question}"),
-])
-
 LABEL_EXTRACT_PROMPT = ChatPromptTemplate.from_messages([
     ("system", "Extract the figure, table, or equation label from this text.\n"
      "If the text starts with a label like 'Table 1', 'Figure 2', '图1', 'Tabelle 3', "
@@ -105,15 +95,6 @@ LABEL_EXTRACT_PROMPT = ChatPromptTemplate.from_messages([
      "If there is no label, return 'none'.\n"
      "Answer with ONLY the label or 'none'."),
     ("human", "{content}"),
-])
-
-QUERY_LABEL_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", "Does this question ask about a specific table, figure, or equation by number?\n"
-     "If yes, return ONLY the label normalized to English (e.g., 'Table 1', 'Figure 2', 'Equation 3').\n"
-     "Handle any language: '表1' → 'Table 1', '图2' → 'Figure 2', 'Tabelle 3' → 'Table 3'.\n"
-     "If no specific label is referenced, return 'none'.\n"
-     "Answer with ONLY the label or 'none'."),
-    ("human", "{question}"),
 ])
 
 def make_query_analyze_prompt(system_text: str) -> ChatPromptTemplate:

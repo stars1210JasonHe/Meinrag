@@ -368,60 +368,6 @@ class TestBboxMerging:
 # ── Open/Closed question classification ──────────────────────────────────
 
 
-class TestQuestionClassification:
-    """Test _classify_question() with mock LLM."""
-
-    @pytest.mark.asyncio
-    async def test_open_question(self):
-        from app.services.retrieval import _classify_question
-
-        class MockLLM:
-            async def ainvoke(self, input):
-                class Resp:
-                    content = "open"
-                return Resp()
-
-        result = await _classify_question("Summarize this paper", MockLLM())
-        assert result == "open"
-
-    @pytest.mark.asyncio
-    async def test_closed_question(self):
-        from app.services.retrieval import _classify_question
-
-        class MockLLM:
-            async def ainvoke(self, input):
-                class Resp:
-                    content = "closed"
-                return Resp()
-
-        result = await _classify_question("What BLEU score did the model achieve?", MockLLM())
-        assert result == "closed"
-
-    @pytest.mark.asyncio
-    async def test_llm_failure_defaults_to_closed(self):
-        from app.services.retrieval import _classify_question
-
-        class MockLLM:
-            async def ainvoke(self, input):
-                raise RuntimeError("LLM error")
-
-        result = await _classify_question("Some question", MockLLM())
-        assert result == "closed"
-
-    @pytest.mark.asyncio
-    async def test_unexpected_response_defaults_to_closed(self):
-        from app.services.retrieval import _classify_question
-
-        class MockLLM:
-            async def ainvoke(self, input):
-                class Resp:
-                    content = "maybe open maybe not"
-                return Resp()
-
-        result = await _classify_question("Some question", MockLLM())
-        assert result == "closed"
-
-
 # ── Section-aware sampling ───────────────────────────────────────────────
 
 
@@ -688,50 +634,6 @@ class TestLLMLabelExtraction:
                 return R()
 
         result = await _extract_label_llm("ab", MockLLM())
-        assert result is None
-
-
-# ── Query label detection ────────────────────────────────────────────────
-
-
-class TestQueryLabelDetection:
-    """Test _extract_query_label() detects label references in queries."""
-
-    @pytest.mark.asyncio
-    async def test_table_reference(self):
-        from app.services.retrieval import _extract_query_label
-
-        class MockLLM:
-            async def ainvoke(self, input):
-                class R:
-                    content = "Table 1"
-                return R()
-
-        result = await _extract_query_label("Show me table 1", MockLLM())
-        assert result == "Table 1"
-
-    @pytest.mark.asyncio
-    async def test_no_reference(self):
-        from app.services.retrieval import _extract_query_label
-
-        class MockLLM:
-            async def ainvoke(self, input):
-                class R:
-                    content = "none"
-                return R()
-
-        result = await _extract_query_label("What is attention?", MockLLM())
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_llm_failure(self):
-        from app.services.retrieval import _extract_query_label
-
-        class MockLLM:
-            async def ainvoke(self, input):
-                raise RuntimeError("fail")
-
-        result = await _extract_query_label("Table 1", MockLLM())
         assert result is None
 
 

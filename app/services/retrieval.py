@@ -20,8 +20,6 @@ from app.rag.chain import is_reference_entry
 from app.rag.prompts import (
     QUERY_ANALYZE_PROMPT,
     QUERY_EXPANSION_PROMPT,
-    QUESTION_CLASSIFY_PROMPT,
-    QUERY_LABEL_PROMPT,
 )
 from app.services.chunk_utils import is_garbage_table
 from app.vectorstore.base import VectorStoreManager
@@ -59,52 +57,8 @@ class RetrievalResult:
 
 
 # ---------------------------------------------------------------------------
-# Query analysis (deprecated helpers kept for backward compat)
+# Query analysis
 # ---------------------------------------------------------------------------
-
-async def _classify_question(
-    question: str, llm: BaseChatModel,
-) -> str:
-    """Classify a question as 'open' or 'closed' using LLM.
-
-    Open questions need broad section coverage (summaries, overviews).
-    Closed questions need specific top-K retrieval (facts, scores).
-    Returns 'closed' on any failure.
-    """
-    try:
-        messages = QUESTION_CLASSIFY_PROMPT.format_messages(question=question)
-        response = await llm.ainvoke(messages)
-        result = response.content if hasattr(response, "content") else str(response)
-        classification = result.strip().lower()
-        if classification in ("open", "closed"):
-            logger.info("Question classified as: %s — %r", classification, question)
-            return classification
-        logger.warning("Unexpected classification %r, defaulting to closed", result)
-        return "closed"
-    except Exception as e:
-        logger.warning("Question classification failed: %s, defaulting to closed", e)
-        return "closed"
-
-
-async def _extract_query_label(
-    question: str, llm: BaseChatModel,
-) -> str | None:
-    """Extract a table/figure/equation label from the user's query using LLM.
-
-    Returns normalized label like 'Table 1', 'Figure 2', or None.
-    """
-    try:
-        messages = QUERY_LABEL_PROMPT.format_messages(question=question)
-        response = await llm.ainvoke(messages)
-        result = response.content if hasattr(response, "content") else str(response)
-        result = result.strip()
-        if result.lower() == "none" or len(result) > 30:
-            return None
-        return result
-    except Exception as e:
-        logger.warning("Query label extraction failed: %s", e)
-        return None
-
 
 async def _analyze_query(
     question: str, llm: BaseChatModel,
