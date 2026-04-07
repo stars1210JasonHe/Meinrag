@@ -321,6 +321,16 @@ export default function ChatPage() {
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
 
+  // Reset session when document/collection scope changes
+  useEffect(() => {
+    setSessionId(null)
+    setMessages([])
+    setSources([])
+    setQueryTypes([])
+    setSelectedSource(null)
+    setShowSources(false)
+  }, [scopeDocId, scopeCollection])
+
   const clearScope = () => {
     setSearchParams({})
   }
