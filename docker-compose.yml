@@ -17,6 +17,15 @@ services:
       timeout: 5s
       retries: 5
 
+  # Redis — needed when TASK_BACKEND=arq
+  # Start with: docker compose up redis -d
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
   # App — works with both SQLite (default) and PostgreSQL
   app:
     build: .
@@ -29,4 +38,5 @@ services:
 
 volumes:
   pgdata:
+  redis_data:
   app_data:

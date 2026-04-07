@@ -147,11 +147,11 @@ async def upload_document(
 
         # Enqueue background summary generation
         if settings.summary_enabled:
-            from app.services.summary_generator import generate_all_summaries
+            from app.services.task_dispatcher import enqueue_summary_task
             await registry.update_status(doc_id, "summarizing")
-            background_tasks.add_task(
-                generate_all_summaries,
+            await enqueue_summary_task(
                 doc_id, settings,
+                background_tasks=background_tasks,
                 vector_store=vector_store,
                 summary_store=summary_store,
             )

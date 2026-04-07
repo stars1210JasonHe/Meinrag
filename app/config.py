@@ -103,6 +103,10 @@ class Settings(BaseSettings):
     # Query types config file (defines types, strategies, scoring weights)
     query_types_file: str = "data/query_types.json"
 
+    # Background task backend
+    task_backend: str = "background"  # "background" (FastAPI) or "arq" (Redis)
+    redis_url: str = "redis://localhost:6379"
+
     # Summary generation (compiled layer)
     summary_enabled: bool = False
     summary_provider: str = "openrouter"  # "openrouter" or "openai"
