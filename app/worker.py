@@ -3,6 +3,10 @@
 Run with: uv run arq app.worker.WorkerSettings
 """
 import logging
+from pathlib import Path
+
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 from arq.connections import RedisSettings
 
@@ -20,7 +24,10 @@ async def generate_summaries_task(ctx, doc_id: str):
     from pathlib import Path
 
     # Initialize vector stores (worker runs in separate process)
-    embeddings = OpenAIEmbeddings(model=settings.openai_embedding_model)
+    embeddings = OpenAIEmbeddings(
+        model=settings.openai_embedding_model,
+        api_key=settings.openai_api_key,
+    )
 
     vector_store = FAISSStoreManager(Path(settings.vectorstore_dir))
     vector_store.initialize(embeddings)
