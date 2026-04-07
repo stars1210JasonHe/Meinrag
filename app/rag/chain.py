@@ -25,8 +25,11 @@ def format_docs(docs: list[Document]) -> str:
         page = doc.metadata.get("page")
         page_str = f" (p.{page + 1})" if page is not None else ""
         chunk_type = doc.metadata.get("chunk_type", "text")
+        label = doc.metadata.get("label")
         type_label = ""
-        if chunk_type == "table":
+        if label:
+            type_label = f" [{label}]"
+        elif chunk_type == "table":
             table_counter += 1
             type_label = f" [TABLE {table_counter}]"
         elif chunk_type == "image":

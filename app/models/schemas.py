@@ -71,6 +71,7 @@ class SourceChunk(BaseModel):
     chunk_type: Literal["text", "table", "image", "formula"] | None = None
     image_path: str | None = None
     bbox: list[float] | None = None
+    label: str | None = None
 
 
 class QueryResponse(BaseModel):

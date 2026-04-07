@@ -478,6 +478,7 @@ def _build_source_chunks(retrieved: list) -> list[SourceChunk]:
             chunk_type=doc.metadata.get("chunk_type"),
             image_path=doc.metadata.get("image_path"),
             bbox=_parse_bbox(doc.metadata.get("bbox")),
+            label=doc.metadata.get("label"),
         )
         for doc, score in retrieved
     ]
