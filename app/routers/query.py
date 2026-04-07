@@ -13,8 +13,8 @@ from app.dependencies import (
 from app.db.repositories import DocumentRepository, ChatSessionRepository, EdgeRepository
 from app.models.schemas import QueryRequest, QueryResponse, SourceChunk, ChunkContextRequest, AskAIRequest, AskAIResponse
 from langchain_core.output_parsers import StrOutputParser
-from app.rag.chain import build_rag_chain
-from app.rag.prompts import WEB_SEARCH_PROMPT, CHUNK_CONTEXT_PROMPT, QUERY_REWRITE_PROMPT, ASK_AI_PROMPT
+from app.rag.chain import format_docs
+from app.rag.prompts import RAG_PROMPT, RAG_CHAT_PROMPT, WEB_SEARCH_PROMPT, CHUNK_CONTEXT_PROMPT, QUERY_REWRITE_PROMPT, ASK_AI_PROMPT
 from app.routers.stream_helpers import sse_event, stream_chain_response
 from app.services.retrieval import (
     retrieve_and_rank,
@@ -258,24 +258,13 @@ async def query_documents(
         chat_history = await memory_manager.get_history(request.session_id) or None
 
     try:
-        chain, retriever = build_rag_chain(
-            vector_store=vector_store,
-            llm=llm,
-            top_k=request.top_k,
-            doc_ids=doc_ids,
-            chat_history=chat_history,
-            settings=settings,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    try:
         # Force web search — skip vector search entirely
         if request.force_web_search and settings.web_search_enabled:
             return await _web_search_fallback(
                 request, llm, memory_manager, settings, current_user=current_user,
             )
 
+        # Single retrieval — one source of truth for both LLM context and frontend sources
         result = await retrieve_and_rank(
             question=request.question,
             top_k=request.top_k,
@@ -288,6 +277,7 @@ async def query_documents(
             settings=settings,
             force_web_search=False,
             summary_store=summary_store,
+            chat_history=chat_history,
         )
 
         if result.web_search_needed:
@@ -295,7 +285,23 @@ async def query_documents(
                 request, llm, memory_manager, settings, current_user=current_user,
             )
 
-        answer = await _invoke_with_retry(chain, request.question)
+        # Format retrieved docs as context for LLM
+        context = format_docs([doc for doc, _ in result.retrieved])
+
+        # Build simple chain (no retriever — just prompt + LLM)
+        if chat_history:
+            chain = RAG_CHAT_PROMPT | llm | StrOutputParser()
+            answer = await _invoke_with_retry(chain, {
+                "context": context,
+                "chat_history": chat_history,
+                "question": request.question,
+            })
+        else:
+            chain = RAG_PROMPT | llm | StrOutputParser()
+            answer = await _invoke_with_retry(chain, {
+                "context": context,
+                "question": request.question,
+            })
 
         # Store exchange in session memory
         if request.session_id:
@@ -438,20 +444,13 @@ async def query_documents_stream(
     if request.session_id:
         chat_history = await memory_manager.get_history(request.session_id) or None
 
-    try:
-        chain, retriever = build_rag_chain(
-            vector_store=vector_store, llm=llm, top_k=request.top_k,
-            doc_ids=doc_ids, chat_history=chat_history, settings=settings,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
     # --- Retrieval (done before streaming starts) ---
     if request.force_web_search and settings.web_search_enabled:
         result = None
         needs_web_search = True
         query_types: list[str] = []
         query_label = None
+        context = ""
     else:
         result = await retrieve_and_rank(
             question=request.question,
@@ -465,10 +464,12 @@ async def query_documents_stream(
             settings=settings,
             force_web_search=False,
             summary_store=summary_store,
+            chat_history=chat_history,
         )
         needs_web_search = result.web_search_needed
         query_types = result.query_types
         query_label = result.query_label
+        context = format_docs([doc for doc, _ in result.retrieved]) if not needs_web_search else ""
 
     # Pre-compute web search context if needed
     web_context = ""
@@ -495,14 +496,24 @@ async def query_documents_stream(
                 ):
                     yield event
             else:
-                # Normal RAG path
-                # Send query analysis metadata
+                # Normal RAG path — build prompt+LLM chain with pre-computed context
                 yield sse_event("query_analysis", {"types": query_types, "label": query_label})
 
                 sources_data = [s.model_dump() for s in result.sources]
 
+                if chat_history:
+                    rag_chain = RAG_CHAT_PROMPT | llm | StrOutputParser()
+                    input_data = {
+                        "context": context,
+                        "chat_history": chat_history,
+                        "question": request.question,
+                    }
+                else:
+                    rag_chain = RAG_PROMPT | llm | StrOutputParser()
+                    input_data = {"context": context, "question": request.question}
+
                 async for event in stream_chain_response(
-                    chain, request.question, sources_data, request.session_id,
+                    rag_chain, input_data, sources_data, request.session_id,
                 ):
                     yield event
         except Exception as e:

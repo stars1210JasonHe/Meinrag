@@ -54,6 +54,7 @@ class RetrievalResult:
     query_types: list[str] = field(default_factory=list)
     query_label: str | None = None
     web_search_needed: bool = False
+    chat_history: list | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +348,44 @@ async def _expand_via_edges(
 
 
 # ---------------------------------------------------------------------------
+# Reranking
+# ---------------------------------------------------------------------------
+
+async def _rerank_results(
+    retrieved: list[tuple],
+    question: str,
+    settings,
+    llm=None,
+) -> list[tuple]:
+    """Apply cross-encoder reranking to retrieved results."""
+    if not retrieved:
+        return retrieved
+    try:
+        from app.rag.chain import _get_reranker
+        compressor = _get_reranker(settings, llm)
+        docs = [doc for doc, _ in retrieved]
+        compressed = compressor.compress_documents(docs, question)
+
+        # Build score map from original results
+        score_map = {}
+        for doc, score in retrieved:
+            key = (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index"))
+            score_map[key] = score
+
+        reranked = []
+        for cdoc in compressed:
+            key = (cdoc.metadata.get("doc_id"), cdoc.metadata.get("chunk_index"))
+            rerank_score = cdoc.metadata.get("relevance_score", score_map.get(key, 0.0))
+            reranked.append((cdoc, rerank_score))
+
+        logger.info("Reranked %d → %d results", len(retrieved), len(reranked))
+        return reranked if reranked else retrieved
+    except Exception as e:
+        logger.warning("Reranking failed, using original order: %s", e)
+        return retrieved
+
+
+# ---------------------------------------------------------------------------
 # Visual proximity linking
 # ---------------------------------------------------------------------------
 
@@ -576,6 +615,7 @@ async def retrieve_and_rank(
     settings: Settings,
     force_web_search: bool = False,
     summary_store=None,
+    chat_history=None,
 ) -> RetrievalResult:
     """Full retrieval pipeline — single source of truth.
 
@@ -624,6 +664,31 @@ async def retrieve_and_rank(
         except Exception as e:
             logger.warning("Summary search failed: %s", e)
 
+    # 4c. BM25 hybrid search (if enabled)
+    if settings.hybrid_search_enabled:
+        try:
+            from langchain_community.retrievers import BM25Retriever
+            from app.rag.chain import _bm25_cache
+            all_docs = vector_store.get_all_documents()
+            if doc_ids:
+                all_docs = [d for d in all_docs if d.metadata.get("doc_id") in doc_ids]
+            if all_docs:
+                cache_key = tuple(sorted(doc_ids)) if doc_ids else None
+                if (_bm25_cache["retriever"] is not None
+                        and _bm25_cache["doc_count"] == len(all_docs)
+                        and _bm25_cache["doc_ids_key"] == cache_key):
+                    bm25 = _bm25_cache["retriever"]
+                    bm25.k = fetch_k
+                else:
+                    bm25 = BM25Retriever.from_documents(all_docs, k=fetch_k)
+                    _bm25_cache["retriever"] = bm25
+                    _bm25_cache["doc_count"] = len(all_docs)
+                    _bm25_cache["doc_ids_key"] = cache_key
+                bm25_results = [(doc, 0.5) for doc in bm25.invoke(question)]
+                retrieved = _merge_dual_results(retrieved, bm25_results)
+        except Exception as e:
+            logger.warning("BM25 hybrid search failed: %s", e)
+
     # 5. Query expansion
     _, retrieved = await _maybe_expand_query(
         question, retrieved, llm, vector_store, settings, doc_ids, top_k,
@@ -641,11 +706,16 @@ async def retrieve_and_rank(
     retrieved = _apply_reference_penalty(retrieved)
     retrieved = _apply_section_weights(retrieved)
 
+    # 6b. Reranking (if enabled)
+    if settings.rerank_enabled:
+        retrieved = await _rerank_results(retrieved, question, settings, llm)
+
     # 7. Check web search
     if force_web_search or _needs_web_search(user_scoped, retrieved, settings):
         return RetrievalResult(
             sources=[], retrieved=[], query_types=query_types,
             query_label=query_label, web_search_needed=True,
+            chat_history=chat_history,
         )
 
     # 8. Visual proximity linking
@@ -688,6 +758,7 @@ async def retrieve_and_rank(
         retrieved=retrieved,
         query_types=query_types,
         query_label=query_label,
+        chat_history=chat_history,
     )
 
 
