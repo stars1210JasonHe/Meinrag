@@ -238,22 +238,67 @@ class ChatSessionRepository:
                 messages.append(AIMessage(content=msg.content))
         return messages
 
-    async def list_sessions(self, user_id: str) -> list[dict]:
-        """Return metadata for all sessions belonging to user_id, most recent first."""
+    async def list_sessions(
+        self,
+        user_id: str,
+        scope_type: str | None = None,
+        scope_value: str | None = None,
+    ) -> list[dict]:
+        """Return metadata for all sessions belonging to user_id, most recent first.
+
+        When scope_type + scope_value are provided, return only sessions for that
+        specific scope plus legacy (scope_type=None) sessions.
+        When scope_type == "global", return global + legacy sessions.
+        No filter params = return all (backward compat).
+        """
+        from sqlalchemy import or_
         stmt = (
             select(ChatSessionModel)
             .where(ChatSessionModel.user_id == user_id)
             .order_by(ChatSessionModel.last_access.desc())
         )
+
+        if scope_type and scope_value:
+            # Specific doc/collection scope: match exact scope + legacy sessions
+            stmt = stmt.where(
+                or_(
+                    (ChatSessionModel.scope_type == scope_type) & (ChatSessionModel.scope_value == scope_value),
+                    ChatSessionModel.scope_type.is_(None),
+                )
+            )
+        elif scope_type == "global":
+            # Global scope: show global + legacy sessions
+            stmt = stmt.where(
+                or_(
+                    ChatSessionModel.scope_type == "global",
+                    ChatSessionModel.scope_type.is_(None),
+                )
+            )
+        # No filter params = return all (backward compat)
+
         result = await self._session.execute(stmt)
-        return [
-            {
+        sessions = []
+        for s in result.scalars().all():
+            # Get preview from first human message
+            msg_result = await self._session.execute(
+                select(ChatMessageModel)
+                .where(
+                    ChatMessageModel.session_id == s.session_id,
+                    ChatMessageModel.role == "human",
+                )
+                .order_by(ChatMessageModel.created_at)
+                .limit(1)
+            )
+            first_msg = msg_result.scalar_one_or_none()
+            sessions.append({
                 "session_id": s.session_id,
+                "preview": first_msg.content[:100] if first_msg else "",
                 "created_at": s.created_at.isoformat(),
                 "last_access": s.last_access.isoformat(),
-            }
-            for s in result.scalars().all()
-        ]
+                "scope_type": s.scope_type,
+                "scope_value": s.scope_value,
+            })
+        return sessions
 
     async def get_session_preview(self, session_id: str) -> str:
         """Return the first human message content (truncated) as session title."""
@@ -315,6 +360,7 @@ class ChatSessionRepository:
     async def add_exchange(
         self, session_id: str, question: str, answer: str,
         user_id: str | None = None, sources_json: str | None = None,
+        scope_type: str | None = None, scope_value: str | None = None,
     ) -> None:
         # Ensure session exists
         result = await self._session.execute(
@@ -324,7 +370,12 @@ class ChatSessionRepository:
         )
         chat_session = result.scalar_one_or_none()
         if not chat_session:
-            chat_session = ChatSessionModel(session_id=session_id, user_id=user_id)
+            chat_session = ChatSessionModel(
+                session_id=session_id,
+                user_id=user_id,
+                scope_type=scope_type,
+                scope_value=scope_value,
+            )
             self._session.add(chat_session)
             await self._session.flush()
 

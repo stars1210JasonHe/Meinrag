@@ -99,6 +99,8 @@ class SessionInfo(BaseModel):
     preview: str
     created_at: str
     last_access: str
+    scope_type: str | None = None
+    scope_value: str | None = None
 
 
 class AskAIRequest(BaseModel):

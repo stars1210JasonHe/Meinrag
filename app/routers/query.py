@@ -306,10 +306,21 @@ async def query_documents(
         # Store exchange in session memory
         if request.session_id:
             sources_data = [s.model_dump() for s in result.sources]
+            # Determine session scope from request
+            _scope_type = "global"
+            _scope_value = None
+            if request.doc_ids and len(request.doc_ids) == 1:
+                _scope_type = "doc"
+                _scope_value = request.doc_ids[0]
+            elif request.collection:
+                _scope_type = "collection"
+                _scope_value = request.collection
             await memory_manager.add_exchange(
                 request.session_id, request.question, answer,
                 user_id=current_user,
                 sources_json=json.dumps(sources_data),
+                scope_type=_scope_type,
+                scope_value=_scope_value,
             )
 
         return QueryResponse(
@@ -536,10 +547,21 @@ async def query_documents_stream(
             try:
                 full_answer = "".join(full_answer_parts)
                 sources_data = [s.model_dump() for s in result.sources]
+                # Determine session scope from request
+                _scope_type = "global"
+                _scope_value = None
+                if request.doc_ids and len(request.doc_ids) == 1:
+                    _scope_type = "doc"
+                    _scope_value = request.doc_ids[0]
+                elif request.collection:
+                    _scope_type = "collection"
+                    _scope_value = request.collection
                 await memory_manager.add_exchange(
                     request.session_id, request.question, full_answer,
                     user_id=current_user,
                     sources_json=json.dumps(sources_data),
+                    scope_type=_scope_type,
+                    scope_value=_scope_value,
                 )
             except Exception:
                 logger.warning("Failed to persist streaming exchange to memory")

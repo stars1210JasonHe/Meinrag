@@ -67,8 +67,12 @@ export const sendQuery = (question, options, userId) =>
   })
 
 // Sessions
-export const fetchSessions = (userId) =>
-  apiFetch('/sessions', { headers: headers(userId) })
+export const fetchSessions = (userId, scopeType, scopeValue) => {
+  let params = ''
+  if (scopeType && scopeValue) params = `?scope_type=${encodeURIComponent(scopeType)}&scope_value=${encodeURIComponent(scopeValue)}`
+  else if (scopeType === 'global') params = '?scope_type=global'
+  return apiFetch(`/sessions${params}`, { headers: headers(userId) })
+}
 
 export const fetchSessionMessages = (sessionId, userId) =>
   apiFetch(`/sessions/${sessionId}/messages`, { headers: headers(userId) })

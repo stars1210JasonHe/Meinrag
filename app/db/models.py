@@ -104,6 +104,8 @@ class ChatSessionModel(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
     )
+    scope_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    scope_value: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
     __table_args__ = (
         Index("ix_chat_sessions_user_id", "user_id"),
