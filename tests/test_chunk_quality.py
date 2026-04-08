@@ -374,7 +374,7 @@ class TestBboxMerging:
 class TestSectionAwareSampling:
     """Test _section_aware_sample() picks best chunk per section."""
 
-    def test_one_per_section(self):
+    def test_round_robin_across_sections(self):
         from app.services.retrieval import _section_aware_sample
         results = [
             (Document(page_content="Intro text 1", metadata={"section_type": "introduction"}), 0.8),
@@ -383,13 +383,26 @@ class TestSectionAwareSampling:
             (Document(page_content="Results text", metadata={"section_type": "results"}), 0.5),
             (Document(page_content="Conclusion", metadata={"section_type": "discussion"}), 0.4),
         ]
+        # With top_k=8 (default), returns all 5 spread across sections
         sampled = _section_aware_sample(results)
-        # Should pick best from each section: intro(0.8), methods(0.7), results(0.5), discussion(0.4)
-        assert len(sampled) == 4
+        assert len(sampled) == 5
         contents = [doc.page_content for doc, _ in sampled]
         assert "Intro text 1" in contents
-        assert "Intro text 2" not in contents
+        assert "Intro text 2" in contents  # second round picks this
         assert "Methods text" in contents
+
+    def test_top_k_limits_results(self):
+        from app.services.retrieval import _section_aware_sample
+        results = [
+            (Document(page_content="Intro 1", metadata={"section_type": "introduction"}), 0.8),
+            (Document(page_content="Intro 2", metadata={"section_type": "introduction"}), 0.6),
+            (Document(page_content="Methods", metadata={"section_type": "methods"}), 0.7),
+            (Document(page_content="Results", metadata={"section_type": "results"}), 0.5),
+            (Document(page_content="Discussion", metadata={"section_type": "discussion"}), 0.4),
+        ]
+        # With top_k=3, picks best from top 3 sections first
+        sampled = _section_aware_sample(results, top_k=3)
+        assert len(sampled) == 3
 
     def test_sorted_by_score_descending(self):
         from app.services.retrieval import _section_aware_sample
@@ -415,16 +428,17 @@ class TestSectionAwareSampling:
         from app.services.retrieval import _section_aware_sample
         assert _section_aware_sample([]) == []
 
-    def test_single_section_returns_one(self):
+    def test_single_section_returns_all(self):
         from app.services.retrieval import _section_aware_sample
         results = [
             (Document(page_content="A", metadata={"section_type": "introduction"}), 0.8),
             (Document(page_content="B", metadata={"section_type": "introduction"}), 0.6),
             (Document(page_content="C", metadata={"section_type": "introduction"}), 0.4),
         ]
+        # With default top_k=8, all 3 from single section are returned
         sampled = _section_aware_sample(results)
-        assert len(sampled) == 1
-        assert sampled[0][0].page_content == "A"
+        assert len(sampled) == 3
+        assert sampled[0][0].page_content == "A"  # highest score first
 
 
 # ── Visual proximity linking ─────────────────────────────────────────────

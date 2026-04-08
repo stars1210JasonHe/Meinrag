@@ -171,30 +171,32 @@ class TestNormalizeScores:
 # ---------------------------------------------------------------------------
 
 class TestSectionAwareSample:
-    def test_one_per_section(self):
-        """Only one chunk per section_type is kept (the highest-scoring one)."""
+    def test_round_robin_across_sections(self):
+        """Chunks are sampled round-robin across sections up to top_k."""
         results = [
             (_doc(chunk_index=0, section="methods", content="M1"), 0.9),
             (_doc(chunk_index=1, section="methods", content="M2"), 0.6),
             (_doc(chunk_index=2, section="results", content="R1"), 0.7),
         ]
+        # Default top_k=8, so all 3 are returned
         sampled = _section_aware_sample(results)
-        # Should have exactly 2 entries (one per section)
-        assert len(sampled) == 2
-        sections = {doc.metadata["section_type"] for doc, _ in sampled}
+        assert len(sampled) == 3
+        # With top_k=2, round-robin picks best from each section first
+        sampled2 = _section_aware_sample(results, top_k=2)
+        assert len(sampled2) == 2
+        sections = {doc.metadata["section_type"] for doc, _ in sampled2}
         assert sections == {"methods", "results"}
 
-    def test_picks_highest_score_per_section(self):
-        """Within a section, the highest-scoring chunk is chosen."""
+    def test_highest_score_first_per_section(self):
+        """Within a section, highest-scoring chunk is picked first."""
         results = [
             (_doc(chunk_index=0, section="methods", content="M-low"), 0.4),
             (_doc(chunk_index=1, section="methods", content="M-high"), 0.9),
         ]
         sampled = _section_aware_sample(results)
-        assert len(sampled) == 1
-        doc, score = sampled[0]
-        assert doc.page_content == "M-high"
-        assert score == pytest.approx(0.9)
+        assert len(sampled) == 2
+        assert sampled[0][0].page_content == "M-high"
+        assert sampled[0][1] == pytest.approx(0.9)
 
     def test_sorted_by_score_descending(self):
         """Output is sorted by score descending."""
@@ -217,8 +219,8 @@ class TestSectionAwareSample:
             (Document(page_content="B", metadata={"doc_id": "d1", "chunk_index": 1}), 0.6),
         ]
         sampled = _section_aware_sample(results)
-        # Both have no section_type, so both map to 'body'; only one kept
-        assert len(sampled) == 1
+        # Both map to 'body' section, with top_k=8 both returned
+        assert len(sampled) == 2
 
 
 # ---------------------------------------------------------------------------

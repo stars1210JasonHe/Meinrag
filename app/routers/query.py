@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
 from app.config import Settings
@@ -93,7 +93,7 @@ async def _resolve_doc_ids(
         elif doc_ids:
             doc_ids = [d for d in doc_ids if d in user_doc_ids]
         else:
-            doc_ids = list(user_doc_ids) if user_doc_ids else None
+            doc_ids = list(user_doc_ids) if user_doc_ids else []
     elif request.collection:
         collection_docs = await registry.list_by_collection(request.collection)
         doc_ids = [d["doc_id"] for d in collection_docs]
@@ -438,6 +438,7 @@ async def ask_ai(
 @router.post("/query/stream")
 async def query_documents_stream(
     request: QueryRequest,
+    raw_request: Request,
     settings: Settings = Depends(get_settings),
     vector_store: VectorStoreManager = Depends(get_vector_store),
     llm: BaseChatModel = Depends(get_llm),
@@ -531,40 +532,65 @@ async def query_documents_stream(
             logger.exception("Streaming query failed")
             yield sse_event("error", {"detail": str(e)})
 
-    # Wrap generator to also handle memory persistence
-    async def event_generator_with_memory():
-        full_answer_parts = []
-        async for event in event_generator():
-            yield event
-            # Capture tokens for memory
-            if event.get("event") == "token":
-                import json as _json
-                data = _json.loads(event["data"])
-                full_answer_parts.append(data.get("token", ""))
+    # Shared mutable to capture the full answer during streaming.
+    # Post-yield code in SSE generators is unreliable (cancelled on
+    # client disconnect), so we persist inside the generator itself
+    # as soon as the "done" event is emitted.
+    async def _persist_exchange(full_answer: str, sources_override: list[dict] | None = None):
+        """Save exchange using a fresh DB session (request-scoped one may be closed)."""
+        sources_data = sources_override if sources_override is not None else (
+            [s.model_dump() for s in result.sources] if result else []
+        )
+        _scope_type = "global"
+        _scope_value = None
+        if request.doc_ids and len(request.doc_ids) == 1:
+            _scope_type = "doc"
+            _scope_value = request.doc_ids[0]
+        elif request.collection:
+            _scope_type = "collection"
+            _scope_value = request.collection
 
-        # Persist to memory after all events sent
-        if request.session_id and full_answer_parts and result is not None:
+        session_factory = raw_request.app.state.db_session_factory
+        async with session_factory() as db:
             try:
-                full_answer = "".join(full_answer_parts)
-                sources_data = [s.model_dump() for s in result.sources]
-                # Determine session scope from request
-                _scope_type = "global"
-                _scope_value = None
-                if request.doc_ids and len(request.doc_ids) == 1:
-                    _scope_type = "doc"
-                    _scope_value = request.doc_ids[0]
-                elif request.collection:
-                    _scope_type = "collection"
-                    _scope_value = request.collection
-                await memory_manager.add_exchange(
+                mem = ChatSessionRepository(
+                    db,
+                    max_messages=settings.memory_max_messages,
+                    session_ttl=settings.memory_session_ttl,
+                )
+                await mem.add_exchange(
                     request.session_id, request.question, full_answer,
                     user_id=current_user,
                     sources_json=json.dumps(sources_data),
                     scope_type=_scope_type,
                     scope_value=_scope_value,
                 )
+                await db.commit()
+                logger.info("Persisted streaming exchange for session %s", request.session_id)
             except Exception:
-                logger.warning("Failed to persist streaming exchange to memory")
+                await db.rollback()
+                raise
+
+    async def event_generator_with_memory():
+        full_answer_parts = []
+        async for event in event_generator():
+            evt_type = event.get("event")
+            # Capture tokens
+            if evt_type == "token":
+                import json as _json
+                data = _json.loads(event["data"])
+                full_answer_parts.append(data.get("token", ""))
+
+            # Fire-and-forget persist on done event — use asyncio.create_task
+            # so it survives the SSE task group cancellation on client disconnect
+            if evt_type == "done" and request.session_id:
+                full_answer = "".join(full_answer_parts)
+                if full_answer:
+                    # Pass web_sources for web-search path (result is None there)
+                    override = web_sources if needs_web_search else None
+                    asyncio.create_task(_persist_exchange(full_answer, sources_override=override))
+
+            yield event
 
     return EventSourceResponse(event_generator_with_memory())
 

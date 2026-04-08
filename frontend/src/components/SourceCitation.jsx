@@ -4,14 +4,15 @@ import MarkdownRenderer from './MarkdownRenderer'
 import { API_BASE } from '../api/client'
 
 function scoreColor(score) {
-  if (score >= 0.85) return '#e8f5e9' // green
-  if (score >= 0.65) return '#fff3e0' // orange
-  return '#fce4ec'                     // red
+  // score is 0-100 from backend
+  if (score >= 85) return '#e8f5e9' // green
+  if (score >= 65) return '#fff3e0' // orange
+  return '#fce4ec'                   // red
 }
 
 function scoreTextColor(score) {
-  if (score >= 0.85) return '#2e7d32'
-  if (score >= 0.65) return '#e65100'
+  if (score >= 85) return '#2e7d32'
+  if (score >= 65) return '#e65100'
   return '#c62828'
 }
 
@@ -116,7 +117,7 @@ export default function SourceCitation({ source, msgIdx, sourceIdx, onDownload, 
               color: scoreTextColor(source.score),
             }}
           >
-            {Math.round(source.score * 100)}%
+            {Math.round(source.score)}%
           </span>
         )}
         {source.chunk_index != null && (

@@ -186,23 +186,50 @@ def _apply_section_weights(results: list[tuple]) -> list[tuple]:
 
 def _section_aware_sample(
     results: list[tuple],
+    top_k: int = 8,
 ) -> list[tuple]:
-    """Pick the highest-scoring chunk from each section type.
+    """Round-robin sample across section types for broad coverage.
 
-    For open questions that need broad coverage across a document,
-    this ensures the LLM sees content from every section instead of
-    multiple chunks from the same section.
+    For open/overview questions, ensures the LLM sees content from
+    diverse sections rather than clustering from one section.
+    Picks the best chunk from each section first, then fills up
+    to top_k with remaining chunks by score.
     """
     if not results:
         return []
 
-    best_per_section: dict[str, tuple] = {}
+    # Group by section, each list sorted by score desc
+    from collections import defaultdict
+    by_section: dict[str, list[tuple]] = defaultdict(list)
     for doc, score in results:
         section = doc.metadata.get("section_type", "body")
-        if section not in best_per_section or score > best_per_section[section][1]:
-            best_per_section[section] = (doc, score)
+        by_section[section].append((doc, score))
+    for sec in by_section:
+        by_section[sec].sort(key=lambda x: x[1], reverse=True)
 
-    sampled = list(best_per_section.values())
+    # Round-robin: pick best from each section, then second-best, etc.
+    sampled = []
+    seen_keys = set()
+    round_idx = 0
+    while len(sampled) < top_k:
+        added_this_round = False
+        for sec in sorted(by_section, key=lambda s: by_section[s][0][1] if by_section[s] else 0, reverse=True):
+            items = by_section[sec]
+            if round_idx < len(items):
+                doc, score = items[round_idx]
+                did = doc.metadata.get("doc_id")
+                cidx = doc.metadata.get("chunk_index")
+                key = (did, cidx) if did is not None and cidx is not None else id(doc)
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    sampled.append((doc, score))
+                    added_this_round = True
+                    if len(sampled) >= top_k:
+                        break
+        if not added_this_round:
+            break
+        round_idx += 1
+
     sampled.sort(key=lambda x: x[1], reverse=True)
     return sampled
 
@@ -699,7 +726,7 @@ async def retrieve_and_rank(
     if strategy.get("text_only"):
         text_only = [(doc, score) for doc, score in retrieved
                      if doc.metadata.get("chunk_type") == "text"]
-        retrieved = _section_aware_sample(text_only)
+        retrieved = _section_aware_sample(text_only, top_k=top_k)
     elif strategy.get("demote_references"):
         retrieved = _demote_reference_results(retrieved, top_k)
 
