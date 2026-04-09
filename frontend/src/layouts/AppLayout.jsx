@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useLocation, useSearchParams } from 'react-router-dom'
-import { LayoutDashboard, MessageSquare, Network, Settings, HelpCircle } from 'lucide-react'
+import { LayoutDashboard, MessageSquare, Network } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 function Breadcrumb() {
@@ -86,18 +86,7 @@ export default function AppLayout() {
           ))}
         </div>
 
-        <div className="py-2 border-t" style={{ borderColor: 'hsl(217 33% 17%)' }}>
-          <button className="flex items-center gap-3 px-4 py-2.5 text-sm w-full opacity-60 hover:opacity-100 transition-opacity"
-                  style={{ color: 'hsl(215 20% 65%)' }}>
-            <Settings size={18} className="shrink-0" />
-            <span className="whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">Settings</span>
-          </button>
-          <button className="flex items-center gap-3 px-4 py-2.5 text-sm w-full opacity-60 hover:opacity-100 transition-opacity"
-                  style={{ color: 'hsl(215 20% 65%)' }}>
-            <HelpCircle size={18} className="shrink-0" />
-            <span className="whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">Help</span>
-          </button>
-        </div>
+        <div className="py-2" />
       </nav>
 
       {/* Main content */}
