@@ -1,289 +1,31 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import {
-  Send, FileText, Table2, Image, Calculator, ChevronLeft,
-  Loader2, X, History, Plus, ChevronRight, ZoomIn, ZoomOut,
-} from 'lucide-react'
+import { Send, FileText, Loader2, X, History, Plus } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useQuery } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
 import { fetchSessions, fetchSessionMessages } from '@/lib/api'
-import { Document, Page, pdfjs } from 'react-pdf'
-import 'react-pdf/dist/Page/TextLayer.css'
-import 'react-pdf/dist/Page/AnnotationLayer.css'
-
-pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
-
 import CitationBadge from '@/components/CitationBadge'
+import SourceItem from '@/components/SourceItem'
+import SourceViewer from '@/components/SourceViewer'
+import QueryTypeBadges from '@/components/QueryTypeBadges'
+import { splitCitations } from '@/lib/citations'
 
 const API_BASE = import.meta.env.VITE_API_URL
 const USER_ID = 'admin'
 
-const TYPE_ICONS = {
-  text: FileText,
-  table: Table2,
-  image: Image,
-  formula: Calculator,
-}
-
-const TYPE_COLORS = {
-  fact: 'hsl(168 84% 40%)',
-  overview: 'hsl(250 80% 65%)',
-  reference: 'hsl(45 93% 47%)',
-  exploratory: 'hsl(199 89% 48%)',
-}
-
-// ── Source list item ────────────────────────────────────────────────────────
-
-function SourceItem({ source, index, onClick }) {
-  const Icon = TYPE_ICONS[source.chunk_type] || FileText
-  const displayName = source.source_file?.replace(/\.[^.]+$/, '') || 'unknown'
-  const heading = source.headings?.split(' > ').pop()
-  const detail = source.label || heading || ''
-
-  return (
-    <button
-      onClick={() => onClick(index)}
-      className="flex items-start gap-2 w-full px-3 py-2.5 text-left rounded-lg transition-colors hover:bg-white/5"
-    >
-      <Icon size={14} className="mt-0.5 shrink-0 opacity-60" />
-      <div className="flex-1 min-w-0">
-        <div className="text-xs font-medium truncate" style={{ color: 'hsl(210 40% 98%)' }}>
-          {displayName}
-        </div>
-        <div className="flex items-center gap-2 mt-0.5">
-          {source.score != null && (
-            <span className="text-xs" style={{ color: 'hsl(168 84% 40%)' }}>
-              {Math.round(source.score)}%
-            </span>
-          )}
-          {source.page != null && (
-            <span className="text-xs opacity-40">p.{source.page + 1}</span>
-          )}
-          {detail && (
-            <span className="text-xs opacity-50 truncate">{detail}</span>
-          )}
-        </div>
-      </div>
-    </button>
-  )
-}
-
-// ── Source viewer (real PDF + bbox) ────────────────────────────────────────
-
-const TYPE_BBOX_COLORS = {
-  text: '#3b82f6',
-  table: '#f59e0b',
-  formula: '#a855f7',
-  image: '#10b981',
-}
-
-function SourceViewer({ source, sourceIndex, sources, onBack, onSelectSource }) {
-  const containerRef = useRef(null)
-  const [numPages, setNumPages] = useState(null)
-  const [currentPage, setCurrentPage] = useState((source.page ?? 0) + 1)
-  const [zoom, setZoom] = useState(1.0)
-  const [pageSize, setPageSize] = useState(null)
-  const [containerWidth, setContainerWidth] = useState(500)
-
-  const isPdf = source.source_file?.toLowerCase().endsWith('.pdf')
-  const isImage = source.chunk_type === 'image' && source.image_path
-  const pdfUrl = isPdf ? `${API_BASE}/documents/${source.doc_id}/pdf` : null
-
-  // Measure container width
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
-    const measure = () => setContainerWidth(el.clientWidth)
-    measure()
-    const observer = new ResizeObserver(measure)
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [])
-
-  // Jump to source page when source changes
-  useEffect(() => {
-    setCurrentPage((source.page ?? 0) + 1)
-  }, [source])
-
-  // Scroll wheel zoom
-  const handleWheel = useCallback((e) => {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault()
-      setZoom(z => Math.min(3, Math.max(0.3, z + (e.deltaY > 0 ? -0.1 : 0.1))))
-    }
-  }, [])
-
-  // Bbox overlay
-  const renderBbox = () => {
-    if (!source.bbox || source.bbox.length !== 4 || !pageSize) return null
-    if (currentPage !== (source.page ?? 0) + 1) return null
-    const [x0, y0, x1, y1] = source.bbox
-    const pw = pageSize.originalWidth
-    const ph = pageSize.originalHeight
-    const color = TYPE_BBOX_COLORS[source.chunk_type] || '#3b82f6'
-    return (
-      <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
-        <div style={{
-          position: 'absolute',
-          left: `${(x0 / pw) * 100}%`,
-          top: `${(y0 / ph) * 100}%`,
-          width: `${((x1 - x0) / pw) * 100}%`,
-          height: `${((y1 - y0) / ph) * 100}%`,
-          border: `3px solid ${color}`,
-          backgroundColor: `${color}22`,
-          borderRadius: '2px',
-        }}>
-          <span style={{
-            position: 'absolute', top: -18, left: -1,
-            backgroundColor: color, color: '#fff',
-            fontSize: '10px', padding: '1px 5px', borderRadius: '2px',
-          }}>
-            [{sourceIndex + 1}]
-          </span>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex flex-col h-full">
-      {/* Header: back + source mini-list + nav */}
-      <div className="flex items-center gap-1 px-2 py-1.5 border-b shrink-0"
-           style={{ borderColor: 'hsl(217 33% 17%)' }}>
-        <button onClick={onBack}
-                className="flex items-center gap-0.5 text-xs opacity-60 hover:opacity-100 shrink-0"
-                style={{ color: 'hsl(210 40% 98%)' }}>
-          <ChevronLeft size={14} /> Sources
-        </button>
-
-        <div className="flex-1" />
-
-        {/* Source mini-list */}
-        <div className="flex items-center gap-0.5">
-          {sources.map((s, i) => {
-            const Icon = TYPE_ICONS[s.chunk_type] || FileText
-            const isActive = i === sourceIndex
-            return (
-              <button key={i} onClick={() => onSelectSource(i)}
-                      className={cn('p-1 rounded transition-opacity', isActive ? 'opacity-100' : 'opacity-30 hover:opacity-60')}
-                      style={{ color: isActive ? TYPE_BBOX_COLORS[s.chunk_type] || '#3b82f6' : 'hsl(210 40% 98%)' }}
-                      title={`[${i+1}] ${s.chunk_type}`}>
-                <Icon size={12} />
-              </button>
-            )
-          })}
-        </div>
-
-        <div className="flex-1" />
-
-        {/* Page nav (PDF only) */}
-        {isPdf && numPages && (
-          <div className="flex items-center gap-0.5 shrink-0">
-            <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage <= 1}
-                    className="p-0.5 opacity-40 hover:opacity-100 disabled:opacity-10">
-              <ChevronLeft size={12} />
-            </button>
-            <span className="text-[10px] tabular-nums" style={{ color: 'hsl(210 40% 98%)' }}>
-              {currentPage}/{numPages}
-            </span>
-            <button onClick={() => setCurrentPage(p => Math.min(numPages, p + 1))} disabled={currentPage >= numPages}
-                    className="p-0.5 opacity-40 hover:opacity-100 disabled:opacity-10">
-              <ChevronRight size={12} />
-            </button>
-          </div>
-        )}
-
-        {/* Zoom */}
-        <div className="flex items-center gap-0.5 shrink-0 ml-1">
-          <button onClick={() => setZoom(z => Math.max(0.3, z - 0.2))} className="p-0.5 opacity-40 hover:opacity-100">
-            <ZoomOut size={12} />
-          </button>
-          <span className="text-[10px] tabular-nums w-7 text-center" style={{ color: 'hsl(210 40% 98%)' }}>
-            {Math.round(zoom * 100)}%
-          </span>
-          <button onClick={() => setZoom(z => Math.min(3, z + 0.2))} className="p-0.5 opacity-40 hover:opacity-100">
-            <ZoomIn size={12} />
-          </button>
-        </div>
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 overflow-auto" ref={containerRef} onWheel={handleWheel}>
-        {isImage ? (
-          /* Image source: show image directly */
-          <div className="flex items-center justify-center p-4 h-full">
-            <img src={`${API_BASE}/documents/images/${source.image_path}`}
-                 alt={source.content?.slice(0, 50) || 'Image'}
-                 className="max-w-full max-h-full object-contain rounded" />
-          </div>
-        ) : isPdf && pdfUrl ? (
-          /* PDF source: render actual PDF page */
-          <div className="flex justify-center py-2">
-            <Document file={pdfUrl}
-                      onLoadSuccess={(pdf) => setNumPages(pdf.numPages)}
-                      loading={<div className="p-8 flex items-center justify-center opacity-40"><Loader2 size={20} className="animate-spin" /></div>}
-                      error={<div className="p-8 text-center opacity-40 text-xs">Failed to load PDF</div>}>
-              <Page pageNumber={currentPage}
-                    width={containerWidth * zoom * 0.95}
-                    renderTextLayer={true}
-                    renderAnnotationLayer={false}
-                    onLoadSuccess={(info) => setPageSize(info)}
-                    loading="">
-                {renderBbox()}
-              </Page>
-            </Document>
-          </div>
-        ) : (
-          /* Non-PDF source: show chunk text */
-          <div className="p-4 text-sm leading-relaxed" style={{ color: 'hsl(210 40% 98%)' }}>
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {source.content || 'No content available'}
-            </ReactMarkdown>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ── Query type badges ───────────────────────────────────────────────────────
-
-function QueryTypeBadges({ types }) {
-  if (!types || types.length === 0) return null
-  return (
-    <div className="flex flex-wrap gap-1 mt-2">
-      {types.map(t => (
-        <span
-          key={t}
-          className="px-1.5 py-0.5 rounded text-[10px] font-medium"
-          style={{ backgroundColor: TYPE_COLORS[t] ?? 'hsl(217 33% 17%)', color: '#fff' }}
-        >
-          {t}
-        </span>
-      ))}
-    </div>
-  )
-}
-
-// ── Markdown renderer ───────────────────────────────────────────────────────
+// ── Markdown renderer with citation support ─────────────────────────────────
 
 function renderTextWithCitations(text, onCitationClick) {
   if (typeof text !== 'string') return text
-  // Normalize all citation formats the LLM might produce:
-  //   [Source N: ...]  (Source N: ...)  [Source N]  (Source N)  [N]
-  let normalized = text
-    .replace(/[\[(]Source\s+(\d+)[^\])]*/g, '[$1')   // strip "Source N: details"
-    .replace(/\[(\d+)[)\]]/g, '[$1]')                 // normalize closing bracket
-    .replace(/\((\d+)\)/g, '[$1]')                     // (N) → [N]
-  const parts = normalized.split(/(\[\d+\])/)
-  if (parts.length === 1) return normalized
-  return parts.map((part, i) => {
-    const m = part.match(/^\[(\d+)\]$/)
-    if (m) return <CitationBadge key={i} num={parseInt(m[1], 10)} onClick={onCitationClick} />
-    return part
-  })
+  const parts = splitCitations(text)
+  if (parts.length === 1 && parts[0].type === 'text') return parts[0].value
+  return parts.map((part, i) =>
+    part.type === 'citation'
+      ? <CitationBadge key={i} num={part.value} onClick={onCitationClick} />
+      : part.value
+  )
 }
 
 function makeMarkdownComponents(onCitationClick) {
