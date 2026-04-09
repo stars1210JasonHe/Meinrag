@@ -2,6 +2,7 @@
 
 Functions:
 - is_garbage_table: detect garbage markdown tables
+- is_boilerplate_chunk: detect author footnotes, copyright, disclaimers
 - deduplicate_chunks: remove exact-duplicate chunks
 - tag_reference_chunks: tag reference-section chunks in metadata
 - classify_section_type: classify a heading into a section type
@@ -16,6 +17,38 @@ from langchain_core.documents import Document
 logger = logging.getLogger(__name__)
 
 _GENERIC_COL_RE = re.compile(r"^col\d+$", re.IGNORECASE)
+
+# ── Boilerplate detection ────────────────────────────────────────────────
+
+_BOILERPLATE_RE = re.compile(
+    r"(?:"
+    r"\*\s*Equal\s+contribution"
+    r"|(?:^|\n)\s*[*†‡§¶]\s+\w"
+    r"|(?:All|©)\s+rights?\s+reserved"
+    r"|This\s+work\s+is\s+licensed\s+under"
+    r"|Reprinted\s+with\s+permission"
+    r"|Preprint\.?\s+Under\s+review"
+    r"|Proceedings\s+of\s+the"
+    r"|Published\s+as\s+a\s+conference"
+    r"|Corresponding\s+author"
+    r"|Author\s+contributions?"
+    r"|These\s+authors?\s+contributed\s+equally"
+    r")",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+_BOILERPLATE_MAX_LENGTH = 300
+
+
+def is_boilerplate_chunk(text: str) -> bool:
+    """Detect boilerplate chunks: author footnotes, copyright, disclaimers.
+
+    Only flags short chunks (<300 chars) to avoid false positives on real
+    content that happens to contain a footnote marker.
+    """
+    if not text or len(text.strip()) > _BOILERPLATE_MAX_LENGTH:
+        return False
+    return bool(_BOILERPLATE_RE.search(text))
 
 _REF_HEADING_KEYWORDS = re.compile(
     r"\b(references|bibliography|works\s+cited)\b", re.IGNORECASE

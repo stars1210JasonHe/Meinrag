@@ -184,6 +184,21 @@ def _apply_section_weights(results: list[tuple]) -> list[tuple]:
     return weighted
 
 
+_BOILERPLATE_SCORE_PENALTY = 0.2
+
+
+def _apply_boilerplate_penalty(results: list[tuple]) -> list[tuple]:
+    """Penalize boilerplate chunks (author footnotes, copyright, disclaimers)."""
+    from app.services.chunk_utils import is_boilerplate_chunk
+
+    return [
+        (doc, score * _BOILERPLATE_SCORE_PENALTY)
+        if is_boilerplate_chunk(doc.page_content)
+        else (doc, score)
+        for doc, score in results
+    ]
+
+
 def _section_aware_sample(
     results: list[tuple],
     top_k: int = 8,
@@ -545,6 +560,8 @@ def _build_source_chunks(retrieved: list) -> list[SourceChunk]:
             image_path=doc.metadata.get("image_path"),
             bbox=_parse_bbox(doc.metadata.get("bbox")),
             label=doc.metadata.get("label"),
+            headings=doc.metadata.get("headings"),
+            summary=doc.metadata.get("summary"),
         )
         for doc, score in retrieved
     ]
@@ -732,6 +749,7 @@ async def retrieve_and_rank(
 
     retrieved = _apply_reference_penalty(retrieved)
     retrieved = _apply_section_weights(retrieved)
+    retrieved = _apply_boilerplate_penalty(retrieved)
 
     # 6b. Reranking (if enabled)
     if settings.rerank_enabled:

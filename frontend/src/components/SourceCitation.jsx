@@ -36,6 +36,8 @@ export default function SourceCitation({ source, msgIdx, sourceIdx, onDownload, 
   const isTable = source.chunk_type === 'table'
   const isImage = source.chunk_type === 'image'
   const hasPdf = source.doc_id && source.page != null && !isWeb && onViewPdf
+  const displayName = source.source_file?.replace(/\.[^.]+$/, '') || 'unknown'
+  const heading = source.headings?.split(' > ').pop()
 
   const handleHeaderClick = () => {
     if (hasPdf) {
@@ -92,7 +94,14 @@ export default function SourceCitation({ source, msgIdx, sourceIdx, onDownload, 
         </div>
       )
     }
-    return <div className="source-content">{source.content}</div>
+    return (
+      <div className="source-content">
+        {source.summary && (
+          <div className="source-summary">TL;DR: {source.summary}</div>
+        )}
+        {source.content}
+      </div>
+    )
   }
 
   return (
@@ -104,10 +113,13 @@ export default function SourceCitation({ source, msgIdx, sourceIdx, onDownload, 
             ? <FileText size={14} className="source-pdf-icon" />
             : expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />
         }
-        <span className="source-file">{source.source_file}</span>
+        <span className="source-file">{displayName}</span>
         <ChunkTypeBadge chunkType={source.chunk_type} />
         {source.page != null && (
           <span className="source-page">p.{source.page + 1}</span>
+        )}
+        {heading && (
+          <span className="source-heading" title={source.headings}>{heading}</span>
         )}
         {source.score != null && (
           <span

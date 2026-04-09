@@ -72,6 +72,8 @@ class SourceChunk(BaseModel):
     image_path: str | None = None
     bbox: list[float] | None = None
     label: str | None = None
+    headings: str | None = None
+    summary: str | None = None
 
 
 class QueryResponse(BaseModel):

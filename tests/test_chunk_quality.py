@@ -8,6 +8,7 @@ from langchain_core.documents import Document
 
 from app.services.chunk_utils import (
     is_garbage_table as _is_garbage_table,
+    is_boilerplate_chunk,
     deduplicate_chunks as _deduplicate_chunks,
     tag_reference_chunks as _tag_reference_chunks,
     classify_section_type,
@@ -810,3 +811,184 @@ class TestQueryAnalysis:
 
         result = await _analyze_query("some question", MockLLM())
         assert result["types"] == ["exploratory"]
+
+
+# ── Boilerplate detection ─────────────────────────────────────────────────
+
+
+class TestBoilerplateDetection:
+    def test_author_footnote(self):
+        text = "* Equal contribution. Listing order is random."
+        assert is_boilerplate_chunk(text)
+
+    def test_copyright(self):
+        assert is_boilerplate_chunk("© 2024 All rights reserved.")
+
+    def test_license_notice(self):
+        assert is_boilerplate_chunk("This work is licensed under CC BY 4.0.")
+
+    def test_conference_boilerplate(self):
+        assert is_boilerplate_chunk("Published as a conference paper at ICLR 2024")
+
+    def test_corresponding_author(self):
+        assert is_boilerplate_chunk("Corresponding author: john@example.com")
+
+    def test_dagger_footnote(self):
+        assert is_boilerplate_chunk("† These authors contributed equally to this work.")
+
+    def test_real_content_not_flagged(self):
+        text = "The Transformer architecture uses multi-head self-attention."
+        assert not is_boilerplate_chunk(text)
+
+    def test_long_chunk_not_flagged(self):
+        # Real content that happens to mention "Proceedings" but is long
+        text = "Proceedings of the conference. " + "x " * 200
+        assert not is_boilerplate_chunk(text)
+
+    def test_empty_text(self):
+        assert not is_boilerplate_chunk("")
+        assert not is_boilerplate_chunk(None)
+
+
+# ── Contextual header builder ─────────────────────────────────────────────
+
+
+class TestBuildHeader:
+    def test_full_metadata(self):
+        from app.rag.chain import _build_header
+        from collections import Counter
+
+        doc = Document(
+            page_content="test",
+            metadata={
+                "source_file": "attention_is_all_you_need.pdf",
+                "page": 9,
+                "headings": "7 Conclusion",
+                "doc_id": "7f10b81b4c9d",
+            },
+        )
+        counts = Counter({"attention_is_all_you_need.pdf": 1})
+        header = _build_header(doc, 1, counts)
+        assert header == "--- attention_is_all_you_need | p.10 | 7 Conclusion ---"
+
+    def test_label_takes_precedence_over_heading(self):
+        from app.rag.chain import _build_header
+        from collections import Counter
+
+        doc = Document(
+            page_content="table data",
+            metadata={
+                "source_file": "paper.pdf",
+                "page": 8,
+                "headings": "6 Results",
+                "label": "Table 4",
+            },
+        )
+        counts = Counter({"paper.pdf": 1})
+        header = _build_header(doc, 2, counts)
+        assert header == "--- paper | p.9 | Table 4 ---"
+
+    def test_minimal_metadata(self):
+        from app.rag.chain import _build_header
+        from collections import Counter
+
+        doc = Document(
+            page_content="text",
+            metadata={"source_file": "notes.txt"},
+        )
+        counts = Counter({"notes.txt": 1})
+        header = _build_header(doc, 1, counts)
+        assert header == "--- notes ---"
+
+    def test_duplicate_filename_gets_doc_id_suffix(self):
+        from app.rag.chain import _build_header
+        from collections import Counter
+
+        doc = Document(
+            page_content="text",
+            metadata={
+                "source_file": "report.pdf",
+                "page": 2,
+                "doc_id": "abcd1234efgh",
+            },
+        )
+        counts = Counter({"report.pdf": 2})
+        header = _build_header(doc, 1, counts)
+        assert header == "--- report#abcd | p.3 ---"
+
+    def test_table_chunk_without_label(self):
+        from app.rag.chain import _build_header
+        from collections import Counter
+
+        doc = Document(
+            page_content="| A | B |\n|---|---|\n| 1 | 2 |",
+            metadata={
+                "source_file": "data.pdf",
+                "page": 5,
+                "chunk_type": "table",
+            },
+        )
+        counts = Counter({"data.pdf": 1})
+        header = _build_header(doc, 1, counts)
+        assert header == "--- data | p.6 | Table ---"
+
+    def test_nested_headings_uses_last(self):
+        from app.rag.chain import _build_header
+        from collections import Counter
+
+        doc = Document(
+            page_content="text",
+            metadata={
+                "source_file": "paper.pdf",
+                "page": 4,
+                "headings": "3 Model Architecture > 3.2 Multi-Head Attention",
+            },
+        )
+        counts = Counter({"paper.pdf": 1})
+        header = _build_header(doc, 1, counts)
+        assert header == "--- paper | p.5 | 3.2 Multi-Head Attention ---"
+
+
+class TestFormatDocsContextual:
+    def test_includes_summary(self):
+        from app.rag.chain import format_docs
+
+        doc = Document(
+            page_content="The Transformer uses self-attention.",
+            metadata={
+                "source_file": "paper.pdf",
+                "page": 0,
+                "summary": "Transformer relies on self-attention mechanism.",
+            },
+        )
+        result = format_docs([doc])
+        assert "Summary: Transformer relies on self-attention mechanism." in result
+        assert "--- paper | p.1 ---" in result
+
+    def test_no_summary(self):
+        from app.rag.chain import format_docs
+
+        doc = Document(
+            page_content="Some content.",
+            metadata={"source_file": "file.pdf", "page": 0},
+        )
+        result = format_docs([doc])
+        assert "Summary:" not in result
+
+
+class TestBoilerplatePenalty:
+    def test_penalty_applied(self):
+        from app.services.retrieval import _apply_boilerplate_penalty
+
+        boilerplate = Document(
+            page_content="* Equal contribution. Listing order is random.",
+            metadata={},
+        )
+        normal = Document(
+            page_content="The Transformer model achieves state-of-the-art results.",
+            metadata={},
+        )
+        results = [(boilerplate, 0.9), (normal, 0.8)]
+        penalized = _apply_boilerplate_penalty(results)
+        assert penalized[0][1] == pytest.approx(0.18, abs=0.01)  # 0.9 * 0.2
+        assert penalized[1][1] == 0.8  # unchanged

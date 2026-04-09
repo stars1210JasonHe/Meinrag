@@ -1,5 +1,6 @@
 import logging
 import re
+from collections import Counter
 from typing import Sequence
 
 from langchain_core.documents import Document
@@ -15,27 +16,69 @@ from app.vectorstore.base import VectorStoreManager
 logger = logging.getLogger(__name__)
 
 
+def _strip_ext(filename: str) -> str:
+    """Strip file extension from filename."""
+    dot = filename.rfind(".")
+    return filename[:dot] if dot > 0 else filename
+
+
+def _build_header(doc: Document, idx: int, filename_counts: Counter) -> str:
+    """Build a contextual header like [name | p.5 | 3.2 Attention]."""
+    meta = doc.metadata
+    source = meta.get("source_file", "unknown")
+    name = _strip_ext(source)
+
+    # Disambiguate duplicate filenames with short doc_id suffix
+    if filename_counts.get(source, 0) > 1:
+        doc_id = meta.get("doc_id", "")
+        if doc_id:
+            name = f"{name}#{doc_id[:4]}"
+
+    parts = [name]
+
+    page = meta.get("page")
+    if page is not None:
+        parts.append(f"p.{page + 1}")
+
+    # Prefer label (e.g. "Table 4"), else last heading segment
+    label = meta.get("label")
+    if label:
+        parts.append(label)
+    else:
+        headings = meta.get("headings")
+        if headings:
+            last_heading = headings.split(" > ")[-1].strip()
+            if last_heading:
+                parts.append(last_heading)
+        else:
+            # Fallback: chunk_type badge for non-text
+            chunk_type = meta.get("chunk_type", "text")
+            if chunk_type == "table":
+                parts.append("Table")
+            elif chunk_type == "image":
+                parts.append("Image")
+
+    return f"--- {' | '.join(parts)} ---"
+
+
 def format_docs(docs: list[Document]) -> str:
     """Format retrieved documents into a single context string."""
+    # Count distinct doc_ids per filename — only disambiguate when
+    # the same filename maps to different documents
+    _file_docids: dict[str, set[str]] = {}
+    for doc in docs:
+        sf = doc.metadata.get("source_file", "unknown")
+        did = doc.metadata.get("doc_id", "")
+        _file_docids.setdefault(sf, set()).add(did)
+    filename_counts = Counter({sf: len(ids) for sf, ids in _file_docids.items()})
     formatted = []
-    image_counter = 0
-    table_counter = 0
     for i, doc in enumerate(docs, 1):
-        source = doc.metadata.get("source_file", "unknown")
-        page = doc.metadata.get("page")
-        page_str = f" (p.{page + 1})" if page is not None else ""
-        chunk_type = doc.metadata.get("chunk_type", "text")
-        label = doc.metadata.get("label")
-        type_label = ""
-        if label:
-            type_label = f" [{label}]"
-        elif chunk_type == "table":
-            table_counter += 1
-            type_label = f" [TABLE {table_counter}]"
-        elif chunk_type == "image":
-            image_counter += 1
-            type_label = f" [FIGURE {image_counter}]"
-        formatted.append(f"[Source {i}: {source}{page_str}{type_label}]\n{doc.page_content}")
+        header = _build_header(doc, i, filename_counts)
+        summary = doc.metadata.get("summary")
+        if summary:
+            formatted.append(f"{header}\nSummary: {summary}\n---\n{doc.page_content}")
+        else:
+            formatted.append(f"{header}\n{doc.page_content}")
     return "\n\n---\n\n".join(formatted)
 
 

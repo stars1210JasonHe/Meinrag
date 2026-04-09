@@ -36,10 +36,9 @@ const TYPE_COLORS = {
 
 function SourceItem({ source, index, onClick }) {
   const Icon = TYPE_ICONS[source.chunk_type] || FileText
-  const label =
-    source.chunk_type === 'text'
-      ? (source.content?.slice(0, 60) ?? '') + '…'
-      : source.label || source.source_file || `${source.chunk_type} chunk`
+  const displayName = source.source_file?.replace(/\.[^.]+$/, '') || 'unknown'
+  const heading = source.headings?.split(' > ').pop()
+  const detail = source.label || heading || ''
 
   return (
     <button
@@ -49,7 +48,7 @@ function SourceItem({ source, index, onClick }) {
       <Icon size={14} className="mt-0.5 shrink-0 opacity-60" />
       <div className="flex-1 min-w-0">
         <div className="text-xs font-medium truncate" style={{ color: 'hsl(210 40% 98%)' }}>
-          [{index + 1}] {label}
+          {displayName}
         </div>
         <div className="flex items-center gap-2 mt-0.5">
           {source.score != null && (
@@ -59,6 +58,9 @@ function SourceItem({ source, index, onClick }) {
           )}
           {source.page != null && (
             <span className="text-xs opacity-40">p.{source.page + 1}</span>
+          )}
+          {detail && (
+            <span className="text-xs opacity-50 truncate">{detail}</span>
           )}
         </div>
       </div>
