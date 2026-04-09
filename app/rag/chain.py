@@ -58,7 +58,7 @@ def _build_header(doc: Document, idx: int, filename_counts: Counter) -> str:
             elif chunk_type == "image":
                 parts.append("Image")
 
-    return f"--- {' | '.join(parts)} ---"
+    return f"[{idx}] {' | '.join(parts)}"
 
 
 def format_docs(docs: list[Document]) -> str:

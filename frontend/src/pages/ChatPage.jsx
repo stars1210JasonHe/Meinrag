@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   Send, FileText, Table2, Image, Calculator, ChevronLeft,
@@ -14,6 +14,8 @@ import 'react-pdf/dist/Page/TextLayer.css'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
+
+import CitationBadge from '@/components/CitationBadge'
 
 const API_BASE = import.meta.env.VITE_API_URL
 const USER_ID = 'admin'
@@ -267,32 +269,59 @@ function QueryTypeBadges({ types }) {
 
 // ── Markdown renderer ───────────────────────────────────────────────────────
 
-const markdownComponents = {
-  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-  ul: ({ children }) => <ul className="list-disc pl-4 mb-2">{children}</ul>,
-  ol: ({ children }) => <ol className="list-decimal pl-4 mb-2">{children}</ol>,
-  li: ({ children }) => <li className="mb-0.5">{children}</li>,
-  code: ({ children, className }) =>
-    className ? (
-      <code
-        className={cn('block p-2 rounded text-xs my-2 overflow-x-auto', className)}
-        style={{ backgroundColor: 'hsl(222 47% 6%)' }}
-      >
-        {children}
-      </code>
-    ) : (
-      <code
-        className="px-1 py-0.5 rounded text-xs"
-        style={{ backgroundColor: 'hsl(222 47% 6%)' }}
-      >
-        {children}
-      </code>
-    ),
-  pre: ({ children }) => <>{children}</>,
-  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-  h1: ({ children }) => <h1 className="text-base font-bold mb-2 mt-3 first:mt-0">{children}</h1>,
-  h2: ({ children }) => <h2 className="text-sm font-bold mb-1.5 mt-3 first:mt-0">{children}</h2>,
-  h3: ({ children }) => <h3 className="text-sm font-semibold mb-1 mt-2 first:mt-0">{children}</h3>,
+function renderTextWithCitations(text, onCitationClick) {
+  if (typeof text !== 'string') return text
+  // Normalize all citation formats the LLM might produce:
+  //   [Source N: ...]  (Source N: ...)  [Source N]  (Source N)  [N]
+  let normalized = text
+    .replace(/[\[(]Source\s+(\d+)[^\])]*/g, '[$1')   // strip "Source N: details"
+    .replace(/\[(\d+)[)\]]/g, '[$1]')                 // normalize closing bracket
+    .replace(/\((\d+)\)/g, '[$1]')                     // (N) → [N]
+  const parts = normalized.split(/(\[\d+\])/)
+  if (parts.length === 1) return normalized
+  return parts.map((part, i) => {
+    const m = part.match(/^\[(\d+)\]$/)
+    if (m) return <CitationBadge key={i} num={parseInt(m[1], 10)} onClick={onCitationClick} />
+    return part
+  })
+}
+
+function makeMarkdownComponents(onCitationClick) {
+  const pc = (children) => {
+    if (!children) return children
+    if (typeof children === 'string') return renderTextWithCitations(children, onCitationClick)
+    if (Array.isArray(children)) return children.map((c, i) =>
+      typeof c === 'string' ? <span key={i}>{renderTextWithCitations(c, onCitationClick)}</span> : c
+    )
+    return children
+  }
+  return {
+    p: ({ children }) => <p className="mb-2 last:mb-0">{pc(children)}</p>,
+    ul: ({ children }) => <ul className="list-disc pl-4 mb-2">{children}</ul>,
+    ol: ({ children }) => <ol className="list-decimal pl-4 mb-2">{children}</ol>,
+    li: ({ children }) => <li className="mb-0.5">{pc(children)}</li>,
+    code: ({ children, className }) =>
+      className ? (
+        <code
+          className={cn('block p-2 rounded text-xs my-2 overflow-x-auto', className)}
+          style={{ backgroundColor: 'hsl(222 47% 6%)' }}
+        >
+          {children}
+        </code>
+      ) : (
+        <code
+          className="px-1 py-0.5 rounded text-xs"
+          style={{ backgroundColor: 'hsl(222 47% 6%)' }}
+        >
+          {children}
+        </code>
+      ),
+    pre: ({ children }) => <>{children}</>,
+    strong: ({ children }) => <strong className="font-semibold">{pc(children)}</strong>,
+    h1: ({ children }) => <h1 className="text-base font-bold mb-2 mt-3 first:mt-0">{pc(children)}</h1>,
+    h2: ({ children }) => <h2 className="text-sm font-bold mb-1.5 mt-3 first:mt-0">{pc(children)}</h2>,
+    h3: ({ children }) => <h3 className="text-sm font-semibold mb-1 mt-2 first:mt-0">{pc(children)}</h3>,
+  }
 }
 
 // ── Main ChatPage ───────────────────────────────────────────────────────────
@@ -313,6 +342,16 @@ export default function ChatPage() {
   const [queryTypes, setQueryTypes] = useState([])
   const [selectedSource, setSelectedSource] = useState(null)
   const [showSources, setShowSources] = useState(false)
+
+  const citationComponents = useMemo(
+    () => makeMarkdownComponents((sourceIndex) => {
+      if (sourceIndex >= 0 && sourceIndex < sources.length) {
+        setSelectedSource(sourceIndex)
+        setShowSources(true)
+      }
+    }),
+    [sources.length]
+  )
 
   const { data: sessions = [] } = useQuery({
     queryKey: ['sessions', USER_ID, scopeDocId, scopeCollection],
@@ -611,10 +650,21 @@ export default function ChatPage() {
                         <>
                           <ReactMarkdown
                             remarkPlugins={[remarkGfm]}
-                            components={markdownComponents}
+                            components={citationComponents}
                           >
                             {msg.content}
                           </ReactMarkdown>
+                          {isLastAi && sources.length > 0 && (
+                            <div className="flex items-center gap-1 mt-2 pt-2 border-t border-white/10 flex-wrap">
+                              <span className="text-[11px] opacity-40 mr-1">Sources</span>
+                              {sources.map((_, idx) => (
+                                <CitationBadge key={idx} num={idx + 1} onClick={(i) => {
+                                  setSelectedSource(i)
+                                  setShowSources(true)
+                                }} />
+                              ))}
+                            </div>
+                          )}
                           {isLastAi && queryTypes.length > 0 && (
                             <QueryTypeBadges types={queryTypes} />
                           )}
@@ -655,6 +705,19 @@ export default function ChatPage() {
             >
               <History size={16} />
             </button>
+            {sources.length > 0 && (
+              <button
+                onClick={() => setShowSources(s => !s)}
+                className={cn(
+                  'p-2.5 rounded-lg transition-opacity',
+                  showSources ? 'opacity-100' : 'opacity-40 hover:opacity-100'
+                )}
+                title={showSources ? 'Hide sources' : 'Show sources'}
+                style={{ color: 'hsl(210 40% 98%)' }}
+              >
+                <FileText size={16} />
+              </button>
+            )}
             <input
               ref={inputRef}
               type="text"

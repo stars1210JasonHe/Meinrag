@@ -869,7 +869,7 @@ class TestBuildHeader:
         )
         counts = Counter({"attention_is_all_you_need.pdf": 1})
         header = _build_header(doc, 1, counts)
-        assert header == "--- attention_is_all_you_need | p.10 | 7 Conclusion ---"
+        assert header == "[1] attention_is_all_you_need | p.10 | 7 Conclusion"
 
     def test_label_takes_precedence_over_heading(self):
         from app.rag.chain import _build_header
@@ -886,7 +886,7 @@ class TestBuildHeader:
         )
         counts = Counter({"paper.pdf": 1})
         header = _build_header(doc, 2, counts)
-        assert header == "--- paper | p.9 | Table 4 ---"
+        assert header == "[2] paper | p.9 | Table 4"
 
     def test_minimal_metadata(self):
         from app.rag.chain import _build_header
@@ -898,7 +898,7 @@ class TestBuildHeader:
         )
         counts = Counter({"notes.txt": 1})
         header = _build_header(doc, 1, counts)
-        assert header == "--- notes ---"
+        assert header == "[1] notes"
 
     def test_duplicate_filename_gets_doc_id_suffix(self):
         from app.rag.chain import _build_header
@@ -914,7 +914,7 @@ class TestBuildHeader:
         )
         counts = Counter({"report.pdf": 2})
         header = _build_header(doc, 1, counts)
-        assert header == "--- report#abcd | p.3 ---"
+        assert header == "[1] report#abcd | p.3"
 
     def test_table_chunk_without_label(self):
         from app.rag.chain import _build_header
@@ -930,7 +930,7 @@ class TestBuildHeader:
         )
         counts = Counter({"data.pdf": 1})
         header = _build_header(doc, 1, counts)
-        assert header == "--- data | p.6 | Table ---"
+        assert header == "[1] data | p.6 | Table"
 
     def test_nested_headings_uses_last(self):
         from app.rag.chain import _build_header
@@ -946,7 +946,7 @@ class TestBuildHeader:
         )
         counts = Counter({"paper.pdf": 1})
         header = _build_header(doc, 1, counts)
-        assert header == "--- paper | p.5 | 3.2 Multi-Head Attention ---"
+        assert header == "[1] paper | p.5 | 3.2 Multi-Head Attention"
 
 
 class TestFormatDocsContextual:
@@ -963,7 +963,7 @@ class TestFormatDocsContextual:
         )
         result = format_docs([doc])
         assert "Summary: Transformer relies on self-attention mechanism." in result
-        assert "--- paper | p.1 ---" in result
+        assert "[1] paper | p.1" in result
 
     def test_no_summary(self):
         from app.rag.chain import format_docs
