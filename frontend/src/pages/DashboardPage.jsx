@@ -6,9 +6,11 @@ import {
   Search, Upload, MoreVertical, Trash2, Download, RefreshCw,
   FileText, X, MessageSquare, Filter, ChevronUp, ChevronDown, Menu, Network
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { fetchDocuments, fetchCollections, fetchGraphDocuments, deleteDocument } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import ContextMenu from '@/components/ContextMenu'
+import ConfirmDialog from '@/components/ConfirmDialog'
 
 const USER_ID = 'admin'
 
@@ -52,11 +54,17 @@ export default function DashboardPage() {
 
   const deleteMutation = useMutation({
     mutationFn: (docId) => deleteDocument(docId, USER_ID),
-    onSuccess: () => {
+    onSuccess: (_, docId) => {
       queryClient.invalidateQueries({ queryKey: ['documents'] })
       queryClient.invalidateQueries({ queryKey: ['graph-documents'] })
+      toast.success('Document deleted')
+    },
+    onError: (err) => {
+      toast.error(`Delete failed: ${err.message || 'Unknown error'}`)
     },
   })
+
+  const [confirmDelete, setConfirmDelete] = useState(null)
 
   // Measure container for graph sizing
   useEffect(() => {
@@ -258,7 +266,8 @@ export default function DashboardPage() {
   }, [])
 
   const handleDelete = (docId) => {
-    if (confirm('Delete this document?')) deleteMutation.mutate(docId)
+    const doc = documents.find(d => d.doc_id === docId)
+    setConfirmDelete({ docId, filename: doc?.filename || 'this document' })
     setMenuOpen(null)
   }
 
@@ -314,7 +323,7 @@ export default function DashboardPage() {
     const file = e.target.files?.[0]
     if (!file) return
     setUploading(true)
-    try {
+    const uploadPromise = (async () => {
       const API_BASE = import.meta.env.VITE_API_URL
       const formData = new FormData()
       formData.append('file', file)
@@ -323,12 +332,26 @@ export default function DashboardPage() {
         headers: { 'X-User-Id': USER_ID },
         body: formData,
       })
-      if (!resp.ok) throw new Error('Upload failed')
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}))
+        throw new Error(err.detail || `Upload failed (${resp.status})`)
+      }
+      return resp.json()
+    })()
+
+    toast.promise(uploadPromise, {
+      loading: `Uploading ${file.name}...`,
+      success: (data) => `${file.name} uploaded (${data.chunk_count} chunks)`,
+      error: (err) => `Upload failed: ${err.message}`,
+    })
+
+    try {
+      await uploadPromise
       queryClient.invalidateQueries({ queryKey: ['documents'] })
       queryClient.invalidateQueries({ queryKey: ['collections'] })
       queryClient.invalidateQueries({ queryKey: ['graph-documents'] })
-    } catch (err) {
-      console.error('Upload error:', err)
+    } catch {
+      // toast.promise already shows the error
     } finally {
       setUploading(false)
       e.target.value = ''
@@ -566,6 +589,20 @@ export default function DashboardPage() {
       {contextMenu && (
         <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenu.items} onClose={() => setContextMenu(null)} />
       )}
+
+      <ConfirmDialog
+        open={confirmDelete != null}
+        title="Delete document?"
+        message={`Are you sure you want to delete "${confirmDelete?.filename}"? This cannot be undone.`}
+        confirmLabel="Delete"
+        danger
+        onConfirm={() => {
+          deleteMutation.mutate(confirmDelete.docId)
+          setConfirmDelete(null)
+        }}
+        onCancel={() => setConfirmDelete(null)}
+      />
+
 
       {/* Collapsible document panel */}
       <div className="border-t shrink-0" style={{ borderColor: 'hsl(217 33% 17%)', backgroundColor: 'hsl(222 47% 8%)' }}>

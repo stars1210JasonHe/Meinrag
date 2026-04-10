@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Send, FileText, Loader2, X, History, Plus } from 'lucide-react'
+import { Send, FileText, Loader2, X, History, Plus, Square } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useQuery } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { fetchSessions, fetchSessionMessages } from '@/lib/api'
 import CitationBadge from '@/components/CitationBadge'
@@ -84,6 +85,7 @@ export default function ChatPage() {
   const [queryTypes, setQueryTypes] = useState([])
   const [selectedSource, setSelectedSource] = useState(null)
   const [showSources, setShowSources] = useState(false)
+  const abortControllerRef = useRef(null)
 
   const citationComponents = useMemo(
     () => makeMarkdownComponents((sourceIndex) => {
@@ -199,6 +201,9 @@ export default function ChatPage() {
         return updated
       })
 
+    const controller = new AbortController()
+    abortControllerRef.current = controller
+
     try {
       const newSessionId = sessionId || `session-${Date.now()}`
       if (!sessionId) setSessionId(newSessionId)
@@ -212,6 +217,7 @@ export default function ChatPage() {
           ...(scopeDocId ? { doc_ids: [scopeDocId] } : {}),
           ...(scopeCollection ? { collection: scopeCollection } : {}),
         }),
+        signal: controller.signal,
       })
 
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
@@ -254,6 +260,7 @@ export default function ChatPage() {
           } else if (data.types) {
             setQueryTypes(data.types)
           } else if (data.error) {
+            toast.error(`Backend error: ${data.error}`)
             updateAi(msg => ({ ...msg, content: `Error: ${data.error}`, loading: false }))
           }
           // data.done — nothing extra needed
@@ -263,15 +270,29 @@ export default function ChatPage() {
       // Clear loading flag in case we never got a token
       updateAi(msg => (msg.loading ? { ...msg, loading: false } : msg))
     } catch (err) {
-      updateAi(() => ({
-        role: 'ai',
-        content: `Failed to get response: ${err.message}`,
-        loading: false,
-      }))
+      if (err.name === 'AbortError') {
+        updateAi(msg => ({
+          ...msg,
+          content: msg.content || '_Stopped_',
+          loading: false,
+        }))
+      } else {
+        toast.error(`Request failed: ${err.message}`)
+        updateAi(() => ({
+          role: 'ai',
+          content: `Failed to get response: ${err.message}`,
+          loading: false,
+        }))
+      }
     } finally {
       setLoading(false)
+      abortControllerRef.current = null
       inputRef.current?.focus()
     }
+  }
+
+  const handleStop = () => {
+    abortControllerRef.current?.abort()
   }
 
   const handleKeyDown = (e) => {
@@ -475,21 +496,31 @@ export default function ChatPage() {
                 border: '1px solid hsl(217 33% 22%)',
               }}
             />
-            <button
-              onClick={handleSend}
-              disabled={!input.trim() || loading}
-              className="p-2.5 rounded-lg transition-opacity disabled:opacity-40"
-              style={{
-                backgroundColor: 'hsl(250 80% 65%)',
-                color: 'hsl(210 40% 98%)',
-              }}
-            >
-              {loading ? (
-                <Loader2 size={16} className="animate-spin" />
-              ) : (
+            {loading ? (
+              <button
+                onClick={handleStop}
+                className="p-2.5 rounded-lg transition-opacity hover:opacity-90"
+                style={{
+                  backgroundColor: 'hsl(0 84% 60%)',
+                  color: 'hsl(210 40% 98%)',
+                }}
+                title="Stop generation"
+              >
+                <Square size={16} fill="currentColor" />
+              </button>
+            ) : (
+              <button
+                onClick={handleSend}
+                disabled={!input.trim()}
+                className="p-2.5 rounded-lg transition-opacity disabled:opacity-40"
+                style={{
+                  backgroundColor: 'hsl(250 80% 65%)',
+                  color: 'hsl(210 40% 98%)',
+                }}
+              >
                 <Send size={16} />
-              )}
-            </button>
+              </button>
+            )}
           </div>
         </div>
       </div>
