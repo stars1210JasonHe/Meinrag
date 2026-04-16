@@ -55,8 +55,9 @@ export default function DashboardPage() {
   const deleteMutation = useMutation({
     mutationFn: (docId) => deleteDocument(docId, USER_ID),
     onSuccess: (_, docId) => {
-      queryClient.invalidateQueries({ queryKey: ['documents'] })
-      queryClient.invalidateQueries({ queryKey: ['graph-documents'] })
+      queryClient.invalidateQueries({ queryKey: ['documents', USER_ID] })
+      queryClient.invalidateQueries({ queryKey: ['graph-documents', USER_ID] })
+      queryClient.invalidateQueries({ queryKey: ['collections', USER_ID] })
       toast.success('Document deleted')
     },
     onError: (err) => {
@@ -347,9 +348,9 @@ export default function DashboardPage() {
 
     try {
       await uploadPromise
-      queryClient.invalidateQueries({ queryKey: ['documents'] })
-      queryClient.invalidateQueries({ queryKey: ['collections'] })
-      queryClient.invalidateQueries({ queryKey: ['graph-documents'] })
+      queryClient.invalidateQueries({ queryKey: ['documents', USER_ID] })
+      queryClient.invalidateQueries({ queryKey: ['collections', USER_ID] })
+      queryClient.invalidateQueries({ queryKey: ['graph-documents', USER_ID] })
     } catch {
       // toast.promise already shows the error
     } finally {
@@ -565,26 +566,27 @@ export default function DashboardPage() {
             />
           )}
 
-          {/* Floating upload button */}
-          <label
-            className={cn(
-              'absolute bottom-4 right-4 flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm cursor-pointer shadow-lg transition-opacity z-10',
-              uploading ? 'opacity-50 pointer-events-none' : 'hover:opacity-90'
-            )}
-            style={{ backgroundColor: 'hsl(250 80% 65%)', color: 'hsl(210 40% 98%)' }}
-          >
-            {uploading ? <RefreshCw size={16} className="animate-spin" /> : <Upload size={16} />}
-            {uploading ? 'Uploading...' : 'Upload'}
-            <input
-              type="file"
-              className="hidden"
-              onChange={handleUpload}
-              disabled={uploading}
-              accept=".pdf,.docx,.txt,.md,.html,.xlsx,.pptx"
-            />
-          </label>
         </div>
       </div>
+
+      {/* Floating upload button — fixed to viewport bottom-right */}
+      <label
+        className={cn(
+          'fixed bottom-6 right-6 flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm cursor-pointer shadow-lg transition-opacity z-30',
+          uploading ? 'opacity-50 pointer-events-none' : 'hover:opacity-90'
+        )}
+        style={{ backgroundColor: 'hsl(250 80% 65%)', color: 'hsl(210 40% 98%)' }}
+      >
+        {uploading ? <RefreshCw size={16} className="animate-spin" /> : <Upload size={16} />}
+        {uploading ? 'Uploading...' : 'Upload'}
+        <input
+          type="file"
+          className="hidden"
+          onChange={handleUpload}
+          disabled={uploading}
+          accept=".pdf,.docx,.txt,.md,.html,.xlsx,.pptx"
+        />
+      </label>
 
       {contextMenu && (
         <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenu.items} onClose={() => setContextMenu(null)} />
