@@ -1,0 +1,72 @@
+{
+  "name": "academic",
+  "description": "Tuned for academic papers and research documents. Per-query-type overrides for section weights and graph edge emphasis.",
+  "defaults": {
+    "section_weights": {
+      "abstract": 1.2,
+      "introduction": 1.0,
+      "related_work": 0.8,
+      "methods": 1.1,
+      "training": 1.0,
+      "results": 1.1,
+      "discussion": 1.0,
+      "conclusion": 1.1,
+      "references": 1.0,
+      "appendix": 0.6,
+      "acknowledgment": 0.3,
+      "body": 1.0
+    },
+    "penalties": {
+      "reference_section": 0.25,
+      "boilerplate": 0.15
+    },
+    "graph": {
+      "normalization_factor": 10,
+      "edge_type_weights": {
+        "follows": 0.3,
+        "co_located": 0.5,
+        "describes": 1.0,
+        "references": 0.6,
+        "similar_to": 0.4
+      },
+      "expansion_score_decay": 0.8
+    },
+    "confidence_tiers": {
+      "high": 0.50,
+      "moderate": 0.30
+    }
+  },
+  "query_type_overrides": {
+    "fact": {
+      "section_weights": {
+        "abstract": 1.3,
+        "results": 1.2
+      },
+      "penalties": {
+        "reference_section": 0.2
+      }
+    },
+    "overview": {
+      "section_weights": {
+        "abstract": 1.5,
+        "conclusion": 1.3,
+        "related_work": 0.6
+      }
+    },
+    "reference": {
+      "graph": {
+        "edge_type_weights": {
+          "describes": 1.0,
+          "references": 1.0
+        }
+      }
+    },
+    "exploratory": {
+      "section_weights": {
+        "abstract": 1.3,
+        "discussion": 1.1
+      }
+    }
+  },
+  "normalization": "max_scale"
+}

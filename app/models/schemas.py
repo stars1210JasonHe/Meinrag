@@ -83,6 +83,7 @@ class QueryResponse(BaseModel):
     session_id: str | None = None
     web_search_used: bool = False
     query_types: list[str] | None = None
+    confidence_tier: str | None = None
 
 
 class UserInfo(BaseModel):

@@ -329,6 +329,7 @@ async def query_documents(
             question=request.question,
             session_id=request.session_id,
             query_types=result.query_types,
+            confidence_tier=result.confidence_tier,
         )
     except Exception as e:
         logger.exception("Query failed")
@@ -462,6 +463,7 @@ async def query_documents_stream(
         needs_web_search = True
         query_types: list[str] = []
         query_label = None
+        confidence_tier = None
         context = ""
     else:
         result = await retrieve_and_rank(
@@ -481,6 +483,7 @@ async def query_documents_stream(
         needs_web_search = result.web_search_needed
         query_types = result.query_types
         query_label = result.query_label
+        confidence_tier = result.confidence_tier
         context = format_docs([doc for doc, _ in result.retrieved]) if not needs_web_search else ""
 
     # Pre-compute web search context if needed
@@ -509,7 +512,7 @@ async def query_documents_stream(
                     yield event
             else:
                 # Normal RAG path — build prompt+LLM chain with pre-computed context
-                yield sse_event("query_analysis", {"types": query_types, "label": query_label})
+                yield sse_event("query_analysis", {"types": query_types, "label": query_label, "confidence_tier": confidence_tier})
 
                 sources_data = [s.model_dump() for s in result.sources]
 

@@ -112,7 +112,8 @@ class Settings(BaseSettings):
     summary_provider: str = "openrouter"  # "openrouter" or "openai"
     summary_model: str = "qwen/qwen3.5-9b"
     summary_min_chars: int = 200
-    scoring_recency_decay: float = 0.001
+    scoring_profile: str = "general"
+    scoring_recency_decay: float = 0.001  # unused until recency signal is wired into _composite_score
 
     # Visual proximity linking (replace blanket visual supplements)
     visual_proximity_enabled: bool = True
@@ -120,7 +121,8 @@ class Settings(BaseSettings):
 
     # Hybrid search
     hybrid_search_enabled: bool = False
-    hybrid_bm25_weight: float = 0.5
+    hybrid_bm25_weight: float = 0.5  # used by legacy EnsembleRetriever in chain.py; retrieval.py uses RRF instead
+    rrf_k: int = 60
 
     # Chat memory
     memory_max_messages: int = 20

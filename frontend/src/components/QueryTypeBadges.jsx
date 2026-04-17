@@ -8,7 +8,7 @@ const TYPE_COLORS = {
 export default function QueryTypeBadges({ types }) {
   if (!types || types.length === 0) return null
   return (
-    <div className="flex flex-wrap gap-1 mt-2">
+    <div className="flex flex-wrap gap-1">
       {types.map(t => (
         <span
           key={t}

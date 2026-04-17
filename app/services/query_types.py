@@ -15,10 +15,10 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_TYPES = {
     "types": [
-        {"name": "fact", "description": "specific data lookup", "strategy": "top_k", "weights": [0.8, 0.1, 0.0, 0.1]},
-        {"name": "overview", "description": "broad coverage, summarization", "strategy": "section_sampling", "weights": [0.5, 0.2, 0.1, 0.2]},
-        {"name": "reference", "description": "asks about a specific table/figure/equation by number", "strategy": "label_lookup", "weights": [0.3, 0.3, 0.0, 0.4]},
-        {"name": "exploratory", "description": "open exploration, comparison", "strategy": "top_k", "weights": [0.6, 0.2, 0.1, 0.1]},
+        {"name": "fact", "description": "specific data lookup", "strategy": "top_k", "weights": [0.85, 0.15, 0.0, 0.0]},
+        {"name": "overview", "description": "broad coverage, summarization", "strategy": "section_sampling", "weights": [0.6, 0.4, 0.0, 0.0]},
+        {"name": "reference", "description": "asks about a specific table/figure/equation by number", "strategy": "label_lookup", "weights": [0.3, 0.7, 0.0, 0.0]},
+        {"name": "exploratory", "description": "open exploration, comparison", "strategy": "top_k", "weights": [0.65, 0.35, 0.0, 0.0]},
     ],
     "label_instruction": "If reference type, extract the label normalized to English. null if no reference.",
     "strategies": {

@@ -151,29 +151,36 @@ class TestReferenceTagging:
 
 
 class TestReferenceScorePenalty:
+    def _scoring(self):
+        from app.services.scoring_profile import load_scoring_profile
+        return load_scoring_profile("general").for_query_type()
+
     def test_reference_chunk_penalized(self):
         from app.services.retrieval import _apply_reference_penalty
+        scoring = self._scoring()
         results = [
             (Document(page_content="Real content", metadata={}), 0.6),
             (Document(page_content="[1] Author et al.", metadata={"section": "references"}), 0.5),
         ]
-        penalized = _apply_reference_penalty(results)
+        penalized = _apply_reference_penalty(results, scoring)
         assert penalized[0][1] == 0.6
         assert penalized[1][1] == pytest.approx(0.5 * 0.3)
 
     def test_non_reference_unchanged(self):
         from app.services.retrieval import _apply_reference_penalty
+        scoring = self._scoring()
         results = [
             (Document(page_content="Normal text", metadata={}), 0.8),
             (Document(page_content="Another chunk", metadata={"section": "introduction"}), 0.7),
         ]
-        penalized = _apply_reference_penalty(results)
+        penalized = _apply_reference_penalty(results, scoring)
         assert penalized[0][1] == 0.8
         assert penalized[1][1] == 0.7
 
     def test_empty_results(self):
         from app.services.retrieval import _apply_reference_penalty
-        assert _apply_reference_penalty([]) == []
+        scoring = self._scoring()
+        assert _apply_reference_penalty([], scoring) == []
 
 
 # ── Task 8: Section type classifier ──────────────────────────────────────
@@ -288,40 +295,48 @@ class TestSectionMetadata:
 
 
 class TestSectionScoreWeighting:
+    def _scoring(self):
+        from app.services.scoring_profile import load_scoring_profile
+        return load_scoring_profile("general").for_query_type()
+
     def test_acknowledgment_penalized(self):
         from app.services.retrieval import _apply_section_weights
+        scoring = self._scoring()
         results = [
             (Document(page_content="Thanks to...", metadata={"section_type": "acknowledgment"}), 0.5),
         ]
-        weighted = _apply_section_weights(results)
+        weighted = _apply_section_weights(results, scoring)
         assert weighted[0][1] == pytest.approx(0.5 * 0.4)
 
     def test_appendix_penalized(self):
         from app.services.retrieval import _apply_section_weights
+        scoring = self._scoring()
         results = [
             (Document(page_content="Appendix content", metadata={"section_type": "appendix"}), 0.5),
         ]
-        weighted = _apply_section_weights(results)
+        weighted = _apply_section_weights(results, scoring)
         assert weighted[0][1] == pytest.approx(0.5 * 0.7)
 
     def test_body_sections_unchanged(self):
         from app.services.retrieval import _apply_section_weights
+        scoring = self._scoring()
         results = [
             (Document(page_content="Methods", metadata={"section_type": "methods"}), 0.7),
             (Document(page_content="Results", metadata={"section_type": "results"}), 0.6),
             (Document(page_content="Intro", metadata={"section_type": "introduction"}), 0.5),
         ]
-        weighted = _apply_section_weights(results)
+        weighted = _apply_section_weights(results, scoring)
         assert weighted[0][1] == 0.7
         assert weighted[1][1] == 0.6
         assert weighted[2][1] == 0.5
 
     def test_references_not_double_penalized(self):
         from app.services.retrieval import _apply_section_weights
+        scoring = self._scoring()
         results = [
             (Document(page_content="[1] Author", metadata={"section_type": "references", "section": "references"}), 0.15),
         ]
-        weighted = _apply_section_weights(results)
+        weighted = _apply_section_weights(results, scoring)
         assert weighted[0][1] == 0.15  # unchanged — handled by reference penalty
 
 
@@ -742,7 +757,7 @@ class TestCompositeScoring:
 
     def test_parse_weights_invalid_falls_back(self):
         from app.services.retrieval import _parse_weights
-        assert _parse_weights("invalid") == (0.7, 0.15, 0.05, 0.1)
+        assert _parse_weights("invalid") == (0.7, 0.3, 0.0, 0.0)
 
     def test_different_type_weights(self):
         from app.services.retrieval import _composite_score
@@ -979,7 +994,9 @@ class TestFormatDocsContextual:
 class TestBoilerplatePenalty:
     def test_penalty_applied(self):
         from app.services.retrieval import _apply_boilerplate_penalty
+        from app.services.scoring_profile import load_scoring_profile
 
+        scoring = load_scoring_profile("general").for_query_type()
         boilerplate = Document(
             page_content="* Equal contribution. Listing order is random.",
             metadata={},
@@ -989,6 +1006,6 @@ class TestBoilerplatePenalty:
             metadata={},
         )
         results = [(boilerplate, 0.9), (normal, 0.8)]
-        penalized = _apply_boilerplate_penalty(results)
+        penalized = _apply_boilerplate_penalty(results, scoring)
         assert penalized[0][1] == pytest.approx(0.18, abs=0.01)  # 0.9 * 0.2
         assert penalized[1][1] == 0.8  # unchanged

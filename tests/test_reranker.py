@@ -11,7 +11,7 @@ class TestRerankerConfig:
     """Config defaults and validation."""
 
     def test_default_rerank_settings(self):
-        s = Settings()
+        s = Settings(_env_file=None)
         assert s.rerank_enabled is False
         assert s.rerank_top_n == 4
         assert s.rerank_provider == RerankProvider.FLASHRANK

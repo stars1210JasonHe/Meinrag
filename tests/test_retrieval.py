@@ -19,6 +19,7 @@ from app.services.retrieval import (
     _lookup_by_label,
     _analyze_query,
     _apply_composite_scoring,
+    _rrf_merge_bm25,
 )
 
 
@@ -412,9 +413,12 @@ class FakeSettings:
 
 
 class FakeEdgeRepo:
-    """Returns configurable edge counts per (doc_id, [chunk_indices])."""
+    """Returns configurable edge counts per (doc_id, [chunk_indices]).
+
+    Accepts flat counts {(doc_id, chunk_index): total} and converts to
+    typed format {chunk_index: {"follows": total}} for the typed API.
+    """
     def __init__(self, counts: dict | None = None):
-        # counts: {(doc_id, chunk_index): count}
         self._counts = counts or {}
 
     async def get_edge_counts_batch(self, doc_id, chunk_indices):
@@ -422,6 +426,19 @@ class FakeEdgeRepo:
             cidx: self._counts.get((doc_id, cidx), 0)
             for cidx in chunk_indices
         }
+
+    async def get_edge_type_counts_batch(self, doc_id, chunk_indices):
+        result = {}
+        for cidx in chunk_indices:
+            total = self._counts.get((doc_id, cidx), 0)
+            if total > 0:
+                result[cidx] = {"follows": total}
+        return result
+
+
+def _general_scoring():
+    from app.services.scoring_profile import load_scoring_profile
+    return load_scoring_profile("general").for_query_type()
 
 
 class TestCompositeScoring:
@@ -431,40 +448,43 @@ class TestCompositeScoring:
         doc_with_edges = _doc(doc_id="d1", chunk_index=0, content="has edges")
         doc_no_edges = _doc(doc_id="d1", chunk_index=1, content="no edges")
         retrieved = [(doc_with_edges, 0.5), (doc_no_edges, 0.5)]
-        # chunk_index=0 has 10 edges (max graph score = 1.0), chunk_index=1 has 0
         edge_repo = FakeEdgeRepo({("d1", 0): 10})
         settings = FakeSettings()
-        result = await _apply_composite_scoring(retrieved, edge_repo, "fact", settings)
+        scoring = _general_scoring()
+        result = await _apply_composite_scoring(retrieved, edge_repo, "fact", settings, scoring)
         score_map = {doc.metadata["chunk_index"]: score for doc, score in result}
         assert score_map[0] > score_map[1]
 
     @pytest.mark.asyncio
     async def test_graph_score_capped_at_1(self):
-        """Edge count > 10 should still cap graph_score at 1.0."""
+        """Edge count > normalization_factor should still cap graph_score at 1.0."""
         doc = _doc(doc_id="d1", chunk_index=0)
         edge_repo = FakeEdgeRepo({("d1", 0): 999})
         settings = FakeSettings()
-        result = await _apply_composite_scoring([(doc, 0.5)], edge_repo, "fact", settings)
+        scoring = _general_scoring()
+        result = await _apply_composite_scoring([(doc, 0.5)], edge_repo, "fact", settings, scoring)
         _, score = result[0]
-        # With fact weights [0.8, 0.1, 0.0, 0.1]: 0.8*0.5 + 0.1*1.0 + 0.0*1.0 + 0.1*1.0
-        assert score == pytest.approx(0.8 * 0.5 + 0.1 * 1.0 + 0.0 * 1.0 + 0.1 * 1.0)
+        # With fact weights [0.85, 0.15, 0.0, 0.0]: 0.85*0.5 + 0.15*1.0 + 0.0*1.0 + 0.0*1.0
+        assert score == pytest.approx(0.85 * 0.5 + 0.15 * 1.0 + 0.0 * 1.0 + 0.0 * 1.0)
 
     @pytest.mark.asyncio
     async def test_no_edge_repo(self):
         """With edge_repo=None, graph_score=0; scoring still works."""
         doc = _doc(doc_id="d1", chunk_index=0)
         settings = FakeSettings()
-        result = await _apply_composite_scoring([(doc, 0.6)], None, "fact", settings)
+        scoring = _general_scoring()
+        result = await _apply_composite_scoring([(doc, 0.6)], None, "fact", settings, scoring)
         assert len(result) == 1
         _, score = result[0]
-        # fact weights [0.8, 0.1, 0.0, 0.1]: 0.8*0.6 + 0.1*0 + 0.0*1.0 + 0.1*1.0
-        assert score == pytest.approx(0.8 * 0.6 + 0.0 + 0.0 * 1.0 + 0.1 * 1.0)
+        # fact weights [0.85, 0.15, 0.0, 0.0]: 0.85*0.6 + 0.15*0 + 0.0*1.0 + 0.0*1.0
+        assert score == pytest.approx(0.85 * 0.6 + 0.0 + 0.0 * 1.0 + 0.0 * 1.0)
 
     @pytest.mark.asyncio
     async def test_empty_input(self):
         """Empty retrieved list returns empty."""
         settings = FakeSettings()
-        result = await _apply_composite_scoring([], FakeEdgeRepo(), "fact", settings)
+        scoring = _general_scoring()
+        result = await _apply_composite_scoring([], FakeEdgeRepo(), "fact", settings, scoring)
         assert result == []
 
     @pytest.mark.asyncio
@@ -472,23 +492,85 @@ class TestCompositeScoring:
         """Chunks without doc_id/chunk_index get graph_score=0 but are still scored."""
         doc = Document(page_content="no metadata", metadata={})
         settings = FakeSettings()
-        result = await _apply_composite_scoring([(doc, 0.5)], FakeEdgeRepo(), "exploratory", settings)
+        scoring = _general_scoring()
+        result = await _apply_composite_scoring([(doc, 0.5)], FakeEdgeRepo(), "exploratory", settings, scoring)
         assert len(result) == 1
 
     @pytest.mark.asyncio
     async def test_per_query_type_weights(self):
         """Different query types produce different scores for the same input."""
         doc = _doc(doc_id="d1", chunk_index=0)
-        edge_repo = FakeEdgeRepo({("d1", 0): 10})  # high graph score
+        edge_repo = FakeEdgeRepo({("d1", 0): 10})
         settings = FakeSettings()
+        scoring = _general_scoring()
 
-        fact_result = await _apply_composite_scoring([(doc, 0.5)], edge_repo, "fact", settings)
-        overview_result = await _apply_composite_scoring([(doc, 0.5)], edge_repo, "overview", settings)
+        fact_result = await _apply_composite_scoring([(doc, 0.5)], edge_repo, "fact", settings, scoring)
+        overview_result = await _apply_composite_scoring([(doc, 0.5)], edge_repo, "overview", settings, scoring)
 
         _, fact_score = fact_result[0]
         _, overview_score = overview_result[0]
-        # fact weights: [0.8, 0.1, 0.0, 0.1]; overview: [0.5, 0.2, 0.1, 0.2]
+        # fact weights: [0.85, 0.15, 0.0, 0.0]; overview: [0.6, 0.4, 0.0, 0.0]
         # With similarity=0.5 and graph=1.0:
-        # fact:     0.8*0.5 + 0.1*1.0 + 0.0*1.0 + 0.1*1.0 = 0.60
-        # overview: 0.5*0.5 + 0.2*1.0 + 0.1*1.0 + 0.2*1.0 = 0.75
+        # fact:     0.85*0.5 + 0.15*1.0 + 0.0*1.0 + 0.0*1.0 = 0.575
+        # overview: 0.6*0.5 + 0.4*1.0 + 0.0*1.0 + 0.0*1.0 = 0.70
         assert fact_score != pytest.approx(overview_score)
+
+
+class TestRRFMerge:
+    def test_vector_only(self):
+        """With no BM25 results, vector ranking is preserved."""
+        docs = [_doc(chunk_index=i) for i in range(3)]
+        vector = [(docs[0], 0.9), (docs[1], 0.7), (docs[2], 0.5)]
+        result = _rrf_merge_bm25(vector, [], k=60)
+        assert len(result) == 3
+        scores = [s for _, s in result]
+        assert scores[0] > scores[1] > scores[2]
+        assert scores[0] == pytest.approx(1.0)
+
+    def test_bm25_only(self):
+        """With no vector results, BM25 ranking is preserved."""
+        docs = [_doc(chunk_index=i) for i in range(3)]
+        result = _rrf_merge_bm25([], docs, k=60)
+        assert len(result) == 3
+        scores = [s for _, s in result]
+        assert scores[0] > scores[1] > scores[2]
+        assert scores[0] == pytest.approx(1.0)
+
+    def test_both_found_sums(self):
+        """Chunks found by both retrievers get higher RRF scores."""
+        shared = _doc(chunk_index=0)
+        vec_only = _doc(chunk_index=1)
+        bm25_only = _doc(chunk_index=2)
+
+        vector = [(shared, 0.9), (vec_only, 0.8)]
+        bm25_docs = [shared, bm25_only]
+
+        result = _rrf_merge_bm25(vector, bm25_docs, k=60)
+        score_map = {doc.metadata["chunk_index"]: score for doc, score in result}
+        assert score_map[0] > score_map[1]
+        assert score_map[0] > score_map[2]
+
+    def test_empty_inputs(self):
+        """Both empty returns empty."""
+        assert _rrf_merge_bm25([], [], k=60) == []
+
+    def test_normalized_to_0_1(self):
+        """Output scores are in [0, 1] range."""
+        docs = [_doc(chunk_index=i) for i in range(5)]
+        vector = [(d, 0.5) for d in docs[:3]]
+        bm25 = docs[2:]
+        result = _rrf_merge_bm25(vector, bm25, k=60)
+        for _, score in result:
+            assert 0.0 <= score <= 1.0
+
+    def test_k_parameter_affects_scores(self):
+        """Larger k compresses rank differences; smaller k amplifies them."""
+        docs = [_doc(chunk_index=i) for i in range(3)]
+        vector = [(docs[0], 0.9), (docs[1], 0.7), (docs[2], 0.5)]
+
+        result_k10 = _rrf_merge_bm25(vector, [], k=10)
+        result_k100 = _rrf_merge_bm25(vector, [], k=100)
+
+        spread_k10 = result_k10[0][1] - result_k10[-1][1]
+        spread_k100 = result_k100[0][1] - result_k100[-1][1]
+        assert spread_k10 > spread_k100

@@ -1,0 +1,41 @@
+{
+  "name": "general",
+  "description": "Default scoring profile — matches original hardcoded behavior. Safe baseline for mixed document types.",
+  "defaults": {
+    "section_weights": {
+      "abstract": 1.0,
+      "introduction": 1.0,
+      "related_work": 0.9,
+      "methods": 1.0,
+      "training": 1.0,
+      "results": 1.0,
+      "discussion": 1.0,
+      "conclusion": 1.0,
+      "references": 1.0,
+      "appendix": 0.7,
+      "acknowledgment": 0.4,
+      "body": 1.0
+    },
+    "penalties": {
+      "reference_section": 0.3,
+      "boilerplate": 0.2
+    },
+    "graph": {
+      "normalization_factor": 10,
+      "edge_type_weights": {
+        "follows": 1.0,
+        "co_located": 1.0,
+        "describes": 1.0,
+        "references": 1.0,
+        "similar_to": 1.0
+      },
+      "expansion_score_decay": 0.8
+    },
+    "confidence_tiers": {
+      "high": 0.50,
+      "moderate": 0.30
+    }
+  },
+  "query_type_overrides": {},
+  "normalization": "max_scale"
+}

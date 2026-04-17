@@ -11,6 +11,7 @@ import CitationBadge from '@/components/CitationBadge'
 import SourceItem from '@/components/SourceItem'
 import SourceViewer from '@/components/SourceViewer'
 import QueryTypeBadges from '@/components/QueryTypeBadges'
+import ConfidenceBadge from '@/components/ConfidenceBadge'
 import { splitCitations } from '@/lib/citations'
 
 const API_BASE = import.meta.env.VITE_API_URL
@@ -83,6 +84,7 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(false)
   const [sources, setSources] = useState([])
   const [queryTypes, setQueryTypes] = useState([])
+  const [confidenceTier, setConfidenceTier] = useState(null)
   const [selectedSource, setSelectedSource] = useState(null)
   const [showSources, setShowSources] = useState(false)
   const abortControllerRef = useRef(null)
@@ -116,6 +118,7 @@ export default function ChatPage() {
     setMessages([])
     setSources([])
     setQueryTypes([])
+    setConfidenceTier(null)
     setSelectedSource(null)
     setShowSources(false)
   }, [scopeDocId, scopeCollection])
@@ -129,6 +132,7 @@ export default function ChatPage() {
     setMessages([])
     setSources([])
     setQueryTypes([])
+    setConfidenceTier(null)
     setSelectedSource(null)
     setShowSources(false)
   }
@@ -157,6 +161,7 @@ export default function ChatPage() {
         setShowSources(false)
       }
       setQueryTypes([])
+      setConfidenceTier(null)
       setSelectedSource(null)
     } catch (err) {
       console.error('Failed to load session:', err)
@@ -179,6 +184,7 @@ export default function ChatPage() {
     setLoading(true)
     setSources([])
     setQueryTypes([])
+    setConfidenceTier(null)
     setSelectedSource(null)
     setShowSources(false)
 
@@ -259,6 +265,7 @@ export default function ChatPage() {
             updateAi(msg => ({ ...msg, content: fullAnswer, loading: false }))
           } else if (data.types) {
             setQueryTypes(data.types)
+            if (data.confidence_tier) setConfidenceTier(data.confidence_tier)
           } else if (data.error) {
             toast.error(`Backend error: ${data.error}`)
             updateAi(msg => ({ ...msg, content: `Error: ${data.error}`, loading: false }))
@@ -428,8 +435,11 @@ export default function ChatPage() {
                               ))}
                             </div>
                           )}
-                          {isLastAi && queryTypes.length > 0 && (
-                            <QueryTypeBadges types={queryTypes} />
+                          {isLastAi && (queryTypes.length > 0 || confidenceTier) && (
+                            <div className="flex flex-wrap items-center gap-2 mt-2">
+                              {queryTypes.length > 0 && <QueryTypeBadges types={queryTypes} />}
+                              {confidenceTier && <ConfidenceBadge tier={confidenceTier} />}
+                            </div>
                           )}
                         </>
                       ) : (

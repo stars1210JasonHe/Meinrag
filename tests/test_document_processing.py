@@ -201,7 +201,7 @@ class TestVisionMode:
 
     def test_parse_mode_default_unchanged(self):
         """Default parse_mode is 'default'."""
-        settings = Settings()
+        settings = Settings(_env_file=None)
         assert settings.parse_mode == ParseMode.DEFAULT
 
     def test_parse_mode_accepts_vision(self):
@@ -211,7 +211,7 @@ class TestVisionMode:
 
     def test_backward_compat_pdf_parse_mode(self):
         """Legacy pdf_parse_mode is remapped to parse_mode."""
-        settings = Settings(pdf_parse_mode="enhanced")
+        settings = Settings(_env_file=None, pdf_parse_mode="enhanced")
         assert settings.parse_mode == ParseMode.ENHANCED
 
     def test_vision_settings_defaults(self):

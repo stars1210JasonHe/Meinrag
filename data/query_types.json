@@ -4,25 +4,25 @@
       "name": "fact",
       "description": "specific data lookup (what score, how many, which method, what article says)",
       "strategy": "top_k",
-      "weights": [0.8, 0.1, 0.0, 0.1]
+      "weights": [0.85, 0.15, 0.0, 0.0]
     },
     {
       "name": "overview",
       "description": "broad coverage, summarization (summarize, explain, what is this about, main content)",
       "strategy": "section_sampling",
-      "weights": [0.5, 0.2, 0.1, 0.2]
+      "weights": [0.6, 0.4, 0.0, 0.0]
     },
     {
       "name": "reference",
       "description": "asks about a specific table/figure/equation/clause by number or label",
       "strategy": "label_lookup",
-      "weights": [0.3, 0.3, 0.0, 0.4]
+      "weights": [0.3, 0.7, 0.0, 0.0]
     },
     {
       "name": "exploratory",
       "description": "open exploration, comparison (tell me about X, explain X, compare, what are the implications)",
       "strategy": "top_k",
-      "weights": [0.6, 0.2, 0.1, 0.1]
+      "weights": [0.65, 0.35, 0.0, 0.0]
     }
   ],
   "label_instruction": "If reference type, extract the label normalized to English (e.g., 'Table 1', 'Figure 2', 'Article 30'). Handle any language: '表1' → 'Table 1', '图2' → 'Figure 2', '第三十条' → 'Article 30'. null if no reference.",

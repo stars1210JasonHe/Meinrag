@@ -134,6 +134,11 @@ class TestReferencesEdges:
         assert len(refs) == 2
 
 
+def _general_scoring():
+    from app.services.scoring_profile import load_scoring_profile
+    return load_scoring_profile("general").for_query_type()
+
+
 class TestGraphExpansion:
     """Test _expand_via_edges() traverses edges to find related chunks."""
 
@@ -163,7 +168,7 @@ class TestGraphExpansion:
 
         retrieved = [(text_chunk, 0.7)]
         expanded = await _expand_via_edges(
-            retrieved, MockEdgeRepo(), MockStore(),
+            retrieved, MockEdgeRepo(), MockStore(), _general_scoring(),
             relations=["describes", "references"],
         )
         assert len(expanded) == 2
@@ -188,7 +193,7 @@ class TestGraphExpansion:
                 return [chunk]
 
         retrieved = [(chunk, 0.7)]
-        expanded = await _expand_via_edges(retrieved, MockEdgeRepo(), MockStore())
+        expanded = await _expand_via_edges(retrieved, MockEdgeRepo(), MockStore(), _general_scoring())
         assert len(expanded) == 1
 
     @pytest.mark.asyncio
@@ -203,7 +208,7 @@ class TestGraphExpansion:
             def get_chunks_by_doc(self, doc_id):
                 return []
 
-        result = await _expand_via_edges([], MockEdgeRepo(), MockStore())
+        result = await _expand_via_edges([], MockEdgeRepo(), MockStore(), _general_scoring())
         assert result == []
 
     @pytest.mark.asyncio
@@ -232,7 +237,7 @@ class TestGraphExpansion:
 
         retrieved = [(text_chunk, 0.7)]
         expanded = await _expand_via_edges(
-            retrieved, MockEdgeRepo(), MockStore(), max_expansion=3,
+            retrieved, MockEdgeRepo(), MockStore(), _general_scoring(), max_expansion=3,
         )
         # 1 original + 3 expanded (capped at max_expansion)
         assert len(expanded) == 4

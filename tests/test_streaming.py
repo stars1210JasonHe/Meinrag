@@ -12,7 +12,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.config import Settings, LLMProvider, VectorStoreType
 from app.db.models import Base, UserModel
-from app.dependencies import get_settings, get_vector_store, get_db, get_llm
+from app.dependencies import get_settings, get_vector_store, get_db, get_llm, get_embeddings
 from app.main import create_app
 
 
@@ -41,7 +41,12 @@ def mock_llm():
 
 
 @pytest.fixture
-def client(mock_settings, mock_vector_store, mock_llm):
+def mock_embeddings():
+    return MagicMock()
+
+
+@pytest.fixture
+def client(mock_settings, mock_vector_store, mock_llm, mock_embeddings):
     engine = create_async_engine(
         "sqlite+aiosqlite://",
         connect_args={"check_same_thread": False},
@@ -58,8 +63,8 @@ def client(mock_settings, mock_vector_store, mock_llm):
         async with session_factory() as session:
             session.add(UserModel(user_id="admin", display_name="Admin"))
             await session.commit()
-        # Store mock LLM on app.state for /health/deep
         app.state.llm = mock_llm
+        app.state.db_session_factory = session_factory
         yield
         await engine.dispose()
 
@@ -79,6 +84,7 @@ def client(mock_settings, mock_vector_store, mock_llm):
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_vector_store] = lambda: mock_vector_store
     app.dependency_overrides[get_llm] = lambda: mock_llm
+    app.dependency_overrides[get_embeddings] = lambda: mock_embeddings
 
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c

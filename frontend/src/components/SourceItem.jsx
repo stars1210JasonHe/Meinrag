@@ -9,6 +9,10 @@ const TYPE_ICONS = {
 
 export { TYPE_ICONS }
 
+function scoreColor(p) {
+  return `hsl(${p * 1.2} 72% 45%)`
+}
+
 export default function SourceItem({ source, index, onClick }) {
   const Icon = TYPE_ICONS[source.chunk_type] || FileText
   const displayName = source.source_file?.replace(/\.[^.]+$/, '') || 'unknown'
@@ -27,7 +31,7 @@ export default function SourceItem({ source, index, onClick }) {
         </div>
         <div className="flex items-center gap-2 mt-0.5">
           {source.score != null && (
-            <span className="text-xs" style={{ color: 'hsl(168 84% 40%)' }}>
+            <span className="text-xs" style={{ color: scoreColor(source.score) }}>
               {Math.round(source.score)}%
             </span>
           )}

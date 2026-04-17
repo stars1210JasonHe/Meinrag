@@ -1,0 +1,61 @@
+{
+  "name": "law",
+  "description": "Tuned for legal documents — contracts, statutes, court decisions. Heavy cross-reference edges, moderate boilerplate for standard clauses.",
+  "defaults": {
+    "section_weights": {
+      "abstract": 1.0,
+      "introduction": 1.0,
+      "related_work": 0.7,
+      "methods": 0.8,
+      "training": 0.8,
+      "results": 1.0,
+      "discussion": 1.0,
+      "conclusion": 1.1,
+      "references": 1.0,
+      "appendix": 0.8,
+      "acknowledgment": 0.3,
+      "body": 1.0
+    },
+    "penalties": {
+      "reference_section": 0.4,
+      "boilerplate": 0.25
+    },
+    "graph": {
+      "normalization_factor": 8,
+      "edge_type_weights": {
+        "follows": 0.5,
+        "co_located": 0.4,
+        "describes": 0.6,
+        "references": 1.0,
+        "similar_to": 0.3
+      },
+      "expansion_score_decay": 0.85
+    },
+    "confidence_tiers": {
+      "high": 0.55,
+      "moderate": 0.35
+    }
+  },
+  "query_type_overrides": {
+    "fact": {
+      "penalties": {
+        "reference_section": 0.5
+      },
+      "graph": {
+        "edge_type_weights": {
+          "references": 1.0,
+          "follows": 0.7
+        }
+      }
+    },
+    "reference": {
+      "graph": {
+        "edge_type_weights": {
+          "references": 1.0,
+          "follows": 0.8
+        }
+      }
+    }
+  },
+  "normalization": "max_scale"
+}
