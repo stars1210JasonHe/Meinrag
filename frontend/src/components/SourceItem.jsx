@@ -13,7 +13,7 @@ function scoreColor(p) {
   return `hsl(${p * 1.2} 72% 45%)`
 }
 
-export default function SourceItem({ source, index, onClick }) {
+export default function SourceItem({ source, index, isActive, onClick }) {
   const Icon = TYPE_ICONS[source.chunk_type] || FileText
   const displayName = source.source_file?.replace(/\.[^.]+$/, '') || 'unknown'
   const heading = source.headings?.split(' > ').pop()
@@ -22,7 +22,11 @@ export default function SourceItem({ source, index, onClick }) {
   return (
     <button
       onClick={() => onClick(index)}
-      className="flex items-start gap-2 w-full px-3 py-2.5 text-left rounded-lg transition-colors hover:bg-white/5"
+      className={`flex items-start gap-2 w-full px-3 py-2.5 text-left rounded-lg transition-colors ${
+        isActive
+          ? 'bg-white/10 border-l-2 border-[hsl(168_84%_40%)]'
+          : 'hover:bg-white/5 border-l-2 border-transparent'
+      }`}
     >
       <Icon size={14} className="mt-0.5 shrink-0 opacity-60" />
       <div className="flex-1 min-w-0">

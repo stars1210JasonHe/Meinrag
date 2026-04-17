@@ -1,4 +1,7 @@
+import { useTranslation } from 'react-i18next'
+
 export default function CitationBadge({ num, onClick }) {
+  const { t } = useTranslation()
   return (
     <sup
       onClick={(e) => { e.stopPropagation(); onClick(num - 1) }}
@@ -11,7 +14,7 @@ export default function CitationBadge({ num, onClick }) {
         minWidth: '18px',
         textAlign: 'center',
       }}
-      title={`Source [${num}]`}
+      title={t('citation.source', { num })}
     >
       {num}
     </sup>

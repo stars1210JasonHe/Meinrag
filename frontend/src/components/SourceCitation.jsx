@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { ChevronDown, ChevronRight, Download, Globe, MessageCircleQuestion, Copy, Quote, FileText } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import MarkdownRenderer from './MarkdownRenderer'
 import { API_BASE } from '../api/client'
 
@@ -17,17 +18,19 @@ function scoreTextColor(score) {
 }
 
 function ChunkTypeBadge({ chunkType }) {
+  const { t } = useTranslation()
   if (!chunkType || chunkType === 'text') return null
   const config = {
-    table: { label: 'Table', className: 'source-chunk-type-table' },
-    image: { label: 'Image', className: 'source-chunk-type-image' },
+    table: { labelKey: 'sourceCitation.table', className: 'source-chunk-type-table' },
+    image: { labelKey: 'sourceCitation.image', className: 'source-chunk-type-image' },
   }
-  const { label, className } = config[chunkType] || {}
-  if (!label) return null
-  return <span className={`source-chunk-type ${className}`}>{label}</span>
+  const { labelKey, className } = config[chunkType] || {}
+  if (!labelKey) return null
+  return <span className={`source-chunk-type ${className}`}>{t(labelKey)}</span>
 }
 
 export default function SourceCitation({ source, msgIdx, sourceIdx, onDownload, onAskAbout, onQuote, onViewPdf }) {
+  const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
   const [askInput, setAskInput] = useState('')
   const [showAskInput, setShowAskInput] = useState(false)
@@ -36,7 +39,7 @@ export default function SourceCitation({ source, msgIdx, sourceIdx, onDownload, 
   const isTable = source.chunk_type === 'table'
   const isImage = source.chunk_type === 'image'
   const hasPdf = source.doc_id && source.page != null && !isWeb && onViewPdf
-  const displayName = source.source_file?.replace(/\.[^.]+$/, '') || 'unknown'
+  const displayName = source.source_file?.replace(/\.[^.]+$/, '') || t('common.unknown')
   const heading = source.headings?.split(' > ').pop()
 
   const handleHeaderClick = () => {
@@ -86,7 +89,7 @@ export default function SourceCitation({ source, msgIdx, sourceIdx, onDownload, 
             <img
               className="source-image"
               src={`${API_BASE}/documents/images/${source.image_path}`}
-              alt="Extracted from document"
+              alt={t('sourceCitation.extractedImage')}
               loading="lazy"
             />
           )}
@@ -97,7 +100,7 @@ export default function SourceCitation({ source, msgIdx, sourceIdx, onDownload, 
     return (
       <div className="source-content">
         {source.summary && (
-          <div className="source-summary">TL;DR: {source.summary}</div>
+          <div className="source-summary">{t('sourceCitation.tldr')} {source.summary}</div>
         )}
         {source.content}
       </div>
@@ -141,22 +144,22 @@ export default function SourceCitation({ source, msgIdx, sourceIdx, onDownload, 
             <button
               className="source-ask-btn"
               onClick={e => { e.stopPropagation(); setShowAskInput(!showAskInput) }}
-              title="Ask about this source"
+              title={t('sourceCitation.askSource')}
             >
               <MessageCircleQuestion size={13} />
             </button>
             <button
               className="source-copy-btn"
               onClick={handleCopy}
-              title={copied ? 'Copied!' : 'Copy source text'}
+              title={copied ? t('sourceCitation.copied') : t('sourceCitation.copy')}
             >
               <Copy size={12} />
-              {copied && <span className="copied-badge">Copied</span>}
+              {copied && <span className="copied-badge">{t('sourceCitation.copiedShort')}</span>}
             </button>
             <button
               className="source-quote-btn"
               onClick={handleQuote}
-              title="Quote in input"
+              title={t('sourceCitation.quote')}
             >
               <Quote size={12} />
             </button>
@@ -166,7 +169,7 @@ export default function SourceCitation({ source, msgIdx, sourceIdx, onDownload, 
           <button
             className="source-download"
             onClick={e => { e.stopPropagation(); onDownload(source.doc_id, source.source_file) }}
-            title="Download file"
+            title={t('sourceCitation.downloadFile')}
           >
             <Download size={12} />
           </button>
@@ -181,10 +184,10 @@ export default function SourceCitation({ source, msgIdx, sourceIdx, onDownload, 
             value={askInput}
             onChange={e => setAskInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleAskSubmit()}
-            placeholder="Ask about this source..."
+            placeholder={t('sourceCitation.askSourcePlaceholder')}
             autoFocus
           />
-          <button onClick={handleAskSubmit} disabled={!askInput.trim()}>Ask</button>
+          <button onClick={handleAskSubmit} disabled={!askInput.trim()}>{t('sourceCitation.ask')}</button>
         </div>
       )}
     </div>

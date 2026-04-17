@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import ForceGraph2D from 'react-force-graph-2d'
 import {
   Search, Upload, MoreVertical, Trash2, Download, RefreshCw,
@@ -22,6 +23,7 @@ const NODE_COLORS = {
 export default function DashboardPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const { t } = useTranslation()
   const graphRef = useRef(null)
   const containerRef = useRef(null)
   const [search, setSearch] = useState('')
@@ -58,10 +60,10 @@ export default function DashboardPage() {
       queryClient.invalidateQueries({ queryKey: ['documents', USER_ID] })
       queryClient.invalidateQueries({ queryKey: ['graph-documents', USER_ID] })
       queryClient.invalidateQueries({ queryKey: ['collections', USER_ID] })
-      toast.success('Document deleted')
+      toast.success(t('toasts.documentDeleted'))
     },
     onError: (err) => {
-      toast.error(`Delete failed: ${err.message || 'Unknown error'}`)
+      toast.error(t('toasts.deleteFailed', { message: err.message || t('toasts.unknownError') }))
     },
   })
 
@@ -268,7 +270,7 @@ export default function DashboardPage() {
 
   const handleDelete = (docId) => {
     const doc = documents.find(d => d.doc_id === docId)
-    setConfirmDelete({ docId, filename: doc?.filename || 'this document' })
+    setConfirmDelete({ docId, filename: doc?.filename || t('dashboard.thisDocument') })
     setMenuOpen(null)
   }
 
@@ -300,22 +302,22 @@ export default function DashboardPage() {
 
     if (node._type === 'document' && node._data) {
       items.push(
-        { label: 'Chat about this', icon: MessageSquare, action: () => navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.filename || '')}`) },
-        { label: 'Open in PDF', icon: FileText, action: () => navigate(`/pdf/${node._data.doc_id}`) },
-        { label: 'View in Graph', icon: Network, action: () => navigate(`/graph/${node._data.doc_id}`) },
+        { label: t('dashboard.chatAboutThis'), icon: MessageSquare, action: () => navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.filename || '')}`) },
+        { label: t('dashboard.openInPdf'), icon: FileText, action: () => navigate(`/pdf/${node._data.doc_id}`) },
+        { label: t('dashboard.viewInGraph'), icon: Network, action: () => navigate(`/graph/${node._data.doc_id}`) },
         { separator: true },
-        { label: 'Download', icon: Download, action: () => handleDownload(node._data.doc_id) },
-        { label: 'Delete', icon: Trash2, action: () => handleDelete(node._data.doc_id), danger: true },
+        { label: t('common.download'), icon: Download, action: () => handleDownload(node._data.doc_id) },
+        { label: t('common.delete'), icon: Trash2, action: () => handleDelete(node._data.doc_id), danger: true },
       )
     } else if (node._type === 'collection') {
       items.push(
-        { label: 'Chat about collection', icon: MessageSquare, action: () => navigate(`/chat?collection=${encodeURIComponent(node.label)}`) },
-        { label: 'Filter by this', icon: Filter, action: () => handleDomainClick(node.label) },
+        { label: t('dashboard.chatAboutCollection'), icon: MessageSquare, action: () => navigate(`/chat?collection=${encodeURIComponent(node.label)}`) },
+        { label: t('dashboard.filterByThis'), icon: Filter, action: () => handleDomainClick(node.label) },
       )
     }
 
     items.push({ separator: true })
-    items.push({ label: 'Cancel', action: () => {} })
+    items.push({ label: t('common.cancel'), action: () => {} })
 
     setContextMenu({ x: event.clientX, y: event.clientY, items })
   }, [navigate, handleDownload, handleDelete, handleDomainClick])
@@ -335,15 +337,15 @@ export default function DashboardPage() {
       })
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}))
-        throw new Error(err.detail || `Upload failed (${resp.status})`)
+        throw new Error(err.detail || t('toasts.uploadFailedStatus', { status: resp.status }))
       }
       return resp.json()
     })()
 
     toast.promise(uploadPromise, {
-      loading: `Uploading ${file.name}...`,
-      success: (data) => `${file.name} uploaded (${data.chunk_count} chunks)`,
-      error: (err) => `Upload failed: ${err.message}`,
+      loading: t('toasts.uploadingFile', { filename: file.name }),
+      success: (data) => t('toasts.uploadSuccess', { filename: file.name, chunks: data.chunk_count }),
+      error: (err) => t('toasts.uploadFailed', { message: err.message }),
     })
 
     try {
@@ -373,13 +375,13 @@ export default function DashboardPage() {
   const panelTitle = useMemo(() => {
     const total = Array.isArray(documents) ? documents.length : 0
     if (search) {
-      return `Documents (showing ${displayedDocs.length} of ${filtered.length} matches)`
+      return t('dashboard.panelSearching', { shown: displayedDocs.length, total: filtered.length })
     }
     if (selectedDomain) {
-      return `Documents in "${selectedDomain}" (${displayedDocs.length})`
+      return t('dashboard.panelDomain', { domain: selectedDomain, shown: displayedDocs.length })
     }
-    return `Documents (showing ${displayedDocs.length} of ${total})`
-  }, [documents, displayedDocs, filtered, search, selectedDomain])
+    return t('dashboard.panelDefault', { shown: displayedDocs.length, total })
+  }, [documents, displayedDocs, filtered, search, selectedDomain, t])
 
   return (
     <div className="flex flex-col h-full">
@@ -389,7 +391,7 @@ export default function DashboardPage() {
           onClick={() => setShowDomains(d => !d)}
           className="p-2 rounded-lg opacity-40 hover:opacity-100"
           style={{ backgroundColor: 'hsl(217 33% 17%)', color: 'hsl(210 40% 98%)' }}
-          title={showDomains ? 'Hide domains' : 'Show domains'}
+          title={showDomains ? t('dashboard.hideDomains') : t('dashboard.showDomains')}
         >
           <Menu size={14} />
         </button>
@@ -397,7 +399,7 @@ export default function DashboardPage() {
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 opacity-40" />
           <input
             type="text"
-            placeholder="Search documents..."
+            placeholder={t('dashboard.searchPlaceholder')}
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="w-full pl-9 pr-4 py-2 rounded-lg text-sm outline-none"
@@ -408,7 +410,7 @@ export default function DashboardPage() {
           onClick={() => setShowFilters(f => !f)}
           className={cn('p-2 rounded-lg text-xs transition-opacity', showFilters ? 'opacity-100' : 'opacity-40 hover:opacity-100')}
           style={{ backgroundColor: showFilters ? 'hsl(250 80% 65%)' : 'hsl(217 33% 17%)', color: 'hsl(210 40% 98%)' }}
-          title="Toggle filters"
+          title={t('dashboard.toggleFilters')}
         >
           <Filter size={14} />
         </button>
@@ -440,7 +442,7 @@ export default function DashboardPage() {
                 onClick={() => navigate(`/chat?collection=${encodeURIComponent(activeFilters[0])}`)}
                 className="p-1 rounded opacity-60 hover:opacity-100 transition-opacity"
                 style={{ color: 'hsl(250 80% 65%)' }}
-                title="Chat about this collection"
+                title={t('dashboard.chatAboutCollection')}
               >
                 <MessageSquare size={14} />
               </button>
@@ -449,7 +451,7 @@ export default function DashboardPage() {
                 className="px-2 py-0.5 text-xs opacity-40 hover:opacity-100"
                 style={{ color: 'hsl(210 40% 98%)' }}
               >
-                Clear
+                {t('common.clear')}
               </button>
             </>
           )}
@@ -468,7 +470,7 @@ export default function DashboardPage() {
             className="px-3 py-2 text-xs font-semibold uppercase tracking-wider border-b"
             style={{ color: 'hsl(215 20% 65%)', borderColor: 'hsl(217 33% 17%)' }}
           >
-            Domains
+            {t('dashboard.domains')}
           </div>
           <div className="flex-1 overflow-auto py-1">
             {/* All option */}
@@ -481,7 +483,7 @@ export default function DashboardPage() {
                 fontWeight: !selectedDomain ? 600 : 400,
               }}
             >
-              <span>All</span>
+              <span>{t('common.all')}</span>
               <span className="ml-1 shrink-0 tabular-nums" style={{ color: 'hsl(215 20% 65%)' }}>
                 {Array.isArray(documents) ? documents.length : 0}
               </span>
@@ -489,7 +491,7 @@ export default function DashboardPage() {
 
             {collectionList.length === 0 ? (
               <div className="px-3 py-4 text-xs opacity-30" style={{ color: 'hsl(215 20% 65%)' }}>
-                No collections
+                {t('dashboard.noCollections')}
               </div>
             ) : (
               collectionList.map(col => (
@@ -520,7 +522,7 @@ export default function DashboardPage() {
                 className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-opacity hover:opacity-90"
                 style={{ backgroundColor: 'hsl(250 80% 65%)', color: 'hsl(210 40% 98%)' }}
               >
-                <MessageSquare size={12} /> Chat
+                <MessageSquare size={12} /> {t('nav.chat')}
               </button>
             </div>
           )}
@@ -531,13 +533,13 @@ export default function DashboardPage() {
         <div className="flex-1 relative min-h-0" ref={containerRef} style={{ backgroundColor: 'hsl(222 47% 4%)' }}>
           {isLoading ? (
             <div className="absolute inset-0 flex items-center justify-center opacity-40" style={{ color: 'hsl(210 40% 98%)' }}>
-              Loading...
+              {t('common.loading')}
             </div>
           ) : graphData.nodes.length === 0 ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center opacity-40" style={{ color: 'hsl(210 40% 98%)' }}>
               <FileText size={48} className="mb-4" />
-              <p className="text-lg">Upload your first document</p>
-              <p className="text-sm mt-1">to start building your knowledge graph</p>
+              <p className="text-lg">{t('dashboard.uploadFirst')}</p>
+              <p className="text-sm mt-1">{t('dashboard.uploadFirstHint')}</p>
             </div>
           ) : (
             <ForceGraph2D
@@ -578,7 +580,7 @@ export default function DashboardPage() {
         style={{ backgroundColor: 'hsl(250 80% 65%)', color: 'hsl(210 40% 98%)' }}
       >
         {uploading ? <RefreshCw size={16} className="animate-spin" /> : <Upload size={16} />}
-        {uploading ? 'Uploading...' : 'Upload'}
+        {uploading ? t('dashboard.uploading') : t('dashboard.upload')}
         <input
           type="file"
           className="hidden"
@@ -594,9 +596,9 @@ export default function DashboardPage() {
 
       <ConfirmDialog
         open={confirmDelete != null}
-        title="Delete document?"
-        message={`Are you sure you want to delete "${confirmDelete?.filename}"? This cannot be undone.`}
-        confirmLabel="Delete"
+        title={t('confirm.deleteDocumentTitle')}
+        message={t('confirm.deleteDocumentMessage', { filename: confirmDelete?.filename })}
+        confirmLabel={t('common.delete')}
         danger
         onConfirm={() => {
           deleteMutation.mutate(confirmDelete.docId)
@@ -620,7 +622,7 @@ export default function DashboardPage() {
         {showPanel && (
           <div className="max-h-48 overflow-auto border-t" style={{ borderColor: 'hsl(217 33% 12%)' }}>
             {displayedDocs.length === 0 ? (
-              <div className="p-4 text-xs text-center opacity-30">No documents match</div>
+              <div className="p-4 text-xs text-center opacity-30">{t('dashboard.noMatch')}</div>
             ) : (
               displayedDocs.map(doc => (
                 <div
@@ -634,7 +636,7 @@ export default function DashboardPage() {
                   <button
                     onClick={(e) => { e.stopPropagation(); navigate(`/pdf/${doc.doc_id}`) }}
                     className="p-1 rounded opacity-20 group-hover:opacity-80 hover:opacity-100 transition-opacity"
-                    title="View PDF"
+                    title={t('dashboard.viewPdf')}
                   >
                     <FileText size={14} />
                   </button>
@@ -655,14 +657,14 @@ export default function DashboardPage() {
                           className="flex items-center gap-2 px-3 py-1.5 text-xs w-full hover:bg-white/5"
                           style={{ color: 'hsl(210 40% 98%)' }}
                         >
-                          <Download size={10} /> Download
+                          <Download size={10} /> {t('common.download')}
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); handleDelete(doc.doc_id) }}
                           className="flex items-center gap-2 px-3 py-1.5 text-xs w-full hover:bg-white/5"
                           style={{ color: 'hsl(0 84% 60%)' }}
                         >
-                          <Trash2 size={10} /> Delete
+                          <Trash2 size={10} /> {t('common.delete')}
                         </button>
                       </div>
                     )}

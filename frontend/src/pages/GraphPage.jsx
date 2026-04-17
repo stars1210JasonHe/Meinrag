@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import ForceGraph2D from 'react-force-graph-2d'
 import { FileText, Table2, Image, Calculator, ExternalLink, MessageSquare, X, Network } from 'lucide-react'
 import { fetchGraphDocuments, fetchGraphNodes, fetchDocuments, fetchCollections } from '@/lib/api'
@@ -30,6 +31,7 @@ const TYPE_ICONS = { text: FileText, table: Table2, image: Image, formula: Calcu
 export default function GraphPage() {
   const { docId } = useParams()
   const navigate = useNavigate()
+  const { t } = useTranslation()
   const graphRef = useRef(null)
   const containerRef = useRef(null)
   const [selectedNode, setSelectedNode] = useState(null)
@@ -232,20 +234,20 @@ export default function GraphPage() {
 
     if (node._data?.node_type === 'document') {
       items.push(
-        { label: 'Explore chunks', icon: Network, action: () => { setScope(node._data.doc_id); setSelectedNode(null) } },
-        { label: 'Chat about this', icon: MessageSquare, action: () => navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.source_file || '')}`) },
-        { label: 'Open in PDF', icon: ExternalLink, action: () => navigate(`/pdf/${node._data.doc_id}`) },
+        { label: t('graph.exploreChunks'), icon: Network, action: () => { setScope(node._data.doc_id); setSelectedNode(null) } },
+        { label: t('dashboard.chatAboutThis'), icon: MessageSquare, action: () => navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.source_file || '')}`) },
+        { label: t('dashboard.openInPdf'), icon: ExternalLink, action: () => navigate(`/pdf/${node._data.doc_id}`) },
       )
     } else {
       items.push(
-        { label: 'Chat about this', icon: MessageSquare, action: () => navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.source_file || '')}`) },
-        { label: 'Open in PDF', icon: ExternalLink, action: () => navigate(`/pdf/${node._data.doc_id}`) },
-        { label: 'View neighbors', icon: Network, action: () => { handleNodeClick(node) } },
+        { label: t('dashboard.chatAboutThis'), icon: MessageSquare, action: () => navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.source_file || '')}`) },
+        { label: t('dashboard.openInPdf'), icon: ExternalLink, action: () => navigate(`/pdf/${node._data.doc_id}`) },
+        { label: t('graph.viewNeighbors'), icon: Network, action: () => { handleNodeClick(node) } },
       )
     }
 
     items.push({ separator: true })
-    items.push({ label: 'Cancel', action: () => {} })
+    items.push({ label: t('common.cancel'), action: () => {} })
 
     setContextMenu({ x: event.clientX, y: event.clientY, items })
   }, [navigate, handleNodeClick])
@@ -349,7 +351,7 @@ export default function GraphPage() {
         <div className="flex items-center gap-1 px-4 py-1.5 text-xs border-b"
              style={{ borderColor: 'hsl(217 33% 12%)', color: 'hsl(215 20% 65%)' }}>
           <button onClick={() => handleScopeChange('')} className="hover:underline opacity-60 hover:opacity-100">
-            All Documents
+            {t('graph.allDocuments')}
           </button>
           <span className="opacity-30">→</span>
           {scopeType === 'collection' && (
@@ -374,7 +376,7 @@ export default function GraphPage() {
             style={{ color: 'hsl(210 40% 98%)' }}
           >
             <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
-            {type}
+            {t(`nodeType.${type}`)}
           </button>
         ))}
 
@@ -393,7 +395,7 @@ export default function GraphPage() {
             }}
           >
             <span className="w-3 h-0.5 inline-block rounded" style={{ backgroundColor: EDGE_COLORS[type] }} />
-            {type}
+            {t(`edgeType.${type}`)}
           </button>
         ))}
 
@@ -405,15 +407,15 @@ export default function GraphPage() {
           className="text-xs rounded px-2 py-1 outline-none"
           style={{ backgroundColor: 'hsl(217 33% 17%)', color: 'hsl(210 40% 98%)', border: 'none' }}
         >
-          <option value="">All Documents</option>
+          <option value="">{t('graph.allDocuments')}</option>
           {collections.length > 0 && (
-            <optgroup label="Collections">
+            <optgroup label={t('graph.collections')}>
               {collections.map(c => (
                 <option key={`col:${c}`} value={`col:${c}`}>{c}</option>
               ))}
             </optgroup>
           )}
-          <optgroup label="Documents">
+          <optgroup label={t('graph.documents')}>
             {(Array.isArray(docList) ? docList : []).map(d => (
               <option key={d.doc_id} value={d.doc_id}>{d.filename}</option>
             ))}
@@ -433,7 +435,7 @@ export default function GraphPage() {
         {isLoading && (
           <div className="absolute inset-0 flex items-center justify-center z-10 opacity-40"
                style={{ color: 'hsl(210 40% 98%)' }}>
-            Loading graph...
+            {t('graph.loadingGraph')}
           </div>
         )}
         {graphFormatted.nodes.length > 0 && (
@@ -474,7 +476,7 @@ export default function GraphPage() {
         {!isLoading && graphFormatted.nodes.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center opacity-40"
                style={{ color: 'hsl(210 40% 98%)' }}>
-            No graph data. Select a document or upload one.
+            {t('graph.noGraphData')}
           </div>
         )}
       </div>
@@ -515,7 +517,7 @@ export default function GraphPage() {
               className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs"
               style={{ backgroundColor: 'hsl(217 33% 17%)', color: 'hsl(210 40% 98%)' }}
             >
-              <ExternalLink size={12} /> Open in PDF
+              <ExternalLink size={12} /> {t('dashboard.openInPdf')}
             </button>
             <button
               onClick={() => {
@@ -530,11 +532,11 @@ export default function GraphPage() {
               className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs"
               style={{ backgroundColor: 'hsl(217 33% 17%)', color: 'hsl(210 40% 98%)' }}
             >
-              <MessageSquare size={12} /> Ask about this
+              <MessageSquare size={12} /> {t('graph.askAboutThis')}
             </button>
             {selectedNode.page != null && (
               <span className="text-xs opacity-40" style={{ color: 'hsl(210 40% 98%)' }}>
-                Page {selectedNode.page + 1}
+                {t('graph.page', { num: selectedNode.page + 1 })}
               </span>
             )}
           </div>

@@ -1,0 +1,151 @@
+{
+  "common": {
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "delete": "Delete",
+    "loading": "Loading...",
+    "save": "Save",
+    "close": "Close",
+    "error": "Error",
+    "retry": "Retry",
+    "download": "Download",
+    "clear": "Clear",
+    "all": "All",
+    "unknown": "unknown",
+    "empty": "(empty)"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "chat": "Chat",
+    "graph": "Graph",
+    "pdfViewer": "PDF Viewer"
+  },
+  "dashboard": {
+    "searchPlaceholder": "Search documents...",
+    "hideDomains": "Hide domains",
+    "showDomains": "Show domains",
+    "toggleFilters": "Toggle filters",
+    "chatAboutCollection": "Chat about this collection",
+    "domains": "Domains",
+    "noCollections": "No collections",
+    "uploadFirst": "Upload your first document",
+    "uploadFirstHint": "to start building your knowledge graph",
+    "upload": "Upload",
+    "uploading": "Uploading...",
+    "noMatch": "No documents match",
+    "viewPdf": "View PDF",
+    "openInPdf": "Open in PDF",
+    "viewInGraph": "View in Graph",
+    "chatAboutThis": "Chat about this",
+    "filterByThis": "Filter by this",
+    "panelSearching": "Documents (showing {{shown}} of {{total}} matches)",
+    "panelDomain": "Documents in \"{{domain}}\" ({{shown}})",
+    "panelDefault": "Documents (showing {{shown}} of {{total}})",
+    "thisDocument": "this document"
+  },
+  "chat": {
+    "newChat": "New Chat",
+    "noSessionsYet": "No sessions yet",
+    "chatHistory": "Chat history",
+    "hideSources": "Hide sources",
+    "showSources": "Show sources",
+    "stopGeneration": "Stop generation",
+    "stopped": "_Stopped_",
+    "askPlaceholder": "Ask anything about your documents…",
+    "askEmpty": "Ask anything about your documents",
+    "sourcesWithCount": "Sources ({{count}})",
+    "sourcesLabel": "Sources",
+    "searchingIn": "Searching in:",
+    "backendError": "Backend error: {{message}}",
+    "inlineError": "Error: {{message}}",
+    "requestFailed": "Request failed: {{message}}",
+    "responseFailed": "Failed to get response: {{message}}"
+  },
+  "inputBar": {
+    "askCollection": "Ask about {{collection}} documents...",
+    "askDocument": "Ask about this document...",
+    "askQuestion": "Ask a question...",
+    "filteredDocument": "Filtered document",
+    "clearFilter": "Clear filter",
+    "webSearch": "Search the web instead of documents"
+  },
+  "sourceViewer": {
+    "sources": "Sources",
+    "image": "Image",
+    "failedToLoadPdf": "Failed to load PDF",
+    "noContent": "No content available"
+  },
+  "pdfViewer": {
+    "selectFromDashboard": "Select a document from Dashboard",
+    "loadingPdf": "Loading PDF...",
+    "failedToLoadPdf": "Failed to load PDF",
+    "searchPlaceholder": "Search in PDF...",
+    "pageChunks": "Page Chunks ({{count}})",
+    "noChunks": "No chunks on this page"
+  },
+  "graph": {
+    "allDocuments": "All Documents",
+    "collections": "Collections",
+    "documents": "Documents",
+    "loadingGraph": "Loading graph...",
+    "noGraphData": "No graph data. Select a document or upload one.",
+    "exploreChunks": "Explore chunks",
+    "viewNeighbors": "View neighbors",
+    "askAboutThis": "Ask about this",
+    "page": "Page {{num}}"
+  },
+  "nodeType": {
+    "text": "text",
+    "table": "table",
+    "image": "image",
+    "formula": "formula"
+  },
+  "edgeType": {
+    "follows": "follows",
+    "co_located": "co-located",
+    "describes": "describes",
+    "references": "references",
+    "similar_to": "similar to"
+  },
+  "sourceCitation": {
+    "table": "Table",
+    "image": "Image",
+    "extractedImage": "Extracted from document",
+    "tldr": "TL;DR:",
+    "askSource": "Ask about this source",
+    "copy": "Copy source text",
+    "copied": "Copied!",
+    "copiedShort": "Copied",
+    "quote": "Quote in input",
+    "downloadFile": "Download file",
+    "askSourcePlaceholder": "Ask about this source...",
+    "ask": "Ask"
+  },
+  "citation": {
+    "source": "Source [{{num}}]"
+  },
+  "confidence": {
+    "high": "High confidence",
+    "moderate": "Moderate confidence",
+    "low": "Low confidence"
+  },
+  "queryType": {
+    "fact": "fact",
+    "overview": "overview",
+    "reference": "reference",
+    "exploratory": "exploratory"
+  },
+  "confirm": {
+    "deleteDocumentTitle": "Delete document?",
+    "deleteDocumentMessage": "Are you sure you want to delete \"{{filename}}\"? This cannot be undone."
+  },
+  "toasts": {
+    "documentDeleted": "Document deleted",
+    "deleteFailed": "Delete failed: {{message}}",
+    "uploadingFile": "Uploading {{filename}}...",
+    "uploadSuccess": "{{filename}} uploaded ({{chunks}} chunks)",
+    "uploadFailed": "Upload failed: {{message}}",
+    "uploadFailedStatus": "Upload failed ({{status}})",
+    "unknownError": "Unknown error"
+  }
+}

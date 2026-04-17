@@ -1,27 +1,30 @@
 import { Outlet, NavLink, useLocation, useSearchParams } from 'react-router-dom'
 import { LayoutDashboard, MessageSquare, Network } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
+import LanguageSwitcher from '@/components/LanguageSwitcher'
 
 function Breadcrumb() {
   const location = useLocation()
   const [searchParams] = useSearchParams()
+  const { t } = useTranslation()
   const path = location.pathname
 
   if (path === '/') return null
 
-  const crumbs = [{ label: 'Dashboard', to: '/' }]
+  const crumbs = [{ label: t('nav.dashboard'), to: '/' }]
 
   if (path.startsWith('/chat')) {
     const docName = searchParams.get('name')
     const collection = searchParams.get('collection')
     const suffix = docName ? `: ${docName}` : collection ? `: ${collection}` : ''
-    crumbs.push({ label: `Chat${suffix}` })
+    crumbs.push({ label: `${t('nav.chat')}${suffix}` })
   } else if (path.startsWith('/graph')) {
-    crumbs.push({ label: 'Graph' })
+    crumbs.push({ label: t('nav.graph') })
     const docId = path.replace('/graph/', '').replace('/graph', '')
     if (docId) crumbs.push({ label: docId })
   } else if (path.startsWith('/pdf')) {
-    crumbs.push({ label: 'PDF Viewer' })
+    crumbs.push({ label: t('nav.pdfViewer') })
   }
 
   return (
@@ -42,12 +45,13 @@ function Breadcrumb() {
 }
 
 const NAV_ITEMS = [
-  { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/chat', icon: MessageSquare, label: 'Chat' },
-  { to: '/graph', icon: Network, label: 'Graph' },
+  { to: '/', icon: LayoutDashboard, labelKey: 'nav.dashboard' },
+  { to: '/chat', icon: MessageSquare, labelKey: 'nav.chat' },
+  { to: '/graph', icon: Network, labelKey: 'nav.graph' },
 ]
 
 export default function AppLayout() {
+  const { t } = useTranslation()
   return (
     <div className="flex h-screen" style={{ backgroundColor: 'hsl(222 47% 6%)' }}>
       {/* Sidebar — collapsed, expands on hover */}
@@ -62,7 +66,7 @@ export default function AppLayout() {
         </div>
 
         <div className="flex-1 py-2">
-          {NAV_ITEMS.map(({ to, icon: Icon, label }) => (
+          {NAV_ITEMS.map(({ to, icon: Icon, labelKey }) => (
             <NavLink
               key={to}
               to={to}
@@ -80,13 +84,15 @@ export default function AppLayout() {
             >
               <Icon size={18} className="shrink-0" />
               <span className="whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
-                {label}
+                {t(labelKey)}
               </span>
             </NavLink>
           ))}
         </div>
 
-        <div className="py-2" />
+        <div className="py-2 border-t" style={{ borderColor: 'hsl(217 33% 17%)' }}>
+          <LanguageSwitcher />
+        </div>
       </nav>
 
       {/* Main content */}

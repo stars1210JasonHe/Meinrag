@@ -1,16 +1,19 @@
 import { useEffect } from 'react'
 import { AlertTriangle } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 export default function ConfirmDialog({
   open,
-  title = 'Confirm',
+  title,
   message,
-  confirmLabel = 'Confirm',
-  cancelLabel = 'Cancel',
+  confirmLabel,
+  cancelLabel,
   danger = false,
   onConfirm,
   onCancel,
 }) {
+  const { t } = useTranslation()
+
   useEffect(() => {
     if (!open) return
     const handleKey = (e) => {
@@ -22,6 +25,10 @@ export default function ConfirmDialog({
   }, [open, onConfirm, onCancel])
 
   if (!open) return null
+
+  const titleText = title ?? t('common.confirm')
+  const confirmText = confirmLabel ?? t('common.confirm')
+  const cancelText = cancelLabel ?? t('common.cancel')
 
   return (
     <div
@@ -45,7 +52,7 @@ export default function ConfirmDialog({
             </div>
           )}
           <div className="flex-1 min-w-0">
-            <h3 className="text-sm font-semibold mb-1">{title}</h3>
+            <h3 className="text-sm font-semibold mb-1">{titleText}</h3>
             <p className="text-xs opacity-70">{message}</p>
           </div>
         </div>
@@ -55,7 +62,7 @@ export default function ConfirmDialog({
             className="px-3 py-1.5 text-xs rounded transition-opacity opacity-70 hover:opacity-100"
             style={{ backgroundColor: 'hsl(217 33% 17%)' }}
           >
-            {cancelLabel}
+            {cancelText}
           </button>
           <button
             onClick={onConfirm}
@@ -64,7 +71,7 @@ export default function ConfirmDialog({
               backgroundColor: danger ? 'hsl(0 84% 60%)' : 'hsl(250 80% 65%)',
             }}
           >
-            {confirmLabel}
+            {confirmText}
           </button>
         </div>
       </div>

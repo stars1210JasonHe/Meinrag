@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Loader2, FileText } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { Document, Page, pdfjs } from 'react-pdf'
 import { TYPE_ICONS } from './SourceItem'
@@ -18,6 +19,7 @@ const TYPE_BBOX_COLORS = {
 export { TYPE_BBOX_COLORS }
 
 export default function SourceViewer({ source, sourceIndex, sources, onBack, onSelectSource }) {
+  const { t } = useTranslation()
   const containerRef = useRef(null)
   const [numPages, setNumPages] = useState(null)
   const [currentPage, setCurrentPage] = useState((source.page ?? 0) + 1)
@@ -93,7 +95,7 @@ export default function SourceViewer({ source, sourceIndex, sources, onBack, onS
         <button onClick={onBack}
                 className="flex items-center gap-0.5 text-xs opacity-60 hover:opacity-100 shrink-0"
                 style={{ color: 'hsl(210 40% 98%)' }}>
-          <ChevronLeft size={14} /> Sources
+          <ChevronLeft size={14} /> {t('sourceViewer.sources')}
         </button>
 
         <div className="flex-1" />
@@ -152,7 +154,7 @@ export default function SourceViewer({ source, sourceIndex, sources, onBack, onS
         {isImage ? (
           <div className="flex items-center justify-center p-4 h-full">
             <img src={`${API_BASE}/documents/images/${source.image_path}`}
-                 alt={source.content?.slice(0, 50) || 'Image'}
+                 alt={source.content?.slice(0, 50) || t('sourceViewer.image')}
                  className="max-w-full max-h-full object-contain rounded" />
           </div>
         ) : isPdf && pdfUrl ? (
@@ -160,7 +162,7 @@ export default function SourceViewer({ source, sourceIndex, sources, onBack, onS
             <Document file={pdfUrl}
                       onLoadSuccess={(pdf) => setNumPages(pdf.numPages)}
                       loading={<div className="p-8 flex items-center justify-center opacity-40"><Loader2 size={20} className="animate-spin" /></div>}
-                      error={<div className="p-8 text-center opacity-40 text-xs">Failed to load PDF</div>}>
+                      error={<div className="p-8 text-center opacity-40 text-xs">{t('sourceViewer.failedToLoadPdf')}</div>}>
               <Page pageNumber={currentPage}
                     width={containerWidth * zoom * 0.95}
                     renderTextLayer={true}
@@ -174,7 +176,7 @@ export default function SourceViewer({ source, sourceIndex, sources, onBack, onS
         ) : (
           <div className="p-4 text-sm leading-relaxed" style={{ color: 'hsl(210 40% 98%)' }}>
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {source.content || 'No content available'}
+              {source.content || t('sourceViewer.noContent')}
             </ReactMarkdown>
           </div>
         )}

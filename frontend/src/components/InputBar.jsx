@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { Send, FileText, FolderOpen, X, Globe } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { formatName } from '../taxonomy'
 
 export default function InputBar({ loading, selectedFilter, onSendMessage, onClearFilter, quotedText, onQuotedTextConsumed }) {
+  const { t } = useTranslation()
   const [input, setInput] = useState('')
   const inputRef = useRef(null)
 
@@ -28,9 +30,9 @@ export default function InputBar({ loading, selectedFilter, onSendMessage, onCle
   }
 
   const getPlaceholder = () => {
-    if (selectedFilter.type === 'collection') return `Ask about ${selectedFilter.value} documents...`
-    if (selectedFilter.type === 'doc') return 'Ask about this document...'
-    return 'Ask a question...'
+    if (selectedFilter.type === 'collection') return t('inputBar.askCollection', { collection: selectedFilter.value })
+    if (selectedFilter.type === 'doc') return t('inputBar.askDocument')
+    return t('inputBar.askQuestion')
   }
 
   return (
@@ -41,8 +43,8 @@ export default function InputBar({ loading, selectedFilter, onSendMessage, onCle
             ? <FileText size={13} />
             : <FolderOpen size={13} />
           }
-          <span>{selectedFilter.type === 'doc' ? 'Filtered document' : formatName(selectedFilter.value)}</span>
-          <button className="scope-clear" onClick={onClearFilter} title="Clear filter">
+          <span>{selectedFilter.type === 'doc' ? t('inputBar.filteredDocument') : formatName(selectedFilter.value)}</span>
+          <button className="scope-clear" onClick={onClearFilter} title={t('inputBar.clearFilter')}>
             <X size={12} />
           </button>
         </div>
@@ -61,7 +63,7 @@ export default function InputBar({ loading, selectedFilter, onSendMessage, onCle
           onClick={handleWebSearch}
           disabled={loading || !input.trim()}
           className="btn-web-search"
-          title="Search the web instead of documents"
+          title={t('inputBar.webSearch')}
         >
           <Globe size={22} />
         </button>

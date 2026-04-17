@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { Document, Page, pdfjs } from 'react-pdf'
 import 'react-pdf/dist/Page/TextLayer.css'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
@@ -21,6 +22,7 @@ const TYPE_COLORS = { text: '#3b82f6', table: '#f59e0b', formula: '#a855f7', ima
 export default function PdfViewerPage() {
   const { docId } = useParams()
   const navigate = useNavigate()
+  const { t } = useTranslation()
   const [numPages, setNumPages] = useState(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [zoom, setZoom] = useState(1.0)
@@ -106,7 +108,7 @@ export default function PdfViewerPage() {
       <div className="flex items-center justify-center h-full opacity-40">
         <div className="text-center">
           <FileText size={48} className="mx-auto mb-4" />
-          <p>Select a document from Dashboard</p>
+          <p>{t('pdfViewer.selectFromDashboard')}</p>
         </div>
       </div>
     )
@@ -168,7 +170,7 @@ export default function PdfViewerPage() {
             type="text"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search in PDF..."
+            placeholder={t('pdfViewer.searchPlaceholder')}
             autoFocus
             className="flex-1 text-xs bg-transparent outline-none"
             style={{ color: 'hsl(210 40% 98%)' }}
@@ -187,8 +189,8 @@ export default function PdfViewerPage() {
             <Document
               file={pdfUrl}
               onLoadSuccess={handleDocLoad}
-              loading={<div className="p-8 opacity-40">Loading PDF...</div>}
-              error={<div className="p-8 opacity-40">Failed to load PDF</div>}
+              loading={<div className="p-8 opacity-40">{t('pdfViewer.loadingPdf')}</div>}
+              error={<div className="p-8 opacity-40">{t('pdfViewer.failedToLoadPdf')}</div>}
             >
               <Page
                 pageNumber={currentPage}
@@ -209,10 +211,10 @@ export default function PdfViewerPage() {
              style={{ borderColor: 'hsl(217 33% 17%)', backgroundColor: 'hsl(222 47% 8%)' }}>
           <div className="px-3 py-2 border-b text-xs font-medium uppercase tracking-wider opacity-40"
                style={{ borderColor: 'hsl(217 33% 17%)' }}>
-            Page Chunks ({pageChunks.length})
+            {t('pdfViewer.pageChunks', { count: pageChunks.length })}
           </div>
           {pageChunks.length === 0 ? (
-            <div className="p-4 text-xs opacity-30 text-center">No chunks on this page</div>
+            <div className="p-4 text-xs opacity-30 text-center">{t('pdfViewer.noChunks')}</div>
           ) : (
             <div className="py-1">
               {pageChunks.map((chunk, i) => {

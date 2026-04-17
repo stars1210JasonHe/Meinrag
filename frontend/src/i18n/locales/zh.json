@@ -1,0 +1,151 @@
+{
+  "common": {
+    "cancel": "取消",
+    "confirm": "确认",
+    "delete": "删除",
+    "loading": "加载中...",
+    "save": "保存",
+    "close": "关闭",
+    "error": "错误",
+    "retry": "重试",
+    "download": "下载",
+    "clear": "清除",
+    "all": "全部",
+    "unknown": "未知",
+    "empty": "（空）"
+  },
+  "nav": {
+    "dashboard": "仪表板",
+    "chat": "聊天",
+    "graph": "图谱",
+    "pdfViewer": "PDF 查看器"
+  },
+  "dashboard": {
+    "searchPlaceholder": "搜索文档...",
+    "hideDomains": "隐藏领域",
+    "showDomains": "显示领域",
+    "toggleFilters": "切换筛选",
+    "chatAboutCollection": "讨论此合集",
+    "domains": "领域",
+    "noCollections": "暂无合集",
+    "uploadFirst": "上传您的第一个文档",
+    "uploadFirstHint": "开始构建您的知识图谱",
+    "upload": "上传",
+    "uploading": "上传中...",
+    "noMatch": "没有匹配的文档",
+    "viewPdf": "查看 PDF",
+    "openInPdf": "在 PDF 中打开",
+    "viewInGraph": "在图谱中查看",
+    "chatAboutThis": "讨论此文档",
+    "filterByThis": "按此筛选",
+    "panelSearching": "文档（显示 {{shown}} / {{total}} 条匹配）",
+    "panelDomain": "\"{{domain}}\" 中的文档（{{shown}}）",
+    "panelDefault": "文档（显示 {{shown}} / {{total}}）",
+    "thisDocument": "此文档"
+  },
+  "chat": {
+    "newChat": "新对话",
+    "noSessionsYet": "暂无会话",
+    "chatHistory": "聊天记录",
+    "hideSources": "隐藏来源",
+    "showSources": "显示来源",
+    "stopGeneration": "停止生成",
+    "stopped": "_已停止_",
+    "askPlaceholder": "向您的文档提问…",
+    "askEmpty": "向您的文档提问",
+    "sourcesWithCount": "来源（{{count}}）",
+    "sourcesLabel": "来源",
+    "searchingIn": "搜索范围：",
+    "backendError": "后端错误：{{message}}",
+    "inlineError": "错误：{{message}}",
+    "requestFailed": "请求失败：{{message}}",
+    "responseFailed": "获取响应失败：{{message}}"
+  },
+  "inputBar": {
+    "askCollection": "在 {{collection}} 文档中提问...",
+    "askDocument": "对此文档提问...",
+    "askQuestion": "提出问题...",
+    "filteredDocument": "已筛选文档",
+    "clearFilter": "清除筛选",
+    "webSearch": "在网络而非文档中搜索"
+  },
+  "sourceViewer": {
+    "sources": "来源",
+    "image": "图片",
+    "failedToLoadPdf": "无法加载 PDF",
+    "noContent": "暂无内容"
+  },
+  "pdfViewer": {
+    "selectFromDashboard": "请从仪表板选择一个文档",
+    "loadingPdf": "正在加载 PDF...",
+    "failedToLoadPdf": "无法加载 PDF",
+    "searchPlaceholder": "在 PDF 中搜索...",
+    "pageChunks": "页面块（{{count}}）",
+    "noChunks": "此页面没有块"
+  },
+  "graph": {
+    "allDocuments": "所有文档",
+    "collections": "合集",
+    "documents": "文档",
+    "loadingGraph": "正在加载图谱...",
+    "noGraphData": "暂无图谱数据。请选择或上传文档。",
+    "exploreChunks": "探索块",
+    "viewNeighbors": "查看邻居",
+    "askAboutThis": "就此提问",
+    "page": "第 {{num}} 页"
+  },
+  "nodeType": {
+    "text": "文本",
+    "table": "表格",
+    "image": "图片",
+    "formula": "公式"
+  },
+  "edgeType": {
+    "follows": "顺序",
+    "co_located": "同位",
+    "describes": "描述",
+    "references": "引用",
+    "similar_to": "相似"
+  },
+  "sourceCitation": {
+    "table": "表格",
+    "image": "图片",
+    "extractedImage": "从文档中提取",
+    "tldr": "简要：",
+    "askSource": "就此来源提问",
+    "copy": "复制来源文字",
+    "copied": "已复制！",
+    "copiedShort": "已复制",
+    "quote": "引用至输入",
+    "downloadFile": "下载文件",
+    "askSourcePlaceholder": "就此来源提问...",
+    "ask": "提问"
+  },
+  "citation": {
+    "source": "来源 [{{num}}]"
+  },
+  "confidence": {
+    "high": "高置信度",
+    "moderate": "中等置信度",
+    "low": "低置信度"
+  },
+  "queryType": {
+    "fact": "事实",
+    "overview": "概述",
+    "reference": "引用",
+    "exploratory": "探索"
+  },
+  "confirm": {
+    "deleteDocumentTitle": "删除文档？",
+    "deleteDocumentMessage": "确定要删除 \"{{filename}}\" 吗？此操作无法撤销。"
+  },
+  "toasts": {
+    "documentDeleted": "文档已删除",
+    "deleteFailed": "删除失败：{{message}}",
+    "uploadingFile": "正在上传 {{filename}}...",
+    "uploadSuccess": "{{filename}} 上传成功（{{chunks}} 个块）",
+    "uploadFailed": "上传失败：{{message}}",
+    "uploadFailedStatus": "上传失败（{{status}}）",
+    "unknownError": "未知错误"
+  }
+}

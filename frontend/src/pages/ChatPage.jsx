@@ -4,6 +4,7 @@ import { Send, FileText, Loader2, X, History, Plus, Square } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useQuery } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { fetchSessions, fetchSessionMessages } from '@/lib/api'
@@ -71,6 +72,7 @@ function makeMarkdownComponents(onCitationClick) {
 // ── Main ChatPage ───────────────────────────────────────────────────────────
 
 export default function ChatPage() {
+  const { t } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
   const scopeDocId = searchParams.get('doc')
   const scopeDocName = searchParams.get('name') || scopeDocId
@@ -267,8 +269,8 @@ export default function ChatPage() {
             setQueryTypes(data.types)
             if (data.confidence_tier) setConfidenceTier(data.confidence_tier)
           } else if (data.error) {
-            toast.error(`Backend error: ${data.error}`)
-            updateAi(msg => ({ ...msg, content: `Error: ${data.error}`, loading: false }))
+            toast.error(t('chat.backendError', { message: data.error }))
+            updateAi(msg => ({ ...msg, content: t('chat.inlineError', { message: data.error }), loading: false }))
           }
           // data.done — nothing extra needed
         }
@@ -280,14 +282,14 @@ export default function ChatPage() {
       if (err.name === 'AbortError') {
         updateAi(msg => ({
           ...msg,
-          content: msg.content || '_Stopped_',
+          content: msg.content || t('chat.stopped'),
           loading: false,
         }))
       } else {
-        toast.error(`Request failed: ${err.message}`)
+        toast.error(t('chat.requestFailed', { message: err.message }))
         updateAi(() => ({
           role: 'ai',
-          content: `Failed to get response: ${err.message}`,
+          content: t('chat.responseFailed', { message: err.message }),
           loading: false,
         }))
       }
@@ -355,12 +357,12 @@ export default function ChatPage() {
               className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-xs"
               style={{ backgroundColor: 'hsl(250 80% 65%)', color: '#fff' }}
             >
-              <Plus size={14} /> New Chat
+              <Plus size={14} /> {t('chat.newChat')}
             </button>
           </div>
           <div className="flex-1 overflow-auto py-1">
             {sessions.length === 0 ? (
-              <p className="px-3 py-4 text-xs opacity-30 text-center">No sessions yet</p>
+              <p className="px-3 py-4 text-xs opacity-30 text-center">{t('chat.noSessionsYet')}</p>
             ) : (
               sessions.map(s => (
                 <button
@@ -372,7 +374,7 @@ export default function ChatPage() {
                   )}
                   style={{ color: 'hsl(210 40% 98%)' }}
                 >
-                  <div className="truncate">{s.preview || '(empty)'}</div>
+                  <div className="truncate">{s.preview || t('common.empty')}</div>
                   <div className="opacity-30 mt-0.5">
                     {new Date(s.last_access).toLocaleDateString()}
                   </div>
@@ -390,7 +392,7 @@ export default function ChatPage() {
           {messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full opacity-40">
               <FileText size={48} className="mb-4" />
-              <p className="text-lg">Ask anything about your documents</p>
+              <p className="text-lg">{t('chat.askEmpty')}</p>
             </div>
           ) : (
             <div className="max-w-3xl mx-auto space-y-4">
@@ -426,7 +428,7 @@ export default function ChatPage() {
                           </ReactMarkdown>
                           {isLastAi && sources.length > 0 && (
                             <div className="flex items-center gap-1 mt-2 pt-2 border-t border-white/10 flex-wrap">
-                              <span className="text-[11px] opacity-40 mr-1">Sources</span>
+                              <span className="text-[11px] opacity-40 mr-1">{t('chat.sourcesLabel')}</span>
                               {sources.map((_, idx) => (
                                 <CitationBadge key={idx} num={idx + 1} onClick={(i) => {
                                   setSelectedSource(i)
@@ -460,7 +462,7 @@ export default function ChatPage() {
             <div className="max-w-3xl mx-auto mb-2 flex items-center gap-2 text-xs"
                  style={{ color: 'hsl(215 20% 65%)' }}>
               <FileText size={12} />
-              <span>Searching in: <strong style={{ color: 'hsl(210 40% 98%)' }}>
+              <span>{t('chat.searchingIn')} <strong style={{ color: 'hsl(210 40% 98%)' }}>
                 {scopeDocId ? scopeDocName : scopeCollection}
               </strong></span>
               <button onClick={clearScope} className="opacity-40 hover:opacity-100"><X size={12} /></button>
@@ -473,7 +475,7 @@ export default function ChatPage() {
                 'p-2.5 rounded-lg transition-opacity',
                 showHistory ? 'opacity-100' : 'opacity-40 hover:opacity-100'
               )}
-              title="Chat history"
+              title={t('chat.chatHistory')}
               style={{ color: 'hsl(210 40% 98%)' }}
             >
               <History size={16} />
@@ -485,7 +487,7 @@ export default function ChatPage() {
                   'p-2.5 rounded-lg transition-opacity',
                   showSources ? 'opacity-100' : 'opacity-40 hover:opacity-100'
                 )}
-                title={showSources ? 'Hide sources' : 'Show sources'}
+                title={showSources ? t('chat.hideSources') : t('chat.showSources')}
                 style={{ color: 'hsl(210 40% 98%)' }}
               >
                 <FileText size={16} />
@@ -497,7 +499,7 @@ export default function ChatPage() {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Ask anything about your documents…"
+              placeholder={t('chat.askPlaceholder')}
               disabled={loading}
               className="flex-1 px-4 py-2.5 rounded-lg text-sm outline-none disabled:opacity-50"
               style={{
@@ -514,7 +516,7 @@ export default function ChatPage() {
                   backgroundColor: 'hsl(0 84% 60%)',
                   color: 'hsl(210 40% 98%)',
                 }}
-                title="Stop generation"
+                title={t('chat.stopGeneration')}
               >
                 <Square size={16} fill="currentColor" />
               </button>
@@ -555,11 +557,11 @@ export default function ChatPage() {
                 className="px-3 py-2.5 border-b text-xs font-medium uppercase tracking-wider opacity-40 shrink-0"
                 style={{ borderColor: 'hsl(217 33% 17%)' }}
               >
-                Sources ({sources.length})
+                {t('chat.sourcesWithCount', { count: sources.length })}
               </div>
               <div className="flex-1 overflow-y-auto py-1">
                 {sources.map((s, i) => (
-                  <SourceItem key={i} source={s} index={i} onClick={setSelectedSource} />
+                  <SourceItem key={i} source={s} index={i} isActive={i === selectedSource} onClick={setSelectedSource} />
                 ))}
               </div>
             </>
