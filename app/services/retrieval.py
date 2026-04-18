@@ -306,7 +306,9 @@ async def _apply_composite_scoring(
             edge_type_weights.get(rel, 1.0) * count
             for rel, count in rel_counts.items()
         )
-        graph_score = min(weighted_edge_sum / norm_factor, 1.0)
+        # Michaelis-Menten saturation: never hits 1.0, always differentiates.
+        # norm_factor is the "half-saturation point" — at norm_factor edges, score=0.5
+        graph_score = weighted_edge_sum / (weighted_edge_sum + norm_factor) if weighted_edge_sum > 0 else 0.0
         # placeholder: recency/authority weights are 0.0 in query_types.json until signals are implemented
         recency = 1.0
         authority = 1.0
@@ -316,14 +318,39 @@ async def _apply_composite_scoring(
     return rescored
 
 
-def _normalize_scores(retrieved: list[tuple]) -> list[tuple]:
-    """Normalize scores to 0-100 range for frontend display."""
+def _normalize_scores(retrieved: list[tuple], profile=None) -> list[tuple]:
+    """Normalize composite scores to 0-100 range for frontend display.
+
+    Three modes via profile.normalization:
+      - "absolute" (default): score * 100, clamped to [0, 100]. Honest: a weak
+        query shows low percentages; top is not artificially pinned to 100.
+      - "tanh": tanh(k*p) / tanh(k) * 100. Smooth S-curve with steepness k.
+      - "max_scale": legacy. Top score divided by max → always 100 at top.
+    """
     if not retrieved:
         return retrieved
-    max_score = max(score for _, score in retrieved)
-    if max_score <= 0:
-        return retrieved
-    return [(doc, round(score / max_score * 100, 1)) for doc, score in retrieved]
+
+    mode = getattr(profile, "normalization", "absolute") if profile else "absolute"
+
+    if mode == "tanh":
+        import math
+        k = getattr(profile, "normalization_k", 1.5)
+        denom = math.tanh(k)
+        if denom <= 0:
+            return retrieved
+        return [
+            (doc, round(math.tanh(k * max(0.0, score)) / denom * 100, 1))
+            for doc, score in retrieved
+        ]
+
+    if mode == "max_scale":
+        max_score = max(score for _, score in retrieved)
+        if max_score <= 0:
+            return retrieved
+        return [(doc, round(score / max_score * 100, 1)) for doc, score in retrieved]
+
+    # Default: absolute — just score * 100, no hidden rescaling
+    return [(doc, round(max(0.0, min(1.0, score)) * 100, 1)) for doc, score in retrieved]
 
 
 def _compute_confidence_tier(retrieved: list[tuple], profile) -> str:
@@ -422,13 +449,17 @@ async def _rerank_results(
             key = (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index"))
             score_map[key] = score
 
+        # Use reranker output for ORDERING only; preserve original FAISS similarity
+        # as the score value. Reranker scores (e.g. FlashRank) cluster near 1.0 for
+        # any query, which would destroy the signal that separates good from weak
+        # matches in the final composite display.
         reranked = []
         for cdoc in compressed:
             key = (cdoc.metadata.get("doc_id"), cdoc.metadata.get("chunk_index"))
-            rerank_score = cdoc.metadata.get("relevance_score", score_map.get(key, 0.0))
-            reranked.append((cdoc, rerank_score))
+            original_score = score_map.get(key, 0.0)
+            reranked.append((cdoc, original_score))
 
-        logger.info("Reranked %d → %d results", len(retrieved), len(reranked))
+        logger.info("Reranked %d → %d results (reordered, original scores preserved)", len(retrieved), len(reranked))
         return reranked if reranked else retrieved
     except Exception as e:
         logger.warning("Reranking failed, using original order: %s", e)
@@ -845,7 +876,7 @@ async def retrieve_and_rank(
 
     # 12. Sort + normalize
     retrieved.sort(key=lambda x: x[1], reverse=True)
-    retrieved = _normalize_scores(retrieved)
+    retrieved = _normalize_scores(retrieved, profile)
 
     # 12. Prepend label chunks
     if label_chunks:

@@ -36,6 +36,28 @@ class TestProfileLoading:
         with pytest.raises(AttributeError):
             profile.name = "hacked"
 
+    def test_normalization_field_parsed(self):
+        """Profiles declare their normalization mode — default ships with absolute."""
+        profile = load_scoring_profile("general")
+        assert profile.normalization == "absolute"
+        assert profile.normalization_k == pytest.approx(1.5)  # default k (only used in tanh mode)
+
+    def test_normalization_defaults_when_missing(self):
+        """A profile with no normalization field now defaults to absolute."""
+        from app.services.scoring_profile import _build_profile
+        profile = _build_profile({"name": "minimal"})
+        assert profile.normalization == "absolute"
+
+    def test_normalization_custom_k(self):
+        """Profile can override the k parameter (tanh mode)."""
+        profile = _build_profile({
+            "name": "custom",
+            "normalization": "tanh",
+            "normalization_k": 2.5,
+        })
+        assert profile.normalization == "tanh"
+        assert profile.normalization_k == pytest.approx(2.5)
+
 
 # ---------------------------------------------------------------------------
 # Override resolution: defaults < profile < query_type

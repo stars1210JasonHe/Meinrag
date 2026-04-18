@@ -80,6 +80,7 @@ class ScoringProfile:
     _defaults: dict
     _overrides: dict  # {query_type: {partial overrides}}
     normalization: str
+    normalization_k: float  # steepness parameter for tanh normalization (ignored for max_scale)
     confidence_high: float
     confidence_moderate: float
 
@@ -163,7 +164,8 @@ def _build_profile(data: dict) -> ScoringProfile:
         description=data.get("description", ""),
         _defaults=defaults,
         _overrides=data.get("query_type_overrides", {}),
-        normalization=data.get("normalization", "max_scale"),
+        normalization=data.get("normalization", "absolute"),
+        normalization_k=data.get("normalization_k", 1.5),
         confidence_high=tiers.get("high", _DEFAULT_CONFIDENCE["high"]),
         confidence_moderate=tiers.get("moderate", _DEFAULT_CONFIDENCE["moderate"]),
     )

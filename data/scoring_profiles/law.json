@@ -57,5 +57,5 @@
       }
     }
   },
-  "normalization": "max_scale"
+  "normalization": "absolute"
 }

@@ -115,56 +115,152 @@ class TestMergeDualResults:
 # 2. _normalize_scores
 # ---------------------------------------------------------------------------
 
-class TestNormalizeScores:
-    def test_normalizes_max_to_100(self):
-        """Highest score should become exactly 100."""
+class TestNormalizeScoresAbsolute:
+    """Default mode: score * 100. Honest — top not pinned to 100."""
+
+    def test_score_multiplied_by_100(self):
+        """Display = raw * 100, preserved as-is."""
         results = [
             (_doc(chunk_index=0), 0.8),
             (_doc(chunk_index=1), 0.4),
             (_doc(chunk_index=2), 0.6),
         ]
         normed = _normalize_scores(results)
-        scores = [s for _, s in normed]
-        assert max(scores) == pytest.approx(100.0)
+        score_map = {doc.metadata["chunk_index"]: s for doc, s in normed}
+        assert score_map[0] == pytest.approx(80.0)
+        assert score_map[1] == pytest.approx(40.0)
+        assert score_map[2] == pytest.approx(60.0)
 
-    def test_proportional_scaling(self):
-        """Scores should scale proportionally relative to the max."""
-        results = [
-            (_doc(chunk_index=0), 1.0),
-            (_doc(chunk_index=1), 0.5),
-        ]
+    def test_perfect_score_hits_100(self):
+        """Raw 1.0 → exactly 100."""
+        results = [(_doc(), 1.0)]
         normed = _normalize_scores(results)
-        score_map = {doc.metadata["chunk_index"]: score for doc, score in normed}
-        assert score_map[0] == pytest.approx(100.0)
-        assert score_map[1] == pytest.approx(50.0)
+        assert normed[0][1] == pytest.approx(100.0)
+
+    def test_top_not_always_100(self):
+        """A mediocre top stays mediocre — no max-scale trick."""
+        results = [(_doc(), 0.73)]
+        normed = _normalize_scores(results)
+        assert normed[0][1] == pytest.approx(73.0)
 
     def test_empty(self):
         assert _normalize_scores([]) == []
 
     def test_all_zero(self):
-        """When all scores are zero, return unchanged (no division)."""
         results = [
             (_doc(chunk_index=0), 0.0),
             (_doc(chunk_index=1), 0.0),
         ]
         normed = _normalize_scores(results)
-        # max_score <= 0 path: return unchanged
         assert [s for _, s in normed] == [0.0, 0.0]
 
-    def test_single_item(self):
-        results = [(_doc(), 0.73)]
+    def test_negative_clamped_to_zero(self):
+        """Rare negative composite scores → display 0, not negative percent."""
+        results = [(_doc(), -0.1)]
+        normed = _normalize_scores(results)
+        assert normed[0][1] == pytest.approx(0.0)
+
+    def test_above_one_clamped_to_100(self):
+        """Score > 1.0 (shouldn't happen but defensive) → 100."""
+        results = [(_doc(), 1.5)]
         normed = _normalize_scores(results)
         assert normed[0][1] == pytest.approx(100.0)
 
-    def test_scores_rounded_to_one_decimal(self):
+
+class TestNormalizeScoresMaxScale:
+    """Legacy mode: divide by max, top always = 100. Kept for rollback."""
+
+    class _Profile:
+        normalization = "max_scale"
+        normalization_k = 1.5
+
+    def test_normalizes_max_to_100(self):
         results = [
-            (_doc(chunk_index=0), 0.3),
-            (_doc(chunk_index=1), 0.7),
+            (_doc(chunk_index=0), 0.8),
+            (_doc(chunk_index=1), 0.4),
+            (_doc(chunk_index=2), 0.6),
         ]
-        normed = _normalize_scores(results)
-        for _, s in normed:
-            # round() to 1dp means at most one digit after decimal point
-            assert s == round(s, 1)
+        normed = _normalize_scores(results, self._Profile())
+        assert max(s for _, s in normed) == pytest.approx(100.0)
+
+    def test_proportional_scaling(self):
+        results = [
+            (_doc(chunk_index=0), 1.0),
+            (_doc(chunk_index=1), 0.5),
+        ]
+        normed = _normalize_scores(results, self._Profile())
+        score_map = {doc.metadata["chunk_index"]: s for doc, s in normed}
+        assert score_map[0] == pytest.approx(100.0)
+        assert score_map[1] == pytest.approx(50.0)
+
+    def test_all_zero_unchanged(self):
+        results = [(_doc(chunk_index=0), 0.0), (_doc(chunk_index=1), 0.0)]
+        normed = _normalize_scores(results, self._Profile())
+        assert [s for _, s in normed] == [0.0, 0.0]
+
+
+class TestNormalizeScoresTanh:
+    """Tanh normalization: absolute, honest, no relative-max trick."""
+
+    class _MockProfile:
+        normalization = "tanh"
+        normalization_k = 1.5
+
+    def test_monotonic(self):
+        """Higher raw score → higher display score."""
+        results = [
+            (_doc(chunk_index=0), 0.25),
+            (_doc(chunk_index=1), 0.50),
+            (_doc(chunk_index=2), 0.85),
+        ]
+        normed = _normalize_scores(results, self._MockProfile())
+        score_map = {doc.metadata["chunk_index"]: s for doc, s in normed}
+        assert score_map[0] < score_map[1] < score_map[2]
+
+    def test_no_relative_max_trick(self):
+        """Top result should NOT always be 100 — a weak query stays weak."""
+        weak_results = [
+            (_doc(chunk_index=0), 0.25),
+            (_doc(chunk_index=1), 0.20),
+            (_doc(chunk_index=2), 0.15),
+        ]
+        normed = _normalize_scores(weak_results, self._MockProfile())
+        top = max(s for _, s in normed)
+        # With tanh(k=1.5), raw 0.25 → ~30%, definitely not 100
+        assert top < 50.0, f"Weak top should stay weak, got {top}"
+
+    def test_perfect_score_hits_100(self):
+        """Raw 1.0 → exactly 100 (by construction: tanh(k)/tanh(k) = 1)."""
+        results = [(_doc(), 1.0)]
+        normed = _normalize_scores(results, self._MockProfile())
+        assert normed[0][1] == pytest.approx(100.0)
+
+    def test_known_values(self):
+        """Sanity check against computed tanh values (k=1.5)."""
+        import math
+        k = 1.5
+        denom = math.tanh(k)
+        results = [
+            (_doc(chunk_index=0), 0.50),
+            (_doc(chunk_index=1), 0.85),
+        ]
+        normed = _normalize_scores(results, self._MockProfile())
+        score_map = {doc.metadata["chunk_index"]: s for doc, s in normed}
+        expected_50 = round(math.tanh(k * 0.50) / denom * 100, 1)
+        expected_85 = round(math.tanh(k * 0.85) / denom * 100, 1)
+        assert score_map[0] == pytest.approx(expected_50)
+        assert score_map[1] == pytest.approx(expected_85)
+        # The two must differ — subtle gap preserved
+        assert score_map[0] != score_map[1]
+
+    def test_empty(self):
+        assert _normalize_scores([], self._MockProfile()) == []
+
+    def test_negative_raw_clamped_to_zero(self):
+        """Graph expansion can produce slightly negative composite scores; clamp to 0."""
+        results = [(_doc(), -0.1)]
+        normed = _normalize_scores(results, self._MockProfile())
+        assert normed[0][1] == pytest.approx(0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -456,16 +552,36 @@ class TestCompositeScoring:
         assert score_map[0] > score_map[1]
 
     @pytest.mark.asyncio
-    async def test_graph_score_capped_at_1(self):
-        """Edge count > normalization_factor should still cap graph_score at 1.0."""
+    async def test_graph_score_soft_saturation(self):
+        """Graph score uses Michaelis-Menten: x / (x + norm_factor), never hits 1.0."""
         doc = _doc(doc_id="d1", chunk_index=0)
         edge_repo = FakeEdgeRepo({("d1", 0): 999})
         settings = FakeSettings()
         scoring = _general_scoring()
         result = await _apply_composite_scoring([(doc, 0.5)], edge_repo, "fact", settings, scoring)
         _, score = result[0]
-        # With fact weights [0.85, 0.15, 0.0, 0.0]: 0.85*0.5 + 0.15*1.0 + 0.0*1.0 + 0.0*1.0
-        assert score == pytest.approx(0.85 * 0.5 + 0.15 * 1.0 + 0.0 * 1.0 + 0.0 * 1.0)
+        # 999 edges, norm_factor=10: graph_score = 999/(999+10) = 0.9901
+        # Composite = 0.85*0.5 + 0.15*0.9901 = 0.425 + 0.1485 = 0.5735
+        expected_graph = 999 / (999 + 10)
+        assert score == pytest.approx(0.85 * 0.5 + 0.15 * expected_graph)
+        # Graph contribution is below the naive 0.15 ceiling
+        assert score < 0.85 * 0.5 + 0.15 * 1.0
+
+    @pytest.mark.asyncio
+    async def test_graph_score_discriminates(self):
+        """Different edge counts give different graph scores (no saturation)."""
+        docA = _doc(doc_id="d1", chunk_index=0, content="low edges")
+        docB = _doc(doc_id="d1", chunk_index=1, content="many edges")
+        edge_repo = FakeEdgeRepo({("d1", 0): 5, ("d1", 1): 50})
+        settings = FakeSettings()
+        scoring = _general_scoring()
+        result = await _apply_composite_scoring(
+            [(docA, 0.5), (docB, 0.5)], edge_repo, "fact", settings, scoring
+        )
+        score_map = {doc.metadata["chunk_index"]: s for doc, s in result}
+        # Before fix, both would saturate at graph=1.0 → identical scores.
+        # After fix, 50 edges gives higher graph score than 5.
+        assert score_map[1] > score_map[0]
 
     @pytest.mark.asyncio
     async def test_no_edge_repo(self):
@@ -500,7 +616,8 @@ class TestCompositeScoring:
     async def test_per_query_type_weights(self):
         """Different query types produce different scores for the same input."""
         doc = _doc(doc_id="d1", chunk_index=0)
-        edge_repo = FakeEdgeRepo({("d1", 0): 10})
+        # Use 30 edges so graph_score = 30/40 = 0.75, distinct from similarity
+        edge_repo = FakeEdgeRepo({("d1", 0): 30})
         settings = FakeSettings()
         scoring = _general_scoring()
 
@@ -510,10 +627,11 @@ class TestCompositeScoring:
         _, fact_score = fact_result[0]
         _, overview_score = overview_result[0]
         # fact weights: [0.85, 0.15, 0.0, 0.0]; overview: [0.6, 0.4, 0.0, 0.0]
-        # With similarity=0.5 and graph=1.0:
-        # fact:     0.85*0.5 + 0.15*1.0 + 0.0*1.0 + 0.0*1.0 = 0.575
-        # overview: 0.6*0.5 + 0.4*1.0 + 0.0*1.0 + 0.0*1.0 = 0.70
+        # With similarity=0.5, 30 edges → graph_score = 30/(30+10) = 0.75:
+        # fact:     0.85*0.5 + 0.15*0.75 = 0.425 + 0.1125 = 0.5375
+        # overview: 0.6*0.5 + 0.4*0.75 = 0.3 + 0.30 = 0.60
         assert fact_score != pytest.approx(overview_score)
+        assert overview_score > fact_score  # overview weights graph higher
 
 
 class TestRRFMerge:
