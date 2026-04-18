@@ -284,16 +284,34 @@ export default function GraphPage() {
     }
 
     // Node shape
-    ctx.beginPath()
     if (node._data?.node_type === 'document') {
-      const s = r * 1.2
-      ctx.roundRect?.(node.x - s, node.y - s, s * 2, s * 2, 2) ||
-        ctx.rect(node.x - s, node.y - s, s * 2, s * 2)
+      // Paper with folded top-right corner
+      const w = r * 2, h = r * 2.4
+      const fold = r * 0.6
+      const x = node.x, y = node.y
+      ctx.beginPath()
+      ctx.moveTo(x - w/2, y - h/2)
+      ctx.lineTo(x + w/2 - fold, y - h/2)
+      ctx.lineTo(x + w/2, y - h/2 + fold)
+      ctx.lineTo(x + w/2, y + h/2)
+      ctx.lineTo(x - w/2, y + h/2)
+      ctx.closePath()
+      ctx.fillStyle = node.color || '#6366f1'
+      ctx.fill()
+      // Folded corner triangle — darker inner shade
+      ctx.beginPath()
+      ctx.moveTo(x + w/2 - fold, y - h/2)
+      ctx.lineTo(x + w/2 - fold, y - h/2 + fold)
+      ctx.lineTo(x + w/2, y - h/2 + fold)
+      ctx.closePath()
+      ctx.fillStyle = '#4f52c5'
+      ctx.fill()
     } else {
+      ctx.beginPath()
       ctx.arc(node.x, node.y, r, 0, Math.PI * 2)
+      ctx.fillStyle = node.color || '#6366f1'
+      ctx.fill()
     }
-    ctx.fillStyle = node.color || '#6366f1'
-    ctx.fill()
 
     // Border ring for selected
     if (selectedNode && node._data?.chunk_index === selectedNode.chunk_index && node._data?.doc_id === selectedNode.doc_id) {

@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import ForceGraph2D from 'react-force-graph-2d'
 import {
   Search, Upload, MoreVertical, Trash2, Download, RefreshCw,
-  FileText, X, MessageSquare, Filter, ChevronUp, ChevronDown, Menu, Network
+  FileText, X, MessageSquare, Filter, ChevronUp, ChevronDown, Network,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { fetchDocuments, fetchCollections, fetchGraphDocuments, deleteDocument } from '@/lib/api'
@@ -15,9 +15,49 @@ import ConfirmDialog from '@/components/ConfirmDialog'
 
 const USER_ID = 'admin'
 
-const NODE_COLORS = {
-  document: '#3b82f6',
-  collection: '#a855f7',
+// Shape colors — matched to GraphPage's document color + Windows-folder-yellow for domains
+const DOC_COLOR = '#6366f1'        // indigo (same as GraphPage's document node)
+const DOC_COLOR_DIM = '#4f52c5'
+const FOLDER_COLOR = '#f0b72a'     // warm yellow (Windows folder)
+const FOLDER_FILL = '#f0b72a22'    // translucent yellow fill
+const FOLDER_TAB_COLOR = '#c99018'
+
+// Graph node colors reading live from CSS vars (captured at paint time)
+function cssVar(name, fallback = '#5b7ec9') {
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+    return v || fallback
+  } catch { return fallback }
+}
+
+// Debounce hook — for search input
+function useDebounced(value, delay = 300) {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const h = setTimeout(() => setDebounced(value), delay)
+    return () => clearTimeout(h)
+  }, [value, delay])
+  return debounced
+}
+
+function relTime(iso) {
+  if (!iso) return '—'
+  const diff = Date.now() - new Date(iso).getTime()
+  const sec = Math.max(1, Math.floor(diff / 1000))
+  if (sec < 60) return `${sec}s`
+  const min = Math.floor(sec / 60)
+  if (min < 60) return `${min}m`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr}h`
+  const day = Math.floor(hr / 24)
+  if (day < 30) return `${day}d`
+  const mo = Math.floor(day / 30)
+  if (mo < 12) return `${mo}mo`
+  return `${Math.floor(mo / 12)}y`
+}
+
+function formatName(name) {
+  return String(name).split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
 }
 
 export default function DashboardPage() {
@@ -26,17 +66,21 @@ export default function DashboardPage() {
   const { t } = useTranslation()
   const graphRef = useRef(null)
   const containerRef = useRef(null)
-  const [search, setSearch] = useState('')
+
+  const [rawSearch, setRawSearch] = useState('')
+  const search = useDebounced(rawSearch, 300)
   const [activeFilters, setActiveFilters] = useState([])
   const [showFilters, setShowFilters] = useState(false)
   const [showPanel, setShowPanel] = useState(false)
   const [menuOpen, setMenuOpen] = useState(null)
   const [uploading, setUploading] = useState(false)
   const [hoverNode, setHoverNode] = useState(null)
+  const [highlightNodes, setHighlightNodes] = useState(new Set())
+  const [highlightLinks, setHighlightLinks] = useState(new Set())
   const [dimensions, setDimensions] = useState({ width: 800, height: 500 })
   const [selectedDomain, setSelectedDomain] = useState(null)
-  const [showDomains, setShowDomains] = useState(true)
   const [contextMenu, setContextMenu] = useState(null)
+  const [confirmDelete, setConfirmDelete] = useState(null)
 
   const { data: documentsData, isLoading } = useQuery({
     queryKey: ['documents', USER_ID],
@@ -56,18 +100,14 @@ export default function DashboardPage() {
 
   const deleteMutation = useMutation({
     mutationFn: (docId) => deleteDocument(docId, USER_ID),
-    onSuccess: (_, docId) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['documents', USER_ID] })
       queryClient.invalidateQueries({ queryKey: ['graph-documents', USER_ID] })
       queryClient.invalidateQueries({ queryKey: ['collections', USER_ID] })
       toast.success(t('toasts.documentDeleted'))
     },
-    onError: (err) => {
-      toast.error(t('toasts.deleteFailed', { message: err.message || t('toasts.unknownError') }))
-    },
+    onError: (err) => toast.error(t('toasts.deleteFailed', { message: err.message || t('toasts.unknownError') })),
   })
-
-  const [confirmDelete, setConfirmDelete] = useState(null)
 
   // Measure container for graph sizing
   useEffect(() => {
@@ -80,13 +120,9 @@ export default function DashboardPage() {
     return () => observer.disconnect()
   }, [])
 
-  // Sync selectedDomain → activeFilters
+  // Sync domain → filter
   useEffect(() => {
-    if (selectedDomain) {
-      setActiveFilters([selectedDomain])
-    } else {
-      setActiveFilters([])
-    }
+    setActiveFilters(selectedDomain ? [selectedDomain] : [])
   }, [selectedDomain])
 
   const availableTags = useMemo(() => {
@@ -97,19 +133,14 @@ export default function DashboardPage() {
     return [...tags].sort()
   }, [collectionsData])
 
-  const formatName = (name) => name.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
-
-  // Collections list with per-collection document counts
   const collectionList = useMemo(() => {
-    const docs = Array.isArray(documents) ? documents : []
-    const collections = collectionsData?.existing_collections || []
-    return collections.map(col => ({
+    const cols = collectionsData?.existing_collections || []
+    return cols.map(col => ({
       name: col,
-      count: docs.filter(d => d.collections?.includes(col)).length,
+      count: documents.filter(d => d.collections?.includes(col)).length,
     })).sort((a, b) => b.count - a.count)
   }, [documents, collectionsData])
 
-  // Filter documents
   const filtered = useMemo(() => {
     let docs = Array.isArray(documents) ? documents : []
     if (search) {
@@ -120,35 +151,24 @@ export default function DashboardPage() {
       )
     }
     if (activeFilters.length > 0) {
-      docs = docs.filter(d =>
-        activeFilters.some(f => d.collections?.includes(f))
-      )
+      docs = docs.filter(d => activeFilters.some(f => d.collections?.includes(f)))
     }
     return docs
   }, [documents, search, activeFilters])
 
-  // Displayed docs in the bottom panel:
-  // - collection selected → only that collection's docs
-  // - searching → matching results, max 50
-  // - neither → most recent 20
   const displayedDocs = useMemo(() => {
     const allDocs = Array.isArray(documents) ? documents : []
-    if (search) {
-      return filtered.slice(0, 50)
-    }
-    if (selectedDomain) {
-      return filtered
-    }
-    // Most recent 20 by upload date (or doc_id order as fallback)
+    if (search) return filtered.slice(0, 50)
+    if (selectedDomain) return filtered
     const sorted = [...allDocs].sort((a, b) => {
-      const da = a.created_at || a.upload_date || ''
-      const db = b.created_at || b.upload_date || ''
+      const da = a.uploaded_at || a.created_at || ''
+      const db = b.uploaded_at || b.created_at || ''
       return db.localeCompare(da)
     })
     return sorted.slice(0, 20)
   }, [documents, filtered, search, selectedDomain])
 
-  // Build graph data: document nodes + collection virtual nodes + links
+  // Build graph data
   const graphData = useMemo(() => {
     const docs = Array.isArray(documents) ? documents : []
     if (docs.length === 0) return { nodes: [], links: [] }
@@ -159,23 +179,30 @@ export default function DashboardPage() {
     const searchLower = search.toLowerCase()
     const filteredIds = new Set(filtered.map(d => d.doc_id))
 
+    // Collect counts to size collection nodes
+    const collectionCounts = {}
+
     for (const d of docs) {
       const matchesSearch = !search ||
         d.filename?.toLowerCase().includes(searchLower) ||
         d.collections?.some(c => c.toLowerCase().includes(searchLower))
       const matchesFilter = activeFilters.length === 0 || filteredIds.has(d.doc_id)
 
+      // Size documents by chunk count: sqrt scale to avoid huge outliers
+      const chunkSize = Math.max(1, Math.sqrt(d.chunk_count || 1))
+
       nodes.push({
         id: `doc:${d.doc_id}`,
         label: d.filename?.replace(/\.[^.]+$/, '').slice(0, 30) || d.doc_id,
-        color: NODE_COLORS.document,
-        val: 4,
+        val: 2 + chunkSize * 0.8,
         _type: 'document',
         _data: d,
+        _chunks: d.chunk_count || 0,
         _dimmed: (search && !matchesSearch) || (activeFilters.length > 0 && !matchesFilter),
       })
 
       for (const c of (d.collections || [])) {
+        collectionCounts[c] = (collectionCounts[c] || 0) + 1
         collectionSet.add(c)
         links.push({ source: `col:${c}`, target: `doc:${d.doc_id}`, _type: 'belongs_to' })
       }
@@ -184,17 +211,18 @@ export default function DashboardPage() {
     for (const c of collectionSet) {
       const matchesSearch = !search || c.toLowerCase().includes(searchLower)
       const matchesFilter = activeFilters.length === 0 || activeFilters.includes(c)
+      const count = collectionCounts[c] || 0
+      // Size collections by member count
       nodes.push({
         id: `col:${c}`,
-        label: c,
-        color: NODE_COLORS.collection,
-        val: 6,
+        label: formatName(c),
+        val: 4 + Math.sqrt(count) * 1.2,
         _type: 'collection',
+        _count: count,
         _dimmed: (search && !matchesSearch) || (activeFilters.length > 0 && !matchesFilter),
       })
     }
 
-    // Cross-doc similar_to edges from API
     if (graphEdges?.edges) {
       for (const e of graphEdges.edges) {
         links.push({
@@ -205,68 +233,159 @@ export default function DashboardPage() {
       }
     }
 
-    // Only keep links where both endpoints exist
     const nodeIds = new Set(nodes.map(n => n.id))
     const validLinks = links.filter(l => nodeIds.has(l.source) && nodeIds.has(l.target))
 
-    return {
-      nodes: nodes.map(n => ({ ...n })),
-      links: validLinks.map(l => ({ ...l })),
-    }
+    return { nodes: nodes.map(n => ({ ...n })), links: validLinks.map(l => ({ ...l })) }
   }, [documents, filtered, search, activeFilters, graphEdges])
 
-  // Custom node canvas paint
-  const paintNode = useCallback((node, ctx) => {
-    const r = Math.sqrt(node.val || 3) * 1.8
-    const dimmed = node._dimmed && !hoverNode
-    ctx.globalAlpha = dimmed ? 0.2 : 1.0
+  // Tune force simulation — cleaner layout when collections >> documents
+  useEffect(() => {
+    const g = graphRef.current
+    if (!g || !g.d3Force) return
+    try {
+      const charge = g.d3Force('charge')
+      if (charge?.strength) charge.strength(n => n._type === 'collection' ? -260 : -90)
+      const link = g.d3Force('link')
+      if (link?.distance) link.distance(l => l._type === 'similar_to' ? 80 : 35)
+      if (link?.strength) link.strength(0.7)
+      const collide = g.d3Force('collide')
+      if (collide?.radius) collide.radius(n => Math.sqrt(n.val || 3) * 2.2 + 6)
+      if (g.d3ReheatSimulation) g.d3ReheatSimulation()
+    } catch (e) {
+      console.warn('[Dashboard] force tune failed:', e)
+    }
+  }, [graphData])
 
-    // Glow on hover
-    if (hoverNode?.id === node.id) {
+  // Custom node paint — file/folder shapes w/ hover highlight
+  const paintNode = useCallback((node, ctx) => {
+    // Guard: simulation may not have set coordinates yet
+    if (typeof node.x !== 'number' || typeof node.y !== 'number' ||
+        !isFinite(node.x) || !isFinite(node.y)) return
+
+    const s = Math.max(3, Math.sqrt(node.val || 3) * 2.2)  // size baseline
+    const hovered = hoverNode?.id === node.id
+    const active = hoverNode != null
+    // Dim unless highlighted (hover) or search/filter-matched
+    const isHighlighted = !active || highlightNodes.has(node.id)
+    const staticDimmed = node._dimmed && !active
+    const opacity = staticDimmed ? 0.18 : (isHighlighted ? 1.0 : 0.2)
+
+    const fg1 = cssVar('--fg-1', '#d4d0ca')
+    const fgDim = cssVar('--fg-dim', '#9a9690')
+    const fgFaint = cssVar('--fg-faint', '#5a564f')
+
+    ctx.globalAlpha = opacity
+
+    if (node._type === 'collection') {
+      // ==== FOLDER SHAPE ====
+      const w = s * 2.4, h = s * 1.9
+      const tabW = s * 0.9, tabH = s * 0.45
+      const x = node.x, y = node.y
+
+      // Hover glow
+      if (hovered) {
+        ctx.beginPath()
+        ctx.roundRect?.(x - w/2 - 3, y - h/2 - tabH - 3, w + 6, h + tabH + 6, 4) ||
+          ctx.rect(x - w/2 - 3, y - h/2 - tabH - 3, w + 6, h + tabH + 6)
+        ctx.fillStyle = FOLDER_COLOR + '33'
+        ctx.fill()
+      }
+
+      // Folder tab
       ctx.beginPath()
-      ctx.arc(node.x, node.y, r + 4, 0, Math.PI * 2)
-      ctx.fillStyle = node.color + '33'
+      ctx.moveTo(x - w/2, y - h/2)
+      ctx.lineTo(x - w/2 + tabW, y - h/2)
+      ctx.lineTo(x - w/2 + tabW + tabH * 0.6, y - h/2 + tabH)
+      ctx.lineTo(x + w/2, y - h/2 + tabH)
+      ctx.lineTo(x + w/2, y + h/2)
+      ctx.lineTo(x - w/2, y + h/2)
+      ctx.closePath()
+      ctx.fillStyle = FOLDER_COLOR
+      ctx.fill()
+      // Subtle top highlight
+      ctx.strokeStyle = FOLDER_TAB_COLOR
+      ctx.lineWidth = 0.8
+      ctx.stroke()
+
+    } else {
+      // ==== DOCUMENT (paper w/ folded corner) SHAPE ====
+      const w = s * 1.7, h = s * 2.1
+      const fold = s * 0.55
+      const x = node.x, y = node.y
+
+      // Hover glow
+      if (hovered) {
+        ctx.beginPath()
+        ctx.roundRect?.(x - w/2 - 3, y - h/2 - 3, w + 6, h + 6, 3) ||
+          ctx.rect(x - w/2 - 3, y - h/2 - 3, w + 6, h + 6)
+        ctx.fillStyle = DOC_COLOR + '33'
+        ctx.fill()
+      }
+
+      // Paper body (rectangle w/ top-right corner cut)
+      ctx.beginPath()
+      ctx.moveTo(x - w/2, y - h/2)
+      ctx.lineTo(x + w/2 - fold, y - h/2)
+      ctx.lineTo(x + w/2, y - h/2 + fold)
+      ctx.lineTo(x + w/2, y + h/2)
+      ctx.lineTo(x - w/2, y + h/2)
+      ctx.closePath()
+      ctx.fillStyle = DOC_COLOR
+      ctx.fill()
+
+      // Folded corner triangle (inner darker shade)
+      ctx.beginPath()
+      ctx.moveTo(x + w/2 - fold, y - h/2)
+      ctx.lineTo(x + w/2 - fold, y - h/2 + fold)
+      ctx.lineTo(x + w/2, y - h/2 + fold)
+      ctx.closePath()
+      ctx.fillStyle = DOC_COLOR_DIM
       ctx.fill()
     }
 
-    ctx.beginPath()
-    if (node._type === 'collection') {
-      // Diamond shape for collection nodes
-      ctx.moveTo(node.x, node.y - r)
-      ctx.lineTo(node.x + r, node.y)
-      ctx.lineTo(node.x, node.y + r)
-      ctx.lineTo(node.x - r, node.y)
-      ctx.closePath()
-    } else {
-      // Circle for document nodes
-      ctx.arc(node.x, node.y, r, 0, Math.PI * 2)
-    }
-    ctx.fillStyle = node.color
-    ctx.fill()
-
-    // Label below node
-    const fontSize = Math.max(3, r * 0.6)
-    ctx.font = `${fontSize}px sans-serif`
-    ctx.fillStyle = dimmed ? '#475569' : '#e2e8f0'
+    // Label
+    const fontSize = Math.max(4, s * 0.55)
+    const isCollection = node._type === 'collection'
+    ctx.font = `${isCollection ? '500' : '400'} ${fontSize}px 'IBM Plex Sans', sans-serif`
+    ctx.fillStyle = !isHighlighted ? fgFaint : (isCollection ? fg1 : fgDim)
     ctx.textAlign = 'center'
-    const label = node.label?.length > 25 ? node.label.slice(0, 22) + '..' : node.label
-    ctx.fillText(label || '', node.x, node.y + r + fontSize + 1)
+    ctx.textBaseline = 'top'
+    const label = node.label?.length > 28 ? node.label.slice(0, 25) + '…' : node.label
+    const labelY = node.y + (isCollection ? s * 1.9 / 2 : s * 2.1 / 2) + 4
+    ctx.fillText(label || '', node.x, labelY)
 
     ctx.globalAlpha = 1.0
-  }, [hoverNode])
+  }, [hoverNode, highlightNodes])
 
   const handleNodeClick = useCallback((node) => {
     if (node._type === 'document' && node._data?.doc_id) {
-      navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.filename || node._data.source_file || '')}`)
+      navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.filename || '')}`)
     } else if (node._type === 'collection') {
-      setSelectedDomain(prev => prev === node.label ? null : node.label)
+      setSelectedDomain(prev => prev === node.id.replace('col:', '') ? null : node.id.replace('col:', ''))
       setShowPanel(true)
     }
   }, [navigate])
 
   const handleNodeHover = useCallback((node) => {
     setHoverNode(node || null)
-  }, [])
+    if (!node) {
+      setHighlightNodes(new Set())
+      setHighlightLinks(new Set())
+      return
+    }
+    // Collect neighbors via current graph links
+    const neighbors = new Set([node.id])
+    const linkSet = new Set()
+    for (const l of graphData.links) {
+      const srcId = typeof l.source === 'object' ? l.source.id : l.source
+      const tgtId = typeof l.target === 'object' ? l.target.id : l.target
+      if (srcId === node.id) { neighbors.add(tgtId); linkSet.add(l) }
+      if (tgtId === node.id) { neighbors.add(srcId); linkSet.add(l) }
+    }
+    setHighlightNodes(neighbors)
+    setHighlightLinks(linkSet)
+  }, [graphData])
 
   const handleDelete = (docId) => {
     const doc = documents.find(d => d.doc_id === docId)
@@ -281,25 +400,12 @@ export default function DashboardPage() {
   }
 
   const toggleFilter = (tag) => {
-    setActiveFilters(prev =>
-      prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
-    )
-  }
-
-  const handleDomainClick = (col) => {
-    if (selectedDomain === col) {
-      setSelectedDomain(null)
-    } else {
-      setSelectedDomain(col)
-      setShowPanel(true)
-    }
+    setActiveFilters(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag])
   }
 
   const handleGraphRightClick = useCallback((node, event) => {
     event.preventDefault()
-
     const items = []
-
     if (node._type === 'document' && node._data) {
       items.push(
         { label: t('dashboard.chatAboutThis'), icon: MessageSquare, action: () => navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.filename || '')}`) },
@@ -310,17 +416,15 @@ export default function DashboardPage() {
         { label: t('common.delete'), icon: Trash2, action: () => handleDelete(node._data.doc_id), danger: true },
       )
     } else if (node._type === 'collection') {
+      const col = node.id.replace('col:', '')
       items.push(
-        { label: t('dashboard.chatAboutCollection'), icon: MessageSquare, action: () => navigate(`/chat?collection=${encodeURIComponent(node.label)}`) },
-        { label: t('dashboard.filterByThis'), icon: Filter, action: () => handleDomainClick(node.label) },
+        { label: t('dashboard.chatAboutCollection'), icon: MessageSquare, action: () => navigate(`/chat?collection=${encodeURIComponent(col)}`) },
+        { label: t('dashboard.filterByThis'), icon: Filter, action: () => setSelectedDomain(col) },
       )
     }
-
-    items.push({ separator: true })
-    items.push({ label: t('common.cancel'), action: () => {} })
-
+    items.push({ separator: true }, { label: t('common.cancel'), action: () => {} })
     setContextMenu({ x: event.clientX, y: event.clientY, items })
-  }, [navigate, handleDownload, handleDelete, handleDomainClick])
+  }, [navigate, t])
 
   const handleUpload = async (e) => {
     const file = e.target.files?.[0]
@@ -353,17 +457,11 @@ export default function DashboardPage() {
       queryClient.invalidateQueries({ queryKey: ['documents', USER_ID] })
       queryClient.invalidateQueries({ queryKey: ['collections', USER_ID] })
       queryClient.invalidateQueries({ queryKey: ['graph-documents', USER_ID] })
-    } catch {
-      // toast.promise already shows the error
-    } finally {
+    } catch { /* toast shown */ }
+    finally {
       setUploading(false)
       e.target.value = ''
     }
-  }
-
-  const formatDate = (iso) => {
-    if (!iso) return ''
-    return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
   }
 
   // Auto-expand panel when searching
@@ -371,175 +469,194 @@ export default function DashboardPage() {
     if (search) setShowPanel(true)
   }, [search])
 
-  // Panel title: show count info
   const panelTitle = useMemo(() => {
-    const total = Array.isArray(documents) ? documents.length : 0
-    if (search) {
-      return t('dashboard.panelSearching', { shown: displayedDocs.length, total: filtered.length })
-    }
-    if (selectedDomain) {
-      return t('dashboard.panelDomain', { domain: selectedDomain, shown: displayedDocs.length })
-    }
+    const total = documents.length
+    if (search) return t('dashboard.panelSearching', { shown: displayedDocs.length, total: filtered.length })
+    if (selectedDomain) return t('dashboard.panelDomain', { domain: formatName(selectedDomain), shown: displayedDocs.length })
     return t('dashboard.panelDefault', { shown: displayedDocs.length, total })
   }, [documents, displayedDocs, filtered, search, selectedDomain, t])
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Search + Filter toggle bar */}
-      <div className="flex items-center gap-2 p-3 border-b" style={{ borderColor: 'hsl(217 33% 17%)' }}>
-        <button
-          onClick={() => setShowDomains(d => !d)}
-          className="p-2 rounded-lg opacity-40 hover:opacity-100"
-          style={{ backgroundColor: 'hsl(217 33% 17%)', color: 'hsl(210 40% 98%)' }}
-          title={showDomains ? t('dashboard.hideDomains') : t('dashboard.showDomains')}
-        >
-          <Menu size={14} />
-        </button>
-        <div className="relative flex-1">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 opacity-40" />
-          <input
-            type="text"
-            placeholder={t('dashboard.searchPlaceholder')}
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 rounded-lg text-sm outline-none"
-            style={{ backgroundColor: 'hsl(217 33% 17%)', color: 'hsl(210 40% 98%)', border: '1px solid hsl(217 33% 22%)' }}
-          />
-        </div>
-        <button
-          onClick={() => setShowFilters(f => !f)}
-          className={cn('p-2 rounded-lg text-xs transition-opacity', showFilters ? 'opacity-100' : 'opacity-40 hover:opacity-100')}
-          style={{ backgroundColor: showFilters ? 'hsl(250 80% 65%)' : 'hsl(217 33% 17%)', color: 'hsl(210 40% 98%)' }}
-          title={t('dashboard.toggleFilters')}
-        >
-          <Filter size={14} />
-        </button>
-      </div>
+    <div className="flex h-full" style={{ backgroundColor: 'var(--bg)' }}>
 
-      {/* Filter tags — hidden by default, shown when showFilters is true */}
-      {showFilters && availableTags.length > 0 && (
-        <div className="px-3 py-2 flex flex-wrap gap-1.5 border-b" style={{ borderColor: 'hsl(217 33% 17%)' }}>
-          {availableTags.map(tag => (
+      {/* === Left: Domain sidebar === */}
+      <aside
+        className="w-56 shrink-0 flex flex-col border-r"
+        style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-1)' }}
+      >
+        <div
+          className="px-4 pt-5 pb-2 text-[10px] uppercase tracking-[0.1em]"
+          style={{ color: 'var(--fg-faint)', fontFamily: 'var(--mono)' }}
+        >
+          {t('dashboard.domains')}
+        </div>
+        <div className="flex-1 overflow-auto py-1 px-2">
+          <DomainItem
+            label={t('common.all')}
+            count={documents.length}
+            active={!selectedDomain}
+            onClick={() => setSelectedDomain(null)}
+          />
+          {collectionList.length === 0 ? (
+            <div
+              className="px-3 py-6 text-xs text-center"
+              style={{ color: 'var(--fg-faint)', fontFamily: 'var(--mono)' }}
+            >
+              {t('dashboard.noCollections')}
+            </div>
+          ) : (
+            collectionList.map(col => (
+              <DomainItem
+                key={col.name}
+                label={formatName(col.name)}
+                count={col.count}
+                active={selectedDomain === col.name}
+                onClick={() => setSelectedDomain(d => (d === col.name ? null : col.name))}
+              />
+            ))
+          )}
+        </div>
+
+        {selectedDomain && (
+          <div className="p-3 border-t" style={{ borderColor: 'var(--border)' }}>
             <button
-              key={tag}
-              onClick={() => toggleFilter(tag)}
-              className={cn(
-                'px-2 py-0.5 rounded-full text-xs transition-colors flex items-center gap-1',
-                activeFilters.includes(tag) ? 'font-medium' : 'opacity-50 hover:opacity-100'
-              )}
+              onClick={() => navigate(`/chat?collection=${encodeURIComponent(selectedDomain)}`)}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[12px] font-medium transition-all hover:scale-[1.02]"
               style={{
-                backgroundColor: activeFilters.includes(tag) ? 'hsl(250 80% 65%)' : 'hsl(217 33% 17%)',
-                color: 'hsl(210 40% 98%)',
+                background: 'var(--signature)',
+                color: 'var(--bg)',
+                boxShadow: '0 0 14px var(--signature-soft)',
+                fontFamily: 'var(--sans)',
               }}
             >
-              {tag}
-              {activeFilters.includes(tag) && <X size={8} />}
+              <MessageSquare size={13} />
+              {t('nav.chat')}
             </button>
-          ))}
-          {activeFilters.length > 0 && (
-            <>
-              <button
-                onClick={() => navigate(`/chat?collection=${encodeURIComponent(activeFilters[0])}`)}
-                className="p-1 rounded opacity-60 hover:opacity-100 transition-opacity"
-                style={{ color: 'hsl(250 80% 65%)' }}
-                title={t('dashboard.chatAboutCollection')}
-              >
-                <MessageSquare size={14} />
-              </button>
+          </div>
+        )}
+      </aside>
+
+      {/* === Main: search bar + graph + collapsible panel === */}
+      <main className="flex-1 flex flex-col overflow-hidden relative">
+
+        {/* Search bar + filter toggle */}
+        <div
+          className="flex items-center gap-2 px-5 py-3 border-b"
+          style={{ borderColor: 'var(--border)' }}
+        >
+          <SearchInput
+            value={rawSearch}
+            onChange={setRawSearch}
+            matching={filtered.length}
+            total={documents.length}
+            showCount={!!search}
+          />
+          <button
+            onClick={() => setShowFilters(f => !f)}
+            className="p-2.5 rounded-lg transition-all"
+            style={{
+              backgroundColor: showFilters ? 'var(--signature)' : 'var(--bg-2)',
+              color: showFilters ? 'var(--bg)' : 'var(--fg-dim)',
+              border: '1px solid',
+              borderColor: showFilters ? 'var(--signature)' : 'var(--border-2)',
+              boxShadow: showFilters ? '0 0 12px var(--signature-soft)' : 'none',
+            }}
+            title={t('dashboard.toggleFilters')}
+          >
+            <Filter size={14} />
+          </button>
+        </div>
+
+        {/* Filter chips */}
+        {showFilters && availableTags.length > 0 && (
+          <div
+            className="px-5 py-2.5 flex flex-wrap gap-1.5 border-b"
+            style={{ borderColor: 'var(--border)' }}
+          >
+            {availableTags.map(tag => {
+              const isActive = activeFilters.includes(tag)
+              return (
+                <button
+                  key={tag}
+                  onClick={() => toggleFilter(tag)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] transition-all"
+                  style={{
+                    backgroundColor: isActive ? 'var(--signature)' : 'var(--bg-2)',
+                    color: isActive ? 'var(--bg)' : 'var(--fg-dim)',
+                    border: '1px solid',
+                    borderColor: isActive ? 'var(--signature)' : 'var(--border)',
+                    fontFamily: 'var(--mono)',
+                    letterSpacing: '0.05em',
+                    textTransform: 'uppercase',
+                    fontWeight: isActive ? 600 : 400,
+                  }}
+                >
+                  {formatName(tag)}
+                  {isActive && <X size={9} />}
+                </button>
+              )
+            })}
+            {activeFilters.length > 0 && (
               <button
                 onClick={() => setActiveFilters([])}
-                className="px-2 py-0.5 text-xs opacity-40 hover:opacity-100"
-                style={{ color: 'hsl(210 40% 98%)' }}
+                className="px-2 py-1 text-[11px] transition-opacity hover:opacity-100 opacity-60"
+                style={{
+                  color: 'var(--fg-dim)',
+                  fontFamily: 'var(--mono)',
+                  letterSpacing: '0.05em',
+                }}
               >
                 {t('common.clear')}
               </button>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Main content: left sidebar + graph */}
-      <div className="flex flex-1 min-h-0">
-        {/* Left domain/collection sidebar */}
-        {showDomains && (
-        <div
-          className="w-48 shrink-0 flex flex-col border-r"
-          style={{ backgroundColor: 'hsl(222 47% 8%)', borderColor: 'hsl(217 33% 17%)' }}
-        >
-          <div
-            className="px-3 py-2 text-xs font-semibold uppercase tracking-wider border-b"
-            style={{ color: 'hsl(215 20% 65%)', borderColor: 'hsl(217 33% 17%)' }}
-          >
-            {t('dashboard.domains')}
-          </div>
-          <div className="flex-1 overflow-auto py-1">
-            {/* All option */}
-            <button
-              onClick={() => { setSelectedDomain(null); setActiveFilters([]) }}
-              className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-left transition-colors hover:bg-white/5"
-              style={{
-                color: !selectedDomain ? 'hsl(250 80% 65%)' : 'hsl(210 40% 98%)',
-                backgroundColor: !selectedDomain ? 'hsl(250 80% 65% / 0.12)' : 'transparent',
-                fontWeight: !selectedDomain ? 600 : 400,
-              }}
-            >
-              <span>{t('common.all')}</span>
-              <span className="ml-1 shrink-0 tabular-nums" style={{ color: 'hsl(215 20% 65%)' }}>
-                {Array.isArray(documents) ? documents.length : 0}
-              </span>
-            </button>
-
-            {collectionList.length === 0 ? (
-              <div className="px-3 py-4 text-xs opacity-30" style={{ color: 'hsl(215 20% 65%)' }}>
-                {t('dashboard.noCollections')}
-              </div>
-            ) : (
-              collectionList.map(col => (
-                <button
-                  key={col.name}
-                  onClick={() => handleDomainClick(col.name)}
-                  className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-left transition-colors hover:bg-white/5"
-                  style={{
-                    color: selectedDomain === col.name ? 'hsl(250 80% 65%)' : 'hsl(210 40% 98%)',
-                    backgroundColor: selectedDomain === col.name ? 'hsl(250 80% 65% / 0.12)' : 'transparent',
-                    fontWeight: selectedDomain === col.name ? 600 : 400,
-                  }}
-                >
-                  <span className="truncate">{formatName(col.name)}</span>
-                  <span className="ml-1 shrink-0 tabular-nums" style={{ color: 'hsl(215 20% 65%)' }}>
-                    {col.count}
-                  </span>
-                </button>
-              ))
             )}
           </div>
-
-          {/* Chat button — only shown when a domain is selected */}
-          {selectedDomain && (
-            <div className="p-3 border-t" style={{ borderColor: 'hsl(217 33% 17%)' }}>
-              <button
-                onClick={() => navigate(`/chat?collection=${encodeURIComponent(selectedDomain)}`)}
-                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-opacity hover:opacity-90"
-                style={{ backgroundColor: 'hsl(250 80% 65%)', color: 'hsl(210 40% 98%)' }}
-              >
-                <MessageSquare size={12} /> {t('nav.chat')}
-              </button>
-            </div>
-          )}
-        </div>
         )}
 
-        {/* Mini document graph — fills remaining space */}
-        <div className="flex-1 relative min-h-0" ref={containerRef} style={{ backgroundColor: 'hsl(222 47% 4%)' }}>
+        {/* Graph area */}
+        <div
+          ref={containerRef}
+          className="flex-1 relative min-h-0"
+          style={{ backgroundColor: 'var(--bg)' }}
+        >
           {isLoading ? (
-            <div className="absolute inset-0 flex items-center justify-center opacity-40" style={{ color: 'hsl(210 40% 98%)' }}>
+            <div
+              className="absolute inset-0 flex items-center justify-center"
+              style={{
+                color: 'var(--fg-dim)',
+                fontFamily: 'var(--display)',
+                fontStyle: 'italic',
+                fontSize: 18,
+              }}
+            >
               {t('common.loading')}
             </div>
           ) : graphData.nodes.length === 0 ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center opacity-40" style={{ color: 'hsl(210 40% 98%)' }}>
-              <FileText size={48} className="mb-4" />
-              <p className="text-lg">{t('dashboard.uploadFirst')}</p>
-              <p className="text-sm mt-1">{t('dashboard.uploadFirstHint')}</p>
+            <div
+              className="absolute inset-0 flex flex-col items-center justify-center"
+              style={{ color: 'var(--fg-dim)' }}
+            >
+              <FileText size={48} className="mb-4 opacity-60" />
+              <p
+                className="text-lg mb-1"
+                style={{
+                  fontFamily: 'var(--display)',
+                  fontStyle: 'italic',
+                  fontWeight: 400,
+                  letterSpacing: '-0.015em',
+                }}
+              >
+                {t('dashboard.uploadFirst')}
+              </p>
+              <p
+                className="text-[11px] uppercase"
+                style={{
+                  fontFamily: 'var(--mono)',
+                  letterSpacing: '0.08em',
+                  color: 'var(--fg-faint)',
+                }}
+              >
+                {t('dashboard.uploadFirstHint')}
+              </p>
             </div>
           ) : (
             <ForceGraph2D
@@ -547,10 +664,10 @@ export default function DashboardPage() {
               graphData={graphData}
               width={dimensions.width}
               height={dimensions.height}
-              backgroundColor="hsl(222, 47%, 4%)"
+              backgroundColor="rgba(0,0,0,0)"
               nodeCanvasObject={paintNode}
               nodePointerAreaPaint={(node, color, ctx) => {
-                const r = Math.sqrt(node.val || 3) * 1.8 + 2
+                const r = Math.sqrt(node.val || 3) * 2.2 + 3
                 ctx.beginPath()
                 ctx.arc(node.x, node.y, r, 0, Math.PI * 2)
                 ctx.fillStyle = color
@@ -559,119 +676,319 @@ export default function DashboardPage() {
               onNodeClick={handleNodeClick}
               onNodeHover={handleNodeHover}
               onNodeRightClick={handleGraphRightClick}
-              linkColor={l => l._type === 'similar_to' ? '#f59e0b99' : '#6366f133'}
-              linkWidth={l => l._type === 'similar_to' ? 2.5 : 0.5}
-              linkLineDash={l => l._type === 'similar_to' ? [4, 4] : null}
-              cooldownTicks={20}
+              linkColor={l => {
+                const dim = hoverNode && !highlightLinks.has(l)
+                if (l._type === 'similar_to') {
+                  return dim ? '#6366f122' : '#6366f188'
+                }
+                return dim ? cssVar('--fg-faint', '#5a564f') + '15' : cssVar('--fg-faint', '#5a564f') + '40'
+              }}
+              linkWidth={l => highlightLinks.has(l) ? 2 : (l._type === 'similar_to' ? 1.5 : 0.5)}
+              linkLineDash={l => l._type === 'similar_to' ? [3, 3] : []}
+              cooldownTicks={30}
               onEngineStop={() => graphRef.current?.zoomToFit(300, 40)}
               enableNodeDrag={true}
             />
           )}
 
+          {/* Stats overlay — top right */}
+          {graphData.nodes.length > 0 && (
+            <div
+              className="absolute top-4 right-5 text-[10px] uppercase flex gap-5"
+              style={{
+                color: 'var(--fg-faint)',
+                fontFamily: 'var(--mono)',
+                letterSpacing: '0.08em',
+              }}
+            >
+              <Stat label="Documents" value={documents.length} />
+              <Stat label="Collections" value={collectionList.length} />
+            </div>
+          )}
         </div>
-      </div>
 
-      {/* Floating upload button — fixed to viewport bottom-right */}
-      <label
-        className={cn(
-          'fixed bottom-6 right-6 flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm cursor-pointer shadow-lg transition-opacity z-30',
-          uploading ? 'opacity-50 pointer-events-none' : 'hover:opacity-90'
-        )}
-        style={{ backgroundColor: 'hsl(250 80% 65%)', color: 'hsl(210 40% 98%)' }}
-      >
-        {uploading ? <RefreshCw size={16} className="animate-spin" /> : <Upload size={16} />}
-        {uploading ? t('dashboard.uploading') : t('dashboard.upload')}
-        <input
-          type="file"
-          className="hidden"
-          onChange={handleUpload}
-          disabled={uploading}
-          accept=".pdf,.docx,.txt,.md,.html,.xlsx,.pptx"
-        />
-      </label>
-
-      {contextMenu && (
-        <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenu.items} onClose={() => setContextMenu(null)} />
-      )}
-
-      <ConfirmDialog
-        open={confirmDelete != null}
-        title={t('confirm.deleteDocumentTitle')}
-        message={t('confirm.deleteDocumentMessage', { filename: confirmDelete?.filename })}
-        confirmLabel={t('common.delete')}
-        danger
-        onConfirm={() => {
-          deleteMutation.mutate(confirmDelete.docId)
-          setConfirmDelete(null)
-        }}
-        onCancel={() => setConfirmDelete(null)}
-      />
-
-
-      {/* Collapsible document panel */}
-      <div className="border-t shrink-0" style={{ borderColor: 'hsl(217 33% 17%)', backgroundColor: 'hsl(222 47% 8%)' }}>
-        <button
-          onClick={() => setShowPanel(p => !p)}
-          className="flex items-center justify-between w-full px-4 py-2 text-xs"
-          style={{ color: 'hsl(215 20% 65%)' }}
+        {/* Floating upload button */}
+        <label
+          className={cn(
+            'absolute bottom-6 right-6 flex items-center gap-2 px-4 py-2.5 rounded-lg text-[13px] font-medium cursor-pointer transition-all z-30',
+            uploading ? 'opacity-50 pointer-events-none' : 'hover:scale-105'
+          )}
+          style={{
+            backgroundColor: 'var(--signature)',
+            color: 'var(--bg)',
+            boxShadow: '0 10px 30px var(--signature-soft), 0 0 0 1px var(--signature-glow)',
+            fontFamily: 'var(--sans)',
+          }}
         >
-          <span>{panelTitle}</span>
-          {showPanel ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-        </button>
+          {uploading ? <RefreshCw size={15} className="animate-spin" /> : <Upload size={15} />}
+          {uploading ? t('dashboard.uploading') : t('dashboard.upload')}
+          <input
+            type="file"
+            className="hidden"
+            onChange={handleUpload}
+            disabled={uploading}
+            accept=".pdf,.docx,.txt,.md,.html,.xlsx,.pptx"
+          />
+        </label>
 
-        {showPanel && (
-          <div className="max-h-48 overflow-auto border-t" style={{ borderColor: 'hsl(217 33% 12%)' }}>
-            {displayedDocs.length === 0 ? (
-              <div className="p-4 text-xs text-center opacity-30">{t('dashboard.noMatch')}</div>
-            ) : (
-              displayedDocs.map(doc => (
+        {contextMenu && (
+          <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenu.items} onClose={() => setContextMenu(null)} />
+        )}
+
+        <ConfirmDialog
+          open={confirmDelete != null}
+          title={t('confirm.deleteDocumentTitle')}
+          message={t('confirm.deleteDocumentMessage', { filename: confirmDelete?.filename })}
+          confirmLabel={t('common.delete')}
+          danger
+          onConfirm={() => {
+            deleteMutation.mutate(confirmDelete.docId)
+            setConfirmDelete(null)
+          }}
+          onCancel={() => setConfirmDelete(null)}
+        />
+
+        {/* Collapsible documents panel */}
+        <div
+          className="border-t shrink-0"
+          style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-1)' }}
+        >
+          <button
+            onClick={() => setShowPanel(p => !p)}
+            className="flex items-center justify-between w-full px-5 py-2 text-[11px] uppercase"
+            style={{
+              color: 'var(--fg-dim)',
+              fontFamily: 'var(--mono)',
+              letterSpacing: '0.08em',
+            }}
+          >
+            <span>{panelTitle}</span>
+            {showPanel ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
+          </button>
+
+          {showPanel && (
+            <div
+              className="max-h-56 overflow-auto border-t"
+              style={{ borderColor: 'var(--border)' }}
+            >
+              {displayedDocs.length === 0 ? (
                 <div
-                  key={doc.doc_id}
-                  className="flex items-center gap-3 px-4 py-2 hover:bg-white/5 cursor-pointer transition-colors group text-xs"
-                  onClick={() => navigate(`/chat?doc=${doc.doc_id}&name=${encodeURIComponent(doc.filename)}`)}
+                  className="p-6 text-center"
+                  style={{
+                    color: 'var(--fg-faint)',
+                    fontFamily: 'var(--display)',
+                    fontStyle: 'italic',
+                    fontSize: 14,
+                  }}
                 >
-                  <FileText size={12} className="shrink-0 opacity-40" />
-                  <span className="flex-1 truncate" style={{ color: 'hsl(210 40% 98%)' }}>{doc.filename}</span>
-                  <span className="opacity-30 shrink-0">{doc.chunk_count}</span>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); navigate(`/pdf/${doc.doc_id}`) }}
-                    className="p-1 rounded opacity-20 group-hover:opacity-80 hover:opacity-100 transition-opacity"
-                    title={t('dashboard.viewPdf')}
-                  >
-                    <FileText size={14} />
-                  </button>
-                  <div className="relative">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === doc.doc_id ? null : doc.doc_id) }}
-                      className="p-1 rounded opacity-0 group-hover:opacity-60 hover:opacity-100 transition-opacity"
-                    >
-                      <MoreVertical size={10} />
-                    </button>
-                    {menuOpen === doc.doc_id && (
-                      <div
-                        className="absolute right-0 bottom-8 z-20 rounded-lg shadow-lg py-1 min-w-[120px]"
-                        style={{ backgroundColor: 'hsl(222 47% 12%)', border: '1px solid hsl(217 33% 22%)' }}
-                      >
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleDownload(doc.doc_id) }}
-                          className="flex items-center gap-2 px-3 py-1.5 text-xs w-full hover:bg-white/5"
-                          style={{ color: 'hsl(210 40% 98%)' }}
-                        >
-                          <Download size={10} /> {t('common.download')}
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleDelete(doc.doc_id) }}
-                          className="flex items-center gap-2 px-3 py-1.5 text-xs w-full hover:bg-white/5"
-                          style={{ color: 'hsl(0 84% 60%)' }}
-                        >
-                          <Trash2 size={10} /> {t('common.delete')}
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                  {t('dashboard.noMatch')}
                 </div>
-              ))
-            )}
+              ) : (
+                displayedDocs.map(doc => (
+                  <DocRow
+                    key={doc.doc_id}
+                    doc={doc}
+                    onClick={() => navigate(`/chat?doc=${doc.doc_id}&name=${encodeURIComponent(doc.filename || '')}`)}
+                    onViewPdf={(e) => { e.stopPropagation(); navigate(`/pdf/${doc.doc_id}`) }}
+                    onMoreClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === doc.doc_id ? null : doc.doc_id) }}
+                    menuOpen={menuOpen === doc.doc_id}
+                    onDownload={() => handleDownload(doc.doc_id)}
+                    onDelete={() => handleDelete(doc.doc_id)}
+                    tDownload={t('common.download')}
+                    tDelete={t('common.delete')}
+                    tViewPdf={t('dashboard.viewPdf')}
+                  />
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      </main>
+    </div>
+  )
+}
+
+// ============ Subcomponents ============
+
+function Stat({ label, value }) {
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      <span className="opacity-70">{label}</span>
+      <b
+        className="text-[15px] tabular-nums"
+        style={{ color: 'var(--fg)', fontWeight: 500, letterSpacing: '-0.01em' }}
+      >
+        {value}
+      </b>
+    </div>
+  )
+}
+
+function DomainItem({ label, count, active, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] transition-colors relative"
+      style={{
+        color: active ? 'var(--fg)' : 'var(--fg-dim)',
+        backgroundColor: active ? 'var(--bg-3)' : 'transparent',
+      }}
+      onMouseEnter={e => { if (!active) e.currentTarget.style.backgroundColor = 'var(--bg-2)' }}
+      onMouseLeave={e => { if (!active) e.currentTarget.style.backgroundColor = 'transparent' }}
+    >
+      {active && (
+        <span
+          aria-hidden
+          className="absolute left-0 top-1/2 -translate-y-1/2"
+          style={{
+            width: 3, height: 14,
+            background: 'var(--signature)',
+            borderRadius: '0 3px 3px 0',
+            boxShadow: '0 0 10px var(--signature-glow)',
+          }}
+        />
+      )}
+      <span
+        className="shrink-0 w-1.5 h-1.5 rounded-full"
+        style={{ backgroundColor: active ? 'var(--fg-1)' : 'var(--fg-faint)' }}
+      />
+      <span className="flex-1 text-left truncate">{label}</span>
+      <span
+        className="text-[10px] tabular-nums"
+        style={{ color: 'var(--fg-faint)', fontFamily: 'var(--mono)' }}
+      >
+        {count}
+      </span>
+    </button>
+  )
+}
+
+function SearchInput({ value, onChange, matching, total, showCount }) {
+  return (
+    <div
+      className="flex-1 flex items-center gap-3 px-4 rounded-lg transition-all"
+      style={{
+        height: 40,
+        background: 'var(--bg-2)',
+        border: '1px solid var(--border-2)',
+      }}
+      onFocus={e => {
+        e.currentTarget.style.borderColor = 'var(--signature)'
+        e.currentTarget.style.backgroundColor = 'var(--bg-3)'
+        e.currentTarget.style.boxShadow = '0 0 0 3px var(--signature-soft)'
+      }}
+      onBlur={e => {
+        e.currentTarget.style.borderColor = 'var(--border-2)'
+        e.currentTarget.style.backgroundColor = 'var(--bg-2)'
+        e.currentTarget.style.boxShadow = ''
+      }}
+    >
+      <Search size={14} style={{ color: 'var(--fg-faint)' }} className="shrink-0" />
+      <input
+        type="text"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder="Search by title, collection, or keyword…"
+        className="flex-1 bg-transparent outline-none text-[13px]"
+        style={{
+          color: 'var(--fg)',
+          fontFamily: 'var(--sans)',
+          letterSpacing: '-0.005em',
+        }}
+      />
+      {value && (
+        <button
+          onClick={() => onChange('')}
+          className="text-[10px] px-2 py-0.5 rounded-md transition-colors"
+          style={{
+            backgroundColor: 'var(--bg)',
+            border: '1px solid var(--border-2)',
+            color: 'var(--fg-dim)',
+            fontFamily: 'var(--mono)',
+          }}
+          title="Clear"
+        >
+          esc
+        </button>
+      )}
+      {showCount && (
+        <span
+          className="text-[11px] pl-3 border-l whitespace-nowrap"
+          style={{
+            color: 'var(--fg-faint)',
+            fontFamily: 'var(--mono)',
+            borderColor: 'var(--border-2)',
+          }}
+        >
+          <b style={{ color: 'var(--signature)', fontWeight: 500 }}>{matching}</b> of {total} match
+        </span>
+      )}
+    </div>
+  )
+}
+
+function DocRow({ doc, onClick, onViewPdf, onMoreClick, menuOpen, onDownload, onDelete, tDownload, tDelete, tViewPdf }) {
+  return (
+    <div
+      onClick={onClick}
+      className="flex items-center gap-3 px-5 py-2.5 cursor-pointer transition-colors group text-[12px] border-b"
+      style={{ borderColor: 'var(--border)' }}
+      onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-2)'}
+      onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+    >
+      <FileText size={12} className="shrink-0" style={{ color: 'var(--fg-faint)' }} />
+      <span
+        className="flex-1 truncate"
+        style={{
+          color: 'var(--fg-1)',
+          fontFamily: 'var(--display)',
+          fontSize: 14,
+          letterSpacing: '-0.008em',
+        }}
+      >
+        {doc.filename}
+      </span>
+      <span
+        className="shrink-0 text-[10px] tabular-nums"
+        style={{ color: 'var(--fg-faint)', fontFamily: 'var(--mono)', letterSpacing: '0.05em' }}
+      >
+        {doc.chunk_count} · {relTime(doc.uploaded_at)}
+      </span>
+      <button
+        onClick={onViewPdf}
+        className="p-1 rounded transition-opacity opacity-0 group-hover:opacity-70 hover:opacity-100"
+        style={{ color: 'var(--fg-dim)' }}
+        title={tViewPdf}
+      >
+        <FileText size={13} />
+      </button>
+      <div className="relative">
+        <button
+          onClick={onMoreClick}
+          className="p-1 rounded transition-opacity opacity-0 group-hover:opacity-60 hover:opacity-100"
+          style={{ color: 'var(--fg-dim)' }}
+        >
+          <MoreVertical size={11} />
+        </button>
+        {menuOpen && (
+          <div
+            className="absolute right-0 bottom-7 z-20 rounded-lg shadow-xl py-1 min-w-[130px]"
+            style={{ backgroundColor: 'var(--bg-3)', border: '1px solid var(--border-2)' }}
+          >
+            <button
+              onClick={(e) => { e.stopPropagation(); onDownload() }}
+              className="flex items-center gap-2 px-3 py-1.5 text-[12px] w-full transition-colors hover:bg-white/5"
+              style={{ color: 'var(--fg-1)' }}
+            >
+              <Download size={11} /> {tDownload}
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onDelete() }}
+              className="flex items-center gap-2 px-3 py-1.5 text-[12px] w-full transition-colors hover:bg-white/5"
+              style={{ color: 'var(--bad)' }}
+            >
+              <Trash2 size={11} /> {tDelete}
+            </button>
           </div>
         )}
       </div>

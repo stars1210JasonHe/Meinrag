@@ -1,24 +1,89 @@
 @import "tailwindcss";
 
-/* Dark theme variables */
+/* ============================================================
+   MEINRAG Design Tokens
+   Dark default + Light via [data-theme="light"] on <html>
+   Signature accent: Royal Blue (configurable per-user later)
+   ============================================================ */
+
 :root {
-  --background: 222 47% 6%;
-  --foreground: 210 40% 98%;
-  --card: 222 47% 8%;
-  --card-foreground: 210 40% 98%;
-  --primary: 250 80% 65%;
-  --primary-foreground: 210 40% 98%;
-  --secondary: 217 33% 17%;
-  --secondary-foreground: 210 40% 98%;
-  --muted: 217 33% 17%;
-  --muted-foreground: 215 20% 65%;
-  --accent: 168 84% 40%;
-  --accent-foreground: 210 40% 98%;
+  /* === Dark (default) === */
+  --bg: #08080a;
+  --bg-1: #0c0c0f;
+  --bg-2: #111115;
+  --bg-3: #17171c;
+  --bg-4: #1d1d24;
+
+  --border: rgba(255, 255, 255, 0.05);
+  --border-2: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+
+  --fg: #f4f2ee;
+  --fg-1: #d4d0ca;
+  --fg-dim: #9a9690;
+  --fg-faint: #5a564f;
+
+  /* Signature: Royal Blue */
+  --signature: #5b7ec9;
+  --signature-dim: #3f5d9e;
+  --signature-soft: rgba(91, 126, 201, 0.15);
+  --signature-glow: rgba(91, 126, 201, 0.35);
+
+  /* Score tiers (functional) */
+  --ok: #10b981;
+  --warn: #f59e0b;
+  --bad: #ef4444;
+
+  /* Typography */
+  --sans: 'IBM Plex Sans', -apple-system, system-ui, 'Segoe UI', Roboto, sans-serif;
+  --mono: 'IBM Plex Mono', 'SF Mono', Menlo, monospace;
+  --display: 'Fraunces', 'Georgia', serif;
+
+  /* === shadcn compatibility (kept; resolve to our tokens) === */
+  --background: 240 9% 3%;
+  --foreground: 40 22% 94%;
+  --card: 240 11% 6%;
+  --card-foreground: 40 22% 94%;
+  --primary: 218 47% 58%;
+  --primary-foreground: 240 9% 3%;
+  --secondary: 240 11% 10%;
+  --secondary-foreground: 40 22% 94%;
+  --muted: 240 11% 10%;
+  --muted-foreground: 38 7% 58%;
+  --accent-shad: 218 47% 58%;
+  --accent-foreground: 240 9% 3%;
   --destructive: 0 84% 60%;
-  --border: 217 33% 17%;
-  --input: 217 33% 17%;
-  --ring: 250 80% 65%;
+  --border-shad: 0 0% 100% / 8%;
+  --input: 240 11% 10%;
+  --ring: 218 47% 58%;
   --radius: 0.5rem;
+}
+
+[data-theme="light"] {
+  --bg: #f7f5f1;
+  --bg-1: #fbfaf7;
+  --bg-2: #f0ede7;
+  --bg-3: #e8e4dc;
+  --bg-4: #dfdbd2;
+
+  --border: rgba(30, 25, 15, 0.08);
+  --border-2: rgba(30, 25, 15, 0.12);
+  --border-strong: rgba(30, 25, 15, 0.22);
+
+  --fg: #1a1915;
+  --fg-1: #3a372e;
+  --fg-dim: #6f6a5e;
+  --fg-faint: #a09a8a;
+
+  /* Signature shifts darker for contrast on light bg */
+  --signature: #3f5d9e;
+  --signature-dim: #2a4578;
+  --signature-soft: rgba(63, 93, 158, 0.12);
+  --signature-glow: rgba(63, 93, 158, 0.28);
+
+  --ok: #059669;
+  --warn: #d97706;
+  --bad: #dc2626;
 }
 
 html, body, #root {
@@ -28,9 +93,11 @@ html, body, #root {
 }
 
 body {
-  background-color: hsl(222 47% 6%);
-  color: hsl(210 40% 98%);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-weight: 400;
+  letter-spacing: -0.003em;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
