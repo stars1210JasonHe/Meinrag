@@ -10,7 +10,10 @@ const TYPE_ICONS = {
 export { TYPE_ICONS }
 
 function scoreColor(p) {
-  return `hsl(${p * 1.2} 72% 45%)`
+  // Remap: p=20 → red (hue 0), p=70 → green (hue 120). Matches realistic
+  // composite-score range where 65%+ is a genuinely strong match.
+  const hue = Math.max(0, Math.min(120, (p - 20) * 2.4))
+  return `hsl(${hue} 72% 45%)`
 }
 
 export default function SourceItem({ source, index, isActive, onClick }) {
