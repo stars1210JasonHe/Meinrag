@@ -140,7 +140,11 @@ async def upload_document(
             chunks, doc_id=doc_id,
             embeddings=chunk_embeddings if chunk_embeddings else None,
         )
-        cross_edges = build_cross_doc_edges(doc_id, chunks, vector_store, top_k=5)
+        cross_edges = build_cross_doc_edges(
+            doc_id, chunks, vector_store,
+            top_k=5,
+            min_score=settings.graph_similar_min_score,
+        )
 
         edge_repo = EdgeRepository(db)
         await edge_repo.bulk_insert(intra_edges + cross_edges)

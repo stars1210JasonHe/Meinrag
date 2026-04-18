@@ -149,13 +149,21 @@ def build_cross_doc_edges(
     chunks: list[Document],
     vector_store,
     top_k: int = 5,
+    min_score: float = 0.6,
 ) -> list[dict]:
     """Build similar_to edges between this document's chunks and other documents.
 
-    Uses FAISS ANN to find top-K nearest neighbors for each chunk.
+    Uses FAISS ANN to find top-K nearest neighbors for each chunk. Only edges
+    with cosine similarity >= min_score are kept — lower scores are noise from
+    top-K's greedy fill (embeddings naturally cluster in [0.2, 0.8] so even
+    unrelated chunks show up in top-K).
+
+    Affects downstream retrieval: edges feed into composite graph_score and
+    graph expansion, so the threshold gates both visualization and signal.
     """
     edges = []
     seen = set()
+    below_threshold = 0
 
     for chunk in chunks:
         cidx = chunk.metadata.get("chunk_index")
@@ -170,6 +178,10 @@ def build_cross_doc_edges(
                 # Skip self
                 if target_doc_id == doc_id and target_idx == cidx:
                     continue
+                # Threshold — drop weak matches
+                if score < min_score:
+                    below_threshold += 1
+                    continue
                 # Dedup
                 key = (doc_id, cidx, target_doc_id, target_idx)
                 if key in seen:
@@ -182,7 +194,7 @@ def build_cross_doc_edges(
                     "target_doc_id": target_doc_id,
                     "target_chunk_index": target_idx,
                     "relation": "similar_to",
-                    "score": round(score, 4),
+                    "score": round(float(score), 4),
                 })
                 count += 1
                 if count >= top_k:
@@ -190,5 +202,8 @@ def build_cross_doc_edges(
         except Exception as e:
             logger.warning("Cross-doc edge build failed for chunk %d: %s", cidx, e)
 
-    logger.info("Built %d cross-doc similar_to edges for %s", len(edges), doc_id)
+    logger.info(
+        "Built %d cross-doc similar_to edges for %s (dropped %d below score %.2f)",
+        len(edges), doc_id, below_threshold, min_score,
+    )
     return edges

@@ -3,7 +3,7 @@ import pytest
 import numpy as np
 from langchain_core.documents import Document
 
-from app.services.edge_builder import build_intra_doc_edges
+from app.services.edge_builder import build_intra_doc_edges, build_cross_doc_edges
 
 
 class TestFollowsEdges:
@@ -132,6 +132,70 @@ class TestReferencesEdges:
         edges = build_intra_doc_edges(chunks, doc_id="d1")
         refs = [e for e in edges if e["relation"] == "references"]
         assert len(refs) == 2
+
+
+class TestCrossDocSimilarityThreshold:
+    """build_cross_doc_edges filters by min_score to drop noise."""
+
+    class _FakeVectorStore:
+        """Returns canned (doc, score) pairs for similarity_search_with_scores."""
+        def __init__(self, results):
+            self._results = results
+        def similarity_search_with_scores(self, _query, k):
+            return self._results[:k]
+
+    def test_filters_below_threshold(self):
+        src_chunks = [
+            Document(page_content="q", metadata={"doc_id": "s1", "chunk_index": 0, "chunk_type": "text"}),
+        ]
+        # Neighbors: 2 above 0.6, 3 below
+        neighbor_results = [
+            (Document(page_content="a", metadata={"doc_id": "t1", "chunk_index": 0}), 0.85),
+            (Document(page_content="b", metadata={"doc_id": "t2", "chunk_index": 0}), 0.70),
+            (Document(page_content="c", metadata={"doc_id": "t3", "chunk_index": 0}), 0.55),
+            (Document(page_content="d", metadata={"doc_id": "t4", "chunk_index": 0}), 0.40),
+            (Document(page_content="e", metadata={"doc_id": "t5", "chunk_index": 0}), 0.25),
+        ]
+        vs = self._FakeVectorStore(neighbor_results)
+        edges = build_cross_doc_edges("s1", src_chunks, vs, top_k=5, min_score=0.6)
+        assert len(edges) == 2
+        for e in edges:
+            assert e["score"] >= 0.6
+
+    def test_threshold_default_is_0_6(self):
+        import inspect
+        sig = inspect.signature(build_cross_doc_edges)
+        assert sig.parameters["min_score"].default == 0.6
+
+    def test_skips_self(self):
+        src_chunks = [
+            Document(page_content="q", metadata={"doc_id": "s1", "chunk_index": 0, "chunk_type": "text"}),
+        ]
+        neighbor_results = [
+            (Document(page_content="self", metadata={"doc_id": "s1", "chunk_index": 0}), 1.0),
+            (Document(page_content="other", metadata={"doc_id": "t1", "chunk_index": 0}), 0.85),
+        ]
+        vs = self._FakeVectorStore(neighbor_results)
+        edges = build_cross_doc_edges("s1", src_chunks, vs, top_k=5, min_score=0.5)
+        # Self edge should NOT appear; only the cross-doc edge
+        assert len(edges) == 1
+        assert edges[0]["target_doc_id"] == "t1"
+
+    def test_dedup_across_multiple_source_chunks(self):
+        src_chunks = [
+            Document(page_content="a", metadata={"doc_id": "s1", "chunk_index": 0, "chunk_type": "text"}),
+            Document(page_content="b", metadata={"doc_id": "s1", "chunk_index": 1, "chunk_type": "text"}),
+        ]
+        # Same target for both source chunks — should produce 2 edges (different source indices, same target)
+        neighbor_results = [
+            (Document(page_content="same", metadata={"doc_id": "t1", "chunk_index": 0}), 0.85),
+        ]
+        vs = self._FakeVectorStore(neighbor_results)
+        edges = build_cross_doc_edges("s1", src_chunks, vs, top_k=5, min_score=0.5)
+        # Two distinct source chunks → two edges allowed
+        assert len(edges) == 2
+        keys = {(e["source_chunk_index"], e["target_doc_id"], e["target_chunk_index"]) for e in edges}
+        assert keys == {(0, "t1", 0), (1, "t1", 0)}
 
 
 def _general_scoring():

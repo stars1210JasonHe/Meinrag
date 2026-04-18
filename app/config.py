@@ -124,6 +124,12 @@ class Settings(BaseSettings):
     hybrid_bm25_weight: float = 0.5  # used by legacy EnsembleRetriever in chain.py; retrieval.py uses RRF instead
     rrf_k: int = 60
 
+    # Graph edge building — minimum cosine similarity to keep a cross-doc similar_to edge.
+    # Chunk-to-chunk similarity distribution (observed on live corpus): p10=0.61, p50=0.76,
+    # p90=1.0. Threshold 0.6 cuts the bottom ~10% (barely-related matches) without losing
+    # real signal. Affects BOTH visualization AND retrieval (composite graph_score + graph expansion).
+    graph_similar_min_score: float = 0.6
+
     # Chat memory
     memory_max_messages: int = 20
     memory_session_ttl: int = 3600
