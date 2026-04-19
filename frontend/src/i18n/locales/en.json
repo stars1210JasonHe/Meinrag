@@ -59,7 +59,8 @@
     "backendError": "Backend error: {{message}}",
     "inlineError": "Error: {{message}}",
     "requestFailed": "Request failed: {{message}}",
-    "responseFailed": "Failed to get response: {{message}}"
+    "responseFailed": "Failed to get response: {{message}}",
+    "nDocs": "{{count}} selected documents"
   },
   "inputBar": {
     "askCollection": "Ask about {{collection}} documents...",
@@ -147,5 +148,32 @@
     "uploadFailed": "Upload failed: {{message}}",
     "uploadFailedStatus": "Upload failed ({{status}})",
     "unknownError": "Unknown error"
+  },
+  "selection": {
+    "toolbar": "Selection actions",
+    "nSelected": "{{count}} selected",
+    "nSelected_one": "{{count}} selected",
+    "nSelected_other": "{{count}} selected",
+    "ask": "Ask",
+    "visualize": "Visualize",
+    "save": "Save",
+    "clear": "Clear selection",
+    "undo": "Undo",
+    "cleared": "Cleared {{count}} item(s)",
+    "restored": "Selection restored",
+    "askTooltip": "Ask a question about the selected items",
+    "visualizeTooltip": "Show selected items in the graph",
+    "saveTooltip": "Save as a named collection",
+    "saveMinTooltip": "Select at least 2 items to save",
+    "largeWarning": "Large selection — chat may use summary mode",
+    "saveTitle": "Save as Collection",
+    "saveHelp": "{{count}} item(s) will be grouped into a new collection.",
+    "saveNameLabel": "Collection name",
+    "saveNameHint": "Letters, numbers, hyphens, underscores. Spaces become hyphens.",
+    "saveSuccess": "Saved collection \"{{name}}\"",
+    "conflictTitle": "Name already exists",
+    "conflictBody": "Collection \"{{name}}\" already has {{count}} documents. Pick a different name, or merge your selection into it.",
+    "merge": "Merge",
+    "rename": "Rename"
   }
 }

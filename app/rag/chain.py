@@ -194,14 +194,19 @@ def _build_hybrid_retriever(
     return RunnableLambda(_search)
 
 
-def _get_reranker(settings: Settings, llm: BaseChatModel | None = None):
+def _get_reranker(settings: Settings, llm: BaseChatModel | None = None, top_n_override: int | None = None):
     """Create a document compressor based on the configured rerank provider.
 
     Supported providers: flashrank (default, local CPU), cross-encoder (local GPU),
     jina (API), cohere (API), llm (uses chat model).
+
+    Args:
+        top_n_override: If set, overrides settings.rerank_top_n. Used when the
+            caller (retrieval pipeline) knows how many chunks the LLM should see,
+            so the rerank step doesn't throttle multi-doc queries.
     """
     provider = settings.rerank_provider
-    top_n = settings.rerank_top_n
+    top_n = top_n_override if top_n_override is not None else settings.rerank_top_n
     model = settings.rerank_model
 
     try:

@@ -78,6 +78,12 @@ export default function ChatPage() {
   const scopeDocId = searchParams.get('doc')
   const scopeDocName = searchParams.get('name') || scopeDocId
   const scopeCollection = searchParams.get('collection')
+  // Multi-select: Dashboard's "Ask" button sends ?doc_ids=a,b,c
+  const scopeDocIdsParam = searchParams.get('doc_ids')
+  const scopeDocIds = useMemo(
+    () => (scopeDocIdsParam ? scopeDocIdsParam.split(',').filter(Boolean) : null),
+    [scopeDocIdsParam]
+  )
   const prefillQuestion = searchParams.get('q')
 
   const [sessionId, setSessionId] = useState(null)
@@ -126,7 +132,7 @@ export default function ChatPage() {
     setContextInfo(null)
     setSelectedSource(null)
     setShowSources(false)
-  }, [scopeDocId, scopeCollection])
+  }, [scopeDocId, scopeCollection, scopeDocIdsParam])
 
   const clearScope = () => {
     setSearchParams({})
@@ -228,7 +234,9 @@ export default function ChatPage() {
         body: JSON.stringify({
           question, top_k: 8,
           session_id: newSessionId,
-          ...(scopeDocId ? { doc_ids: [scopeDocId] } : {}),
+          ...(scopeDocIds ? { doc_ids: scopeDocIds }
+                : scopeDocId ? { doc_ids: [scopeDocId] }
+                : {}),
           ...(scopeCollection ? { collection: scopeCollection } : {}),
         }),
         signal: controller.signal,
@@ -474,12 +482,15 @@ export default function ChatPage() {
 
         {/* Scope indicator + Input bar */}
         <div className="px-4 py-3 border-t shrink-0" style={{ borderColor: 'hsl(217 33% 17%)' }}>
-          {(scopeDocId || scopeCollection) && (
+          {(scopeDocId || scopeCollection || scopeDocIds) && (
             <div className="max-w-3xl mx-auto mb-2 flex items-center gap-2 text-xs"
                  style={{ color: 'hsl(215 20% 65%)' }}>
               <FileText size={12} />
               <span>{t('chat.searchingIn')} <strong style={{ color: 'hsl(210 40% 98%)' }}>
-                {scopeDocId ? scopeDocName : scopeCollection}
+                {scopeDocIds
+                  ? t('chat.nDocs', { count: scopeDocIds.length, defaultValue: `${scopeDocIds.length} selected documents` })
+                  : scopeDocId ? scopeDocName
+                  : scopeCollection}
               </strong></span>
               <button onClick={clearScope} className="opacity-40 hover:opacity-100"><X size={12} /></button>
             </div>

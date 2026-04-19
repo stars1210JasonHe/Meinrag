@@ -27,6 +27,8 @@ from app.models.schemas import (
     DocumentUpdateRequest,
     DocumentUpdateResponse,
     CollectionsResponse,
+    SaveCollectionRequest,
+    SaveCollectionResponse,
     ChunkDetail,
     ChunkListResponse,
 )
@@ -219,6 +221,55 @@ async def list_collections(
     return CollectionsResponse(
         taxonomy_categories=PRIMARY_CATEGORIES,
         existing_collections=existing,
+    )
+
+
+@router.post("/collections/save", response_model=SaveCollectionResponse)
+async def save_collection(
+    request: SaveCollectionRequest,
+    settings: Settings = Depends(get_settings),
+    registry: DocumentRepository = Depends(get_registry),
+    current_user: str = Depends(get_current_user),
+):
+    """Save a selection as a named collection — atomic add of doc_ids to collection.
+
+    If the collection already has docs, behavior depends on `mode`:
+      - mode="new": return 409 so the frontend can prompt for rename OR merge.
+      - mode="merge": add non-duplicate doc_ids to the existing collection.
+    """
+    # Normalize name (lowercase, hyphen-separated, matches classifier convention)
+    name = request.name.strip().lower().replace(" ", "-")
+    if not re.match(r"^[a-z0-9_-]+$", name):
+        raise HTTPException(
+            status_code=400,
+            detail="Collection name must contain only letters, numbers, hyphens, underscores",
+        )
+
+    user_filter = _get_user_filter(settings, current_user)
+
+    # Check if collection already has docs (user-scoped)
+    existing_docs = await registry.list_by_collection(name, user_id=user_filter)
+
+    if existing_docs and request.mode == "new":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Collection '{name}' already exists with {len(existing_docs)} documents. "
+                   f"Pick a different name or retry with mode='merge'.",
+        )
+
+    added, skipped = await registry.add_docs_to_collection(
+        collection=name,
+        doc_ids=request.doc_ids,
+        user_id=user_filter,
+    )
+
+    total = len(existing_docs) + added  # existing + newly added
+
+    return SaveCollectionResponse(
+        name=name,
+        added=added,
+        already_in_collection=skipped,
+        total_docs_in_collection=total,
     )
 
 

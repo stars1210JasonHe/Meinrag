@@ -46,6 +46,15 @@ export const fetchDocumentChunks = (docId, page, userId) => {
   return apiFetch(`/documents/${docId}/chunks${params}`, { headers: headers(userId) })
 }
 
+// Save a selection as a named collection.
+// mode: "new" (refuse on conflict with 409) | "merge" (add to existing)
+export const saveCollection = (name, docIds, mode = "new", userId) =>
+  apiFetch('/documents/collections/save', {
+    method: 'POST',
+    headers: headers(userId),
+    body: JSON.stringify({ name, doc_ids: docIds, mode }),
+  })
+
 // Download original source file — bypasses apiFetch since we need blob, not JSON
 export async function downloadDocument(docId, filename, userId) {
   const resp = await fetch(`${API_BASE}/documents/${docId}/download`, {

@@ -439,13 +439,21 @@ async def _rerank_results(
     question: str,
     settings,
     llm=None,
+    top_n: int | None = None,
 ) -> list[tuple]:
-    """Apply cross-encoder reranking to retrieved results."""
+    """Apply cross-encoder reranking to retrieved results.
+
+    top_n: how many to keep after reranking. Defaults to settings.rerank_top_n
+    (currently 4), which is fine for single-doc but starves multi-doc queries.
+    Callers should pass the effective top_k so per-doc distribution works.
+    """
     if not retrieved:
         return retrieved
     try:
         from app.rag.chain import _get_reranker
-        compressor = _get_reranker(settings, llm)
+        # Use max of setting and caller's request so a small setting doesn't cap large queries
+        effective_top_n = max(settings.rerank_top_n, top_n) if top_n else settings.rerank_top_n
+        compressor = _get_reranker(settings, llm, top_n_override=effective_top_n)
         docs = [doc for doc, _ in retrieved]
         compressed = compressor.compress_documents(docs, question)
 
@@ -802,6 +810,72 @@ def _compute_context_budget(
     return chunk_budget, history_budget, total
 
 
+def _ensure_per_doc_coverage(
+    retrieved: list[tuple],
+    all_candidates: list[tuple],
+    scope_doc_ids: list[str] | None,
+    question: str = "",
+    vector_store=None,
+) -> list[tuple]:
+    """Guarantee at least 1 chunk from every doc the user explicitly selected.
+
+    Two-step backfill for missing docs:
+      1. Look in the pre-narrow candidate pool (fast, no extra I/O).
+      2. If still missing AND vector_store provided: run a small per-doc
+         similarity search. This handles the case where the initial vector
+         search was biased to top-scoring docs and missed weaker matches.
+
+    Preserves order of existing chunks; new chunks go at the end (budget
+    step reorders via the doc-aware priority pass).
+    """
+    if not scope_doc_ids or len(scope_doc_ids) <= 1:
+        return retrieved
+    represented = {doc.metadata.get("doc_id") for doc, _ in retrieved}
+    missing = [did for did in scope_doc_ids if did not in represented]
+    if not missing:
+        return retrieved
+
+    result = list(retrieved)
+    appended_from_pool = 0
+    still_missing: list[str] = []
+
+    # Step 1: try pre-narrow pool
+    for did in missing:
+        best = None
+        for doc, score in all_candidates:
+            if doc.metadata.get("doc_id") == did:
+                if best is None or score > best[1]:
+                    best = (doc, score)
+        if best is not None:
+            result.append(best)
+            appended_from_pool += 1
+        else:
+            still_missing.append(did)
+
+    # Step 2: per-doc vector search for docs not found in pool
+    appended_from_search = 0
+    if still_missing and vector_store is not None and question:
+        for did in still_missing:
+            try:
+                per_doc_results = vector_store.similarity_search_with_scores(
+                    question, k=2, doc_ids=[did],
+                )
+                if per_doc_results:
+                    # Take top result for this doc
+                    result.append(per_doc_results[0])
+                    appended_from_search += 1
+            except Exception as e:
+                logger.debug("Per-doc search for %s failed: %s", did, e)
+
+    total_appended = appended_from_pool + appended_from_search
+    if total_appended:
+        logger.info(
+            "Per-doc coverage: added %d chunks (%d from pool + %d via search) for missing docs",
+            total_appended, appended_from_pool, appended_from_search,
+        )
+    return result
+
+
 def _apply_per_doc_cap(
     retrieved: list[tuple], n_docs_in_scope: int, top_k: int,
 ) -> list[tuple]:
@@ -828,34 +902,68 @@ def _apply_per_doc_cap(
 def _apply_token_budget(
     retrieved: list[tuple], chunk_budget: int,
 ) -> tuple[list[tuple], int]:
-    """Greedy fill: add chunks in rank order until adding the next would exceed
-    budget. Returns (truncated_list, actual_tokens_used). Skips chunks that
-    individually exceed 25% of budget (outliers)."""
+    """Two-pass greedy fill — doc-diversity aware.
+
+    Pass 1: Reserve budget for the highest-score chunk of each unique doc, so
+    multi-doc queries always have representation.
+    Pass 2: Fill remaining budget with the next-best chunks by rank, regardless
+    of doc.
+
+    Returns (truncated_list, actual_tokens_used). Skips chunks that
+    individually exceed 25% of budget (outliers).
+    """
     if chunk_budget <= 0:
         return [], 0
     max_single_chunk = chunk_budget // 4
-    kept = []
+
+    # Identify the best (highest-scoring) chunk per doc_id — preserve retrieval order for ties
+    first_seen_index: dict[str, int] = {}
+    for i, (doc, _score) in enumerate(retrieved):
+        did = doc.metadata.get("doc_id")
+        if did not in first_seen_index:
+            first_seen_index[did] = i
+    priority_indices = set(first_seen_index.values())
+
+    kept_order_indices: list[int] = []
     used = 0
     skipped_oversize = 0
-    for doc, score in retrieved:
+
+    # Pass 1: priority chunks (top chunk per doc)
+    for i, (doc, _score) in enumerate(retrieved):
+        if i not in priority_indices:
+            continue
         tokens = _count_tokens(doc.page_content or "")
-        if tokens > max_single_chunk and len(kept) > 0:
+        if tokens > max_single_chunk and kept_order_indices:
             skipped_oversize += 1
-            continue  # skip oversize outlier unless it's our only hope
-        if tokens > max_single_chunk and len(kept) == 0:
-            # If it's the only option, include it anyway (let LLM handle overflow)
-            kept.append((doc, score))
-            used = tokens
+            continue
+        if used + tokens > chunk_budget:
+            # Budget exhausted even for priority pass — stop (don't lose coverage for random later doc)
             break
+        kept_order_indices.append(i)
+        used += tokens
+
+    # Pass 2: fill remaining budget with non-priority chunks by rank
+    for i, (doc, _score) in enumerate(retrieved):
+        if i in priority_indices:
+            continue
+        tokens = _count_tokens(doc.page_content or "")
+        if tokens > max_single_chunk and kept_order_indices:
+            skipped_oversize += 1
+            continue
         if used + tokens > chunk_budget:
             break
-        kept.append((doc, score))
+        kept_order_indices.append(i)
         used += tokens
+
+    # Preserve rank order among kept chunks
+    kept_order_indices.sort()
+    kept = [retrieved[i] for i in kept_order_indices]
+
     if skipped_oversize:
         logger.info("Budget: skipped %d oversize chunks (>%d tokens)",
                     skipped_oversize, max_single_chunk)
     if len(kept) < len(retrieved):
-        logger.info("Budget truncation: %d -> %d chunks (%d tokens / %d budget)",
+        logger.info("Budget truncation (doc-aware): %d -> %d chunks (%d tokens / %d budget)",
                     len(retrieved), len(kept), used, chunk_budget)
     return kept, used
 
@@ -943,11 +1051,15 @@ async def retrieve_and_rank(
     strategy_name = primary_cfg.get("strategy", "top_k")
     strategy = get_strategy(qt_config, strategy_name)
     fetch_k = int(top_k * strategy.get("fetch_multiplier", 1.5))
+    logger.info("[TRACE] top_k=%d fetch_k=%d strategy=%s doc_ids=%d",
+                top_k, fetch_k, strategy_name,
+                len(doc_ids) if doc_ids else 0)
 
     # 4. Vector search
     retrieved = vector_store.similarity_search_with_scores(
         question, k=fetch_k, doc_ids=doc_ids,
     )
+    logger.info("[TRACE] after vector_search: %d chunks", len(retrieved))
 
     # 4b. Summary index search (dual-index)
     if summary_store:
@@ -993,23 +1105,47 @@ async def retrieve_and_rank(
         question, retrieved, llm, vector_store, settings, doc_ids, top_k,
         fetch_k=fetch_k,
     )
+    logger.info("[TRACE] after query_expansion: %d chunks", len(retrieved))
+
+    # Save pre-narrowing candidates for per-doc coverage backfill
+    pre_narrow_candidates = list(retrieved)
 
     # 6. Type-specific strategies
     if strategy.get("text_only"):
         text_only = [(doc, score) for doc, score in retrieved
                      if doc.metadata.get("chunk_type") == "text"]
         retrieved = _section_aware_sample(text_only, top_k=top_k)
+        logger.info("[TRACE] after text_only+section_aware_sample: %d chunks", len(retrieved))
     elif strategy.get("demote_references"):
         retrieved = _demote_reference_results(retrieved, top_k)
+        logger.info("[TRACE] after demote_references: %d chunks", len(retrieved))
+
+    # 6a. Multi-doc coverage guarantee — if user selected N docs, ensure each
+    # has at least 1 chunk in the narrowed results. Falls back to per-doc
+    # vector search if a selected doc is absent from the initial candidate pool.
+    retrieved = _ensure_per_doc_coverage(
+        retrieved, pre_narrow_candidates, doc_ids,
+        question=question, vector_store=vector_store,
+    )
+    logger.info("[TRACE] after per_doc_coverage: %d chunks", len(retrieved))
 
     # Scoring stage — constants from scoring profile, resolved for query type
     retrieved = _apply_reference_penalty(retrieved, scoring)
     retrieved = _apply_section_weights(retrieved, scoring)
     retrieved = _apply_boilerplate_penalty(retrieved, scoring)
+    logger.info("[TRACE] after scoring penalties: %d chunks", len(retrieved))
 
     # 6b. Reranking (if enabled — Settings flag)
     if settings.rerank_enabled:
-        retrieved = await _rerank_results(retrieved, question, settings, llm)
+        # Pass top_k so rerank doesn't throttle multi-doc queries.
+        # For multi-doc scope: ensure at least ~3 chunks per selected doc so the
+        # per-doc cap has material to work with.
+        n_docs = len(doc_ids) if doc_ids else 0
+        effective_top_n = max(top_k, n_docs * 3) if n_docs > 1 else top_k
+        retrieved = await _rerank_results(
+            retrieved, question, settings, llm, top_n=effective_top_n,
+        )
+        logger.info("[TRACE] after rerank (top_n=%d): %d chunks", effective_top_n, len(retrieved))
 
     # 7. Check web search
     if force_web_search or _needs_web_search(user_scoped, retrieved, settings):
@@ -1026,17 +1162,20 @@ async def retrieve_and_rank(
             question=question, embeddings=embeddings,
             proximity_pages=settings.visual_proximity_pages,
         )
+        logger.info("[TRACE] after visual_proximity: %d chunks", len(retrieved))
 
     # 9. Graph expansion (decay from scoring profile)
     retrieved = await _expand_via_edges(
         retrieved, edge_repo, vector_store, scoring,
         relations=["describes", "references"],
     )
+    logger.info("[TRACE] after graph_expansion: %d chunks", len(retrieved))
 
     # 10. Composite scoring (weights from query_types.json, graph math from profile)
     retrieved = await _apply_composite_scoring(
         retrieved, edge_repo, primary_type, settings, scoring,
     )
+    logger.info("[TRACE] after composite_scoring: %d chunks", len(retrieved))
 
     # 11. Confidence tier (from raw scores, before normalization)
     confidence_tier = _compute_confidence_tier(retrieved, profile)

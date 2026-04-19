@@ -1,6 +1,6 @@
 {
   "common": {
-    "cancel": "取消",
+    "cancel": "Cancel",
     "confirm": "确认",
     "delete": "删除",
     "loading": "加载中...",
@@ -59,7 +59,8 @@
     "backendError": "后端错误：{{message}}",
     "inlineError": "错误：{{message}}",
     "requestFailed": "请求失败：{{message}}",
-    "responseFailed": "获取响应失败：{{message}}"
+    "responseFailed": "获取响应失败：{{message}}",
+    "nDocs": "{{count}} selected documents"
   },
   "inputBar": {
     "askCollection": "在 {{collection}} 文档中提问...",
@@ -147,5 +148,30 @@
     "uploadFailed": "上传失败：{{message}}",
     "uploadFailedStatus": "上传失败（{{status}}）",
     "unknownError": "未知错误"
+  },
+  "selection": {
+    "toolbar": "选择操作",
+    "nSelected": "已选 {{count}} 项",
+    "ask": "提问",
+    "visualize": "可视化",
+    "save": "保存",
+    "clear": "清除选择",
+    "undo": "撤销",
+    "cleared": "已清除 {{count}} 项",
+    "restored": "已恢复选择",
+    "askTooltip": "对所选项目提问",
+    "visualizeTooltip": "在图谱中显示所选项目",
+    "saveTooltip": "保存为命名集合",
+    "saveMinTooltip": "至少选择 2 项才能保存",
+    "largeWarning": "选择项较多 — 对话可能使用摘要模式",
+    "saveTitle": "保存为集合",
+    "saveHelp": "{{count}} 项将归为新集合。",
+    "saveNameLabel": "集合名称",
+    "saveNameHint": "只能包含字母、数字、连字符和下划线。空格将转为连字符。",
+    "saveSuccess": "已保存集合 \"{{name}}\"",
+    "conflictTitle": "名称已存在",
+    "conflictBody": "集合 \"{{name}}\" 已包含 {{count}} 篇文档。请选择其他名称，或合并到该集合。",
+    "merge": "合并",
+    "rename": "重命名"
   }
 }

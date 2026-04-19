@@ -118,6 +118,43 @@ class DocumentRepository:
         result = await self._session.execute(stmt)
         return sorted(result.scalars().all())
 
+    async def add_docs_to_collection(
+        self, collection: str, doc_ids: list[str], user_id: str | None = None,
+    ) -> tuple[int, int]:
+        """Add each doc to the collection if not already assigned.
+
+        Returns (added_count, skipped_existing_count). Validates user ownership
+        when user_id is provided. Atomic within the current session's transaction.
+        """
+        if not doc_ids:
+            return 0, 0
+
+        # Validate docs exist and belong to user (if scoped)
+        stmt = select(DocumentModel.doc_id).where(DocumentModel.doc_id.in_(doc_ids))
+        if user_id:
+            stmt = stmt.where(DocumentModel.user_id == user_id)
+        result = await self._session.execute(stmt)
+        valid_ids = set(result.scalars().all())
+
+        if not valid_ids:
+            return 0, 0
+
+        # Fetch existing junction rows to avoid duplicate inserts
+        existing_stmt = select(DocumentCollectionModel.doc_id).where(
+            DocumentCollectionModel.collection == collection,
+            DocumentCollectionModel.doc_id.in_(valid_ids),
+        )
+        existing_result = await self._session.execute(existing_stmt)
+        existing_ids = set(existing_result.scalars().all())
+
+        to_add = valid_ids - existing_ids
+        for did in to_add:
+            self._session.add(
+                DocumentCollectionModel(doc_id=did, collection=collection)
+            )
+        await self._session.flush()
+        return len(to_add), len(existing_ids)
+
     async def get_by_id(self, doc_id: str) -> dict | None:
         """Alias for get() — returns document as dict or None."""
         return await self.get(doc_id)

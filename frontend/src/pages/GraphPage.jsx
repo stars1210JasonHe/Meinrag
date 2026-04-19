@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import ForceGraph2D from 'react-force-graph-2d'
@@ -30,6 +30,12 @@ const TYPE_ICONS = { text: FileText, table: Table2, image: Image, formula: Calcu
 
 export default function GraphPage() {
   const { docId } = useParams()
+  const [searchParams] = useSearchParams()
+  const multiDocsParam = searchParams.get('docs')
+  const multiDocIds = useMemo(
+    () => (multiDocsParam ? multiDocsParam.split(',').filter(Boolean) : null),
+    [multiDocsParam]
+  )
   const navigate = useNavigate()
   const { t } = useTranslation()
   const graphRef = useRef(null)
@@ -49,7 +55,9 @@ export default function GraphPage() {
     co_located: false,
   })
   const [scope, setScope] = useState(docId || '')
-  const [scopeType, setScopeType] = useState(docId ? 'doc' : 'all') // 'all' | 'collection' | 'doc'
+  const [scopeType, setScopeType] = useState(
+    multiDocIds ? 'docs' : (docId ? 'doc' : 'all')
+  ) // 'all' | 'collection' | 'doc' | 'docs'
   const [scopeLabel, setScopeLabel] = useState('')
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
   const [contextMenu, setContextMenu] = useState(null) // {x, y, items}
@@ -100,22 +108,28 @@ export default function GraphPage() {
     return groups
   }, [docList])
 
-  // For collection scope, filter document-level graph to matching docs
+  // For collection / multi-doc scope, filter document-level graph to matching docs
   const filteredGraphData = useMemo(() => {
-    if (scopeType !== 'collection' || !graphData) return graphData
-    const colDocs = docsByCollection[scopeLabel] || []
-    const colDocIds = new Set(colDocs.map(d => d.doc_id))
+    if (!graphData) return graphData
+    let allowedIds = null
+    if (scopeType === 'collection') {
+      const colDocs = docsByCollection[scopeLabel] || []
+      allowedIds = new Set(colDocs.map(d => d.doc_id))
+    } else if (scopeType === 'docs' && multiDocIds) {
+      allowedIds = new Set(multiDocIds)
+    }
+    if (!allowedIds) return graphData
     return {
-      nodes: (graphData.nodes || []).filter(n => colDocIds.has(n.doc_id)),
+      nodes: (graphData.nodes || []).filter(n => allowedIds.has(n.doc_id)),
       edges: (graphData.edges || []).filter(e =>
-        colDocIds.has(e.source_doc_id) && colDocIds.has(e.target_doc_id)
+        allowedIds.has(e.source_doc_id) && allowedIds.has(e.target_doc_id)
       ),
     }
-  }, [graphData, scopeType, scopeLabel, docsByCollection])
+  }, [graphData, scopeType, scopeLabel, docsByCollection, multiDocIds])
 
   // Transform backend data to react-force-graph format
   const graphFormatted = useMemo(() => {
-    const data = scopeType === 'collection' ? filteredGraphData : graphData
+    const data = (scopeType === 'collection' || scopeType === 'docs') ? filteredGraphData : graphData
     if (!data) return { nodes: [], links: [] }
 
     const nodes = (data.nodes || [])

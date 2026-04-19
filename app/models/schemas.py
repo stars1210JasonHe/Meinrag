@@ -136,6 +136,22 @@ class CollectionsResponse(BaseModel):
     existing_collections: list[str]
 
 
+class SaveCollectionRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80, description="Collection name")
+    doc_ids: list[str] = Field(..., min_length=1, description="Doc IDs to assign")
+    mode: Literal["new", "merge"] = Field(
+        default="new",
+        description="'new' = refuse with 409 if name exists. 'merge' = add to existing collection.",
+    )
+
+
+class SaveCollectionResponse(BaseModel):
+    name: str
+    added: int
+    already_in_collection: int
+    total_docs_in_collection: int
+
+
 # --- Graph visualization ---
 
 class GraphNode(BaseModel):

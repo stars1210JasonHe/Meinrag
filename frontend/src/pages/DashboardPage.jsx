@@ -12,8 +12,33 @@ import { fetchDocuments, fetchCollections, fetchGraphDocuments, deleteDocument }
 import { cn } from '@/lib/utils'
 import ContextMenu from '@/components/ContextMenu'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import SelectionActionBar from '@/components/SelectionActionBar'
+import SaveCollectionDialog from '@/components/SaveCollectionDialog'
+import { useSelection } from '@/hooks/useSelection'
 
 const USER_ID = 'admin'
+
+// localStorage key: list of collection names user explicitly created via Save
+const USER_SAVED_KEY = `meinrag.user_saved_collections.${USER_ID}`
+
+function loadUserSaved() {
+  try {
+    const raw = localStorage.getItem(USER_SAVED_KEY)
+    return new Set(raw ? JSON.parse(raw) : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function markUserSaved(name) {
+  try {
+    const cur = loadUserSaved()
+    cur.add(name)
+    localStorage.setItem(USER_SAVED_KEY, JSON.stringify([...cur]))
+  } catch {
+    // ignore
+  }
+}
 
 // Shape colors — matched to GraphPage's document color + Windows-folder-yellow for domains
 const DOC_COLOR = '#6366f1'        // indigo (same as GraphPage's document node)
@@ -81,6 +106,33 @@ export default function DashboardPage() {
   const [selectedDomain, setSelectedDomain] = useState(null)
   const [contextMenu, setContextMenu] = useState(null)
   const [confirmDelete, setConfirmDelete] = useState(null)
+
+  // Multi-select (shift-click nodes to add to selection)
+  const selection = useSelection()
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false)
+  const [userSaved, setUserSaved] = useState(() => loadUserSaved())
+
+  // Esc key clears selection (with undo toast)
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape' && selection.count > 0) {
+        const count = selection.count
+        selection.clearWithUndo()
+        toast(
+          t('selection.cleared', { count, defaultValue: `Cleared ${count} item(s)` }),
+          {
+            action: {
+              label: t('selection.undo', { defaultValue: 'Undo' }),
+              onClick: () => selection.undo(),
+            },
+            duration: 5000,
+          }
+        )
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selection, t])
 
   const { data: documentsData, isLoading } = useQuery({
     queryKey: ['documents', USER_ID],
@@ -271,6 +323,10 @@ export default function DashboardPage() {
     const staticDimmed = node._dimmed && !active
     const opacity = staticDimmed ? 0.18 : (isHighlighted ? 1.0 : 0.2)
 
+    // Selected state (multi-select): draws a signature-color ring behind the shape
+    const isSelected = (node._type === 'document' && selection.hasDoc(node._data?.doc_id))
+      || (node._type === 'collection' && selection.hasCollection(node.id.replace('col:', '')))
+
     const fg1 = cssVar('--fg-1', '#d4d0ca')
     const fgDim = cssVar('--fg-dim', '#9a9690')
     const fgFaint = cssVar('--fg-faint', '#5a564f')
@@ -282,6 +338,18 @@ export default function DashboardPage() {
       const w = s * 2.4, h = s * 1.9
       const tabW = s * 0.9, tabH = s * 0.45
       const x = node.x, y = node.y
+
+      // Selection ring (behind everything)
+      if (isSelected) {
+        ctx.globalAlpha = 1.0
+        ctx.beginPath()
+        ctx.roundRect?.(x - w/2 - 5, y - h/2 - tabH - 5, w + 10, h + tabH + 10, 5) ||
+          ctx.rect(x - w/2 - 5, y - h/2 - tabH - 5, w + 10, h + tabH + 10)
+        ctx.strokeStyle = cssVar('--signature', '#5b7ec9')
+        ctx.lineWidth = 2.5
+        ctx.stroke()
+        ctx.globalAlpha = opacity
+      }
 
       // Hover glow
       if (hovered) {
@@ -308,11 +376,47 @@ export default function DashboardPage() {
       ctx.lineWidth = 0.8
       ctx.stroke()
 
+      // Star marker for user-saved collections (top-left corner of folder)
+      const collName = node.id.replace('col:', '')
+      if (userSaved.has(collName)) {
+        const sx = x - w/2 + tabH * 0.8
+        const sy = y - h/2 - tabH * 0.1
+        const sr = Math.max(2, s * 0.32)
+        // 5-point star
+        ctx.beginPath()
+        for (let i = 0; i < 10; i++) {
+          const r = i % 2 === 0 ? sr : sr * 0.45
+          const a = (Math.PI / 5) * i - Math.PI / 2
+          const px = sx + Math.cos(a) * r
+          const py = sy + Math.sin(a) * r
+          if (i === 0) ctx.moveTo(px, py)
+          else ctx.lineTo(px, py)
+        }
+        ctx.closePath()
+        ctx.fillStyle = cssVar('--signature', '#5b7ec9')
+        ctx.fill()
+        ctx.strokeStyle = '#ffffffcc'
+        ctx.lineWidth = 0.6
+        ctx.stroke()
+      }
+
     } else {
       // ==== DOCUMENT (paper w/ folded corner) SHAPE ====
       const w = s * 1.7, h = s * 2.1
       const fold = s * 0.55
       const x = node.x, y = node.y
+
+      // Selection ring (behind everything)
+      if (isSelected) {
+        ctx.globalAlpha = 1.0
+        ctx.beginPath()
+        ctx.roundRect?.(x - w/2 - 5, y - h/2 - 5, w + 10, h + 10, 4) ||
+          ctx.rect(x - w/2 - 5, y - h/2 - 5, w + 10, h + 10)
+        ctx.strokeStyle = cssVar('--signature', '#5b7ec9')
+        ctx.lineWidth = 2.5
+        ctx.stroke()
+        ctx.globalAlpha = opacity
+      }
 
       // Hover glow
       if (hovered) {
@@ -356,16 +460,25 @@ export default function DashboardPage() {
     ctx.fillText(label || '', node.x, labelY)
 
     ctx.globalAlpha = 1.0
-  }, [hoverNode, highlightNodes])
+  }, [hoverNode, highlightNodes, selection, userSaved])
 
-  const handleNodeClick = useCallback((node) => {
+  const handleNodeClick = useCallback((node, event) => {
+    // Shift-click → toggle multi-select instead of navigating
+    if (event?.shiftKey) {
+      if (node._type === 'document' && node._data?.doc_id) {
+        selection.toggleDoc(node._data.doc_id)
+      } else if (node._type === 'collection') {
+        selection.toggleCollection(node.id.replace('col:', ''))
+      }
+      return
+    }
     if (node._type === 'document' && node._data?.doc_id) {
       navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.filename || '')}`)
     } else if (node._type === 'collection') {
       setSelectedDomain(prev => prev === node.id.replace('col:', '') ? null : node.id.replace('col:', ''))
       setShowPanel(true)
     }
-  }, [navigate])
+  }, [navigate, selection])
 
   const handleNodeHover = useCallback((node) => {
     setHoverNode(node || null)
@@ -386,6 +499,52 @@ export default function DashboardPage() {
     setHighlightNodes(neighbors)
     setHighlightLinks(linkSet)
   }, [graphData])
+
+  // Map of collection_name -> [docs]
+  const docsByCollection = useMemo(() => {
+    const m = {}
+    for (const d of (documents || [])) {
+      for (const c of (d.collections || [])) {
+        if (!m[c]) m[c] = []
+        m[c].push(d)
+      }
+    }
+    return m
+  }, [documents])
+
+  // Expand current selection to unique doc_ids (direct + from collections)
+  const selectedDocIds = useMemo(
+    () => selection.expandedDocIds(docsByCollection),
+    [selection, docsByCollection]
+  )
+
+  const handleSelectionAsk = useCallback(() => {
+    if (selectedDocIds.length === 0) return
+    navigate(`/chat?doc_ids=${selectedDocIds.join(',')}`)
+  }, [selectedDocIds, navigate])
+
+  const handleSelectionVisualize = useCallback(() => {
+    if (selectedDocIds.length === 0) return
+    navigate(`/graph?docs=${selectedDocIds.join(',')}`)
+  }, [selectedDocIds, navigate])
+
+  const handleSelectionSave = useCallback(() => {
+    if (selectedDocIds.length < 2) return
+    setSaveDialogOpen(true)
+  }, [selectedDocIds])
+
+  const handleSavedSuccess = useCallback((name) => {
+    setSaveDialogOpen(false)
+    markUserSaved(name)
+    setUserSaved(loadUserSaved())
+    selection.clear()
+    toast.success(t('selection.saveSuccess', {
+      name, defaultValue: `Saved collection "${name}"`,
+    }))
+    queryClient.invalidateQueries({ queryKey: ['collections', USER_ID] })
+    queryClient.invalidateQueries({ queryKey: ['documents', USER_ID] })
+    queryClient.invalidateQueries({ queryKey: ['graph-documents', USER_ID] })
+  }, [selection, queryClient, t])
 
   const handleDelete = (docId) => {
     const doc = documents.find(d => d.doc_id === docId)
@@ -804,6 +963,22 @@ export default function DashboardPage() {
           )}
         </div>
       </main>
+
+      {/* Multi-select action bar (floats at bottom of viewport) */}
+      <SelectionActionBar
+        onAsk={handleSelectionAsk}
+        onVisualize={handleSelectionVisualize}
+        onSave={handleSelectionSave}
+      />
+
+      {/* Save selection as collection dialog */}
+      <SaveCollectionDialog
+        open={saveDialogOpen}
+        count={selectedDocIds.length}
+        docIds={selectedDocIds}
+        onClose={() => setSaveDialogOpen(false)}
+        onSaved={handleSavedSuccess}
+      />
     </div>
   )
 }
