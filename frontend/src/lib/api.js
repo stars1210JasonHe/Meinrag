@@ -46,6 +46,26 @@ export const fetchDocumentChunks = (docId, page, userId) => {
   return apiFetch(`/documents/${docId}/chunks${params}`, { headers: headers(userId) })
 }
 
+// Download original source file — bypasses apiFetch since we need blob, not JSON
+export async function downloadDocument(docId, filename, userId) {
+  const resp = await fetch(`${API_BASE}/documents/${docId}/download`, {
+    headers: { 'X-User-Id': userId || 'admin' },
+  })
+  if (!resp.ok) {
+    const err = await resp.text().catch(() => resp.statusText)
+    throw new Error(`Download ${resp.status}: ${err}`)
+  }
+  const blob = await resp.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename || `document-${docId}`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
 // Graph
 export const fetchGraphDocuments = (userId) =>
   apiFetch('/graph/documents', { headers: headers(userId) })

@@ -1,4 +1,5 @@
-import { FileText, Table2, Image, Calculator } from 'lucide-react'
+import { FileText, Table2, Image, Calculator, Download } from 'lucide-react'
+import { downloadDocument } from '../lib/api'
 
 const TYPE_ICONS = {
   text: FileText,
@@ -21,11 +22,30 @@ export default function SourceItem({ source, index, isActive, onClick }) {
   const displayName = source.source_file?.replace(/\.[^.]+$/, '') || 'unknown'
   const heading = source.headings?.split(' > ').pop()
   const detail = source.label || heading || ''
+  const isDocument = source.source_type !== 'web' && source.doc_id
+
+  async function handleDownload(e) {
+    e.stopPropagation()
+    try {
+      await downloadDocument(source.doc_id, source.source_file)
+    } catch (err) {
+      // surface minimally; parent can add toast handling later
+      console.error('Download failed:', err)
+    }
+  }
 
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={() => onClick(index)}
-      className={`flex items-start gap-2 w-full px-3 py-2.5 text-left rounded-lg transition-colors ${
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onClick(index)
+        }
+      }}
+      className={`relative flex items-start gap-2 w-full px-3 py-2.5 pr-9 text-left rounded-lg transition-colors cursor-pointer ${
         isActive
           ? 'bg-white/10 border-l-2 border-[hsl(168_84%_40%)]'
           : 'hover:bg-white/5 border-l-2 border-transparent'
@@ -50,6 +70,17 @@ export default function SourceItem({ source, index, isActive, onClick }) {
           )}
         </div>
       </div>
-    </button>
+      {isDocument && (
+        <button
+          type="button"
+          onClick={handleDownload}
+          className="absolute top-2 right-2 p-1.5 rounded-md opacity-50 hover:opacity-100 hover:bg-white/10 transition"
+          title={`Download ${source.source_file}`}
+          aria-label={`Download ${source.source_file}`}
+        >
+          <Download size={12} />
+        </button>
+      )}
+    </div>
   )
 }
