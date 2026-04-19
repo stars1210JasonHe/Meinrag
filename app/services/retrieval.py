@@ -41,6 +41,12 @@ class RetrievalResult:
     web_search_needed: bool = False
     chat_history: list | None = None
     confidence_tier: str | None = None
+    # Context budget telemetry
+    context_used_tokens: int | None = None
+    context_budget_tokens: int | None = None
+    context_mode: str | None = None  # "chunks" (v1); "summary" (phase 3, future)
+    chunks_included: int | None = None
+    chunks_available: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -706,6 +712,167 @@ def _rrf_merge_bm25(
 # Main pipeline orchestrator
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Token budget management
+# ---------------------------------------------------------------------------
+
+_TIKTOKEN_ENC = None  # cached encoding
+
+def _get_tiktoken_enc():
+    """Load tiktoken encoding once and cache. cl100k_base covers OpenAI models;
+    produces ±10% estimates for Claude/Gemini which is fine for a conservative budget."""
+    global _TIKTOKEN_ENC
+    if _TIKTOKEN_ENC is None:
+        import tiktoken
+        try:
+            _TIKTOKEN_ENC = tiktoken.get_encoding("cl100k_base")
+        except Exception:
+            _TIKTOKEN_ENC = tiktoken.get_encoding("gpt2")
+    return _TIKTOKEN_ENC
+
+
+def _count_tokens(text: str) -> int:
+    """Count tokens in text. Uses cl100k_base (OpenAI GPT-4 family tokenizer)."""
+    if not text:
+        return 0
+    try:
+        return len(_get_tiktoken_enc().encode(text))
+    except Exception:
+        # Fallback: 1 token per 4 chars
+        return max(1, len(text) // 4)
+
+
+def _resolve_model_name(settings: Settings) -> str:
+    """Pick the correct model name based on llm_provider setting."""
+    if settings.llm_provider.value == "openrouter":
+        return settings.openrouter_model
+    return settings.openai_model
+
+
+def _compute_context_budget(
+    question: str,
+    chat_history,
+    query_type: str,
+    settings: Settings,
+) -> tuple[int, int, int]:
+    """Return (chunk_budget_tokens, history_budget_tokens, total_input_budget).
+
+    Layout of the input budget:
+      total = model_window * context_budget_ratio  - reserved_output  - reserved_prompt_overhead
+      history_budget = clamp(history_tokens,
+                             history_min_reserve * total,
+                             history_max_budget * total)
+      chunk_budget = total - history_budget - query_tokens
+      Then chunk_budget is multiplied by QUERY_BUDGET_RATIOS[query_type].
+    """
+    from app.config import lookup_model_window, QUERY_BUDGET_RATIOS, DEFAULT_QUERY_BUDGET_RATIO
+
+    model_name = _resolve_model_name(settings)
+    window = lookup_model_window(model_name)
+
+    total = int(window * settings.context_budget_ratio) \
+            - settings.reserved_output_tokens \
+            - settings.reserved_prompt_overhead_tokens
+
+    if settings.max_context_tokens is not None:
+        total = min(total, settings.max_context_tokens)
+
+    total = max(total, 1024)  # floor to prevent pathological cases
+
+    # History budget
+    history_min = int(total * settings.history_min_reserve_ratio)
+    history_max = int(total * settings.history_max_budget_ratio)
+    history_tokens = 0
+    if chat_history:
+        for msg in chat_history:
+            content = getattr(msg, "content", None) or str(msg)
+            history_tokens += _count_tokens(content)
+    history_budget = max(history_min, min(history_tokens, history_max))
+
+    # Query tokens
+    query_tokens = _count_tokens(question)
+
+    chunk_budget = total - history_budget - query_tokens
+    chunk_budget = max(chunk_budget, 512)  # floor
+
+    # Apply query-type multiplier
+    qt_ratio = QUERY_BUDGET_RATIOS.get(query_type, DEFAULT_QUERY_BUDGET_RATIO)
+    chunk_budget = int(chunk_budget * qt_ratio)
+
+    return chunk_budget, history_budget, total
+
+
+def _apply_per_doc_cap(
+    retrieved: list[tuple], n_docs_in_scope: int, top_k: int,
+) -> list[tuple]:
+    """When scope is multiple docs, cap chunks per doc to prevent one doc from
+    dominating. Preserves rank order within each doc."""
+    if n_docs_in_scope <= 1:
+        return retrieved
+    cap = max(1, top_k // n_docs_in_scope)
+    # Count per doc, keep top-cap from each
+    from collections import defaultdict
+    per_doc_count: dict[str, int] = defaultdict(int)
+    kept = []
+    for doc, score in retrieved:
+        did = doc.metadata.get("doc_id")
+        if per_doc_count[did] < cap:
+            kept.append((doc, score))
+            per_doc_count[did] += 1
+    if len(kept) < len(retrieved):
+        logger.info("Per-doc cap (%d/doc for %d docs): %d -> %d chunks",
+                    cap, n_docs_in_scope, len(retrieved), len(kept))
+    return kept
+
+
+def _apply_token_budget(
+    retrieved: list[tuple], chunk_budget: int,
+) -> tuple[list[tuple], int]:
+    """Greedy fill: add chunks in rank order until adding the next would exceed
+    budget. Returns (truncated_list, actual_tokens_used). Skips chunks that
+    individually exceed 25% of budget (outliers)."""
+    if chunk_budget <= 0:
+        return [], 0
+    max_single_chunk = chunk_budget // 4
+    kept = []
+    used = 0
+    skipped_oversize = 0
+    for doc, score in retrieved:
+        tokens = _count_tokens(doc.page_content or "")
+        if tokens > max_single_chunk and len(kept) > 0:
+            skipped_oversize += 1
+            continue  # skip oversize outlier unless it's our only hope
+        if tokens > max_single_chunk and len(kept) == 0:
+            # If it's the only option, include it anyway (let LLM handle overflow)
+            kept.append((doc, score))
+            used = tokens
+            break
+        if used + tokens > chunk_budget:
+            break
+        kept.append((doc, score))
+        used += tokens
+    if skipped_oversize:
+        logger.info("Budget: skipped %d oversize chunks (>%d tokens)",
+                    skipped_oversize, max_single_chunk)
+    if len(kept) < len(retrieved):
+        logger.info("Budget truncation: %d -> %d chunks (%d tokens / %d budget)",
+                    len(retrieved), len(kept), used, chunk_budget)
+    return kept, used
+
+
+def _reorder_for_attention(retrieved: list[tuple]) -> list[tuple]:
+    """'Lost in the middle' mitigation: place best chunk at start, second-best
+    at end, middle-ranked chunks in between. Research shows U-shape attention
+    in LLMs — positions 0 and N get the most weight."""
+    if len(retrieved) <= 2:
+        return retrieved
+    sorted_items = retrieved  # already sorted by score desc on entry
+    best = sorted_items[0]
+    second = sorted_items[1]
+    middle = sorted_items[2:]
+    return [best] + middle + [second]
+
+
 def _merge_dual_results(raw_results: list[tuple], summary_results: list[tuple]) -> list[tuple]:
     """Merge raw and summary search results, keeping best score per chunk."""
     best: dict = {}  # (doc_id, chunk_index) -> (doc, score)
@@ -878,7 +1045,7 @@ async def retrieve_and_rank(
     retrieved.sort(key=lambda x: x[1], reverse=True)
     retrieved = _normalize_scores(retrieved, profile)
 
-    # 12. Prepend label chunks
+    # 13. Prepend label chunks
     if label_chunks:
         label_keys = set()
         label_results = []
@@ -890,7 +1057,37 @@ async def retrieve_and_rank(
                      if (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index")) not in label_keys]
         retrieved = label_results + retrieved
 
+    chunks_available = len(retrieved)
+
+    # 14. Per-doc cap (multi-doc scope only)
+    # Count unique docs in retrieved set
+    unique_docs = len({doc.metadata.get("doc_id") for doc, _ in retrieved})
+    retrieved = _apply_per_doc_cap(retrieved, unique_docs, top_k)
+
+    # 15. Token budget enforcement — greedy fill until budget reached
+    chunk_budget, history_budget, total_input_budget = _compute_context_budget(
+        question, chat_history, primary_type, settings,
+    )
+    retrieved, tokens_used = _apply_token_budget(retrieved, chunk_budget)
+
+    # 16. Strategic placement — mitigate "lost in the middle"
+    # (Apply only to non-label chunks; labels stay at front for priority)
+    if label_chunks and retrieved:
+        # Keep label chunks at front, reorder the rest
+        n_label = sum(1 for doc, _ in retrieved
+                      if (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index"))
+                      in {(c.metadata.get("doc_id"), c.metadata.get("chunk_index")) for c in label_chunks})
+        if len(retrieved) > n_label + 2:
+            retrieved = retrieved[:n_label] + _reorder_for_attention(retrieved[n_label:])
+    else:
+        retrieved = _reorder_for_attention(retrieved)
+
     sources = _build_source_chunks(retrieved)
+
+    logger.info(
+        "Context budget: %d chunks (%d tokens / %d budget), query=%s",
+        len(retrieved), tokens_used, chunk_budget, primary_type,
+    )
 
     return RetrievalResult(
         sources=sources,
@@ -899,6 +1096,11 @@ async def retrieve_and_rank(
         query_label=query_label,
         chat_history=chat_history,
         confidence_tier=confidence_tier,
+        context_used_tokens=tokens_used,
+        context_budget_tokens=chunk_budget,
+        context_mode="chunks",  # phase 3 will add "summary" fallback
+        chunks_included=len(retrieved),
+        chunks_available=chunks_available,
     )
 
 

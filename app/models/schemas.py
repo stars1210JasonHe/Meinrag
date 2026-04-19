@@ -84,6 +84,12 @@ class QueryResponse(BaseModel):
     web_search_used: bool = False
     query_types: list[str] | None = None
     confidence_tier: str | None = None
+    # Context window telemetry (Phase 1-2)
+    context_used_tokens: int | None = None
+    context_budget_tokens: int | None = None
+    context_mode: str | None = None  # "chunks" | "summary" (phase 3, future)
+    chunks_included: int | None = None
+    chunks_available: int | None = None
 
 
 class UserInfo(BaseModel):

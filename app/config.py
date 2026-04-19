@@ -130,6 +130,16 @@ class Settings(BaseSettings):
     # real signal. Affects BOTH visualization AND retrieval (composite graph_score + graph expansion).
     graph_similar_min_score: float = 0.6
 
+    # Context window management — protects against overflow when passing chunks to LLM.
+    # Effective budget = min(max_context_tokens or inf, model_window * context_budget_ratio).
+    # Used output tokens are subtracted. See MODEL_WINDOWS below for per-model defaults.
+    max_context_tokens: int | None = None            # hard cap (None = derive from model window)
+    context_budget_ratio: float = 0.6                # fraction of model window available for input
+    reserved_output_tokens: int = 2048               # reserve for LLM's generated answer
+    reserved_prompt_overhead_tokens: int = 512       # system prompt + template + formatting overhead
+    history_max_budget_ratio: float = 0.4            # chat history can take up to this share of input
+    history_min_reserve_ratio: float = 0.2           # but always reserve at least this much
+
     # Chat memory
     memory_max_messages: int = 20
     memory_session_ttl: int = 3600
@@ -175,3 +185,75 @@ class Settings(BaseSettings):
 
 def get_settings() -> Settings:
     return Settings()
+
+
+# ---------------------------------------------------------------------------
+# Per-model context window lookup. Normalized (lowercased, provider-stripped).
+# Fallback = 8192 for unknown models (conservative).
+# ---------------------------------------------------------------------------
+MODEL_WINDOWS: dict[str, int] = {
+    # OpenAI
+    "gpt-4o": 128_000,
+    "gpt-4o-mini": 128_000,
+    "gpt-4-turbo": 128_000,
+    "gpt-4": 8_192,
+    "gpt-3.5-turbo": 16_385,
+    "gpt-3.5-turbo-16k": 16_385,
+    "o1": 128_000,
+    "o1-mini": 128_000,
+    "o1-preview": 128_000,
+    "o3-mini": 128_000,
+    # Anthropic
+    "claude-3-haiku": 200_000,
+    "claude-3-sonnet": 200_000,
+    "claude-3-opus": 200_000,
+    "claude-3-5-sonnet": 200_000,
+    "claude-3-5-haiku": 200_000,
+    "claude-haiku-4-5": 200_000,
+    "claude-sonnet-4-5": 200_000,
+    "claude-opus-4-7": 200_000,
+    # Google
+    "gemini-1.5-flash": 1_000_000,
+    "gemini-1.5-pro": 2_000_000,
+    "gemini-2.0-flash": 1_000_000,
+    # Meta / open
+    "llama-3.1-70b": 128_000,
+    "llama-3.1-8b": 128_000,
+    "llama-3.3-70b": 128_000,
+}
+
+DEFAULT_MODEL_WINDOW = 8_192
+
+
+def lookup_model_window(model_name: str) -> int:
+    """Resolve context window size for a model name. Handles provider prefixes
+    ('openai/gpt-4o-mini' → 'gpt-4o-mini'), case, and partial matches.
+    """
+    if not model_name:
+        return DEFAULT_MODEL_WINDOW
+    norm = model_name.lower().strip()
+    # Strip provider prefix
+    if "/" in norm:
+        norm = norm.split("/", 1)[-1]
+    # Exact match first
+    if norm in MODEL_WINDOWS:
+        return MODEL_WINDOWS[norm]
+    # Partial match — check if any known model is a prefix
+    for known, window in MODEL_WINDOWS.items():
+        if norm.startswith(known) or known.startswith(norm):
+            return window
+    return DEFAULT_MODEL_WINDOW
+
+
+# Per-query-type budget multiplier. Multiplies effective_chunk_budget by this ratio.
+# Fact queries need small focused context; synthesis needs breadth.
+# Values tuned conservatively; verify with credibility test.
+QUERY_BUDGET_RATIOS: dict[str, float] = {
+    "fact": 0.25,
+    "overview": 0.60,
+    "reference": 0.40,
+    "exploratory": 1.00,
+    "synthesis": 0.80,  # deliberately < 1.0; test showed top_k=10 regresses synthesis
+}
+
+DEFAULT_QUERY_BUDGET_RATIO = 0.60

@@ -330,6 +330,11 @@ async def query_documents(
             session_id=request.session_id,
             query_types=result.query_types,
             confidence_tier=result.confidence_tier,
+            context_used_tokens=result.context_used_tokens,
+            context_budget_tokens=result.context_budget_tokens,
+            context_mode=result.context_mode,
+            chunks_included=result.chunks_included,
+            chunks_available=result.chunks_available,
         )
     except Exception as e:
         logger.exception("Query failed")
@@ -512,7 +517,16 @@ async def query_documents_stream(
                     yield event
             else:
                 # Normal RAG path — build prompt+LLM chain with pre-computed context
-                yield sse_event("query_analysis", {"types": query_types, "label": query_label, "confidence_tier": confidence_tier})
+                yield sse_event("query_analysis", {
+                    "types": query_types,
+                    "label": query_label,
+                    "confidence_tier": confidence_tier,
+                    "context_used_tokens": result.context_used_tokens,
+                    "context_budget_tokens": result.context_budget_tokens,
+                    "context_mode": result.context_mode,
+                    "chunks_included": result.chunks_included,
+                    "chunks_available": result.chunks_available,
+                })
 
                 sources_data = [s.model_dump() for s in result.sources]
 

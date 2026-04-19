@@ -13,6 +13,7 @@ import SourceItem from '@/components/SourceItem'
 import SourceViewer from '@/components/SourceViewer'
 import QueryTypeBadges from '@/components/QueryTypeBadges'
 import ConfidenceBadge from '@/components/ConfidenceBadge'
+import ContextTag from '@/components/ContextTag'
 import { splitCitations } from '@/lib/citations'
 
 const API_BASE = import.meta.env.VITE_API_URL
@@ -87,6 +88,7 @@ export default function ChatPage() {
   const [sources, setSources] = useState([])
   const [queryTypes, setQueryTypes] = useState([])
   const [confidenceTier, setConfidenceTier] = useState(null)
+  const [contextInfo, setContextInfo] = useState(null)
   const [selectedSource, setSelectedSource] = useState(null)
   const [showSources, setShowSources] = useState(false)
   const abortControllerRef = useRef(null)
@@ -121,6 +123,7 @@ export default function ChatPage() {
     setSources([])
     setQueryTypes([])
     setConfidenceTier(null)
+    setContextInfo(null)
     setSelectedSource(null)
     setShowSources(false)
   }, [scopeDocId, scopeCollection])
@@ -135,6 +138,7 @@ export default function ChatPage() {
     setSources([])
     setQueryTypes([])
     setConfidenceTier(null)
+    setContextInfo(null)
     setSelectedSource(null)
     setShowSources(false)
   }
@@ -164,6 +168,7 @@ export default function ChatPage() {
       }
       setQueryTypes([])
       setConfidenceTier(null)
+    setContextInfo(null)
       setSelectedSource(null)
     } catch (err) {
       console.error('Failed to load session:', err)
@@ -187,6 +192,7 @@ export default function ChatPage() {
     setSources([])
     setQueryTypes([])
     setConfidenceTier(null)
+    setContextInfo(null)
     setSelectedSource(null)
     setShowSources(false)
 
@@ -268,6 +274,15 @@ export default function ChatPage() {
           } else if (data.types) {
             setQueryTypes(data.types)
             if (data.confidence_tier) setConfidenceTier(data.confidence_tier)
+            if (data.chunks_included != null) {
+              setContextInfo({
+                chunks: data.chunks_included,
+                available: data.chunks_available,
+                tokens: data.context_used_tokens,
+                budget: data.context_budget_tokens,
+                mode: data.context_mode,
+              })
+            }
           } else if (data.error) {
             toast.error(t('chat.backendError', { message: data.error }))
             updateAi(msg => ({ ...msg, content: t('chat.inlineError', { message: data.error }), loading: false }))
@@ -437,10 +452,11 @@ export default function ChatPage() {
                               ))}
                             </div>
                           )}
-                          {isLastAi && (queryTypes.length > 0 || confidenceTier) && (
+                          {isLastAi && (queryTypes.length > 0 || confidenceTier || contextInfo) && (
                             <div className="flex flex-wrap items-center gap-2 mt-2">
                               {queryTypes.length > 0 && <QueryTypeBadges types={queryTypes} />}
                               {confidenceTier && <ConfidenceBadge tier={confidenceTier} />}
+                              {contextInfo && <ContextTag {...contextInfo} />}
                             </div>
                           )}
                         </>
