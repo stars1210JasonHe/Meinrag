@@ -13,7 +13,7 @@ from langchain_community.document_loaders import (
     PyPDFLoader,
     TextLoader,
     UnstructuredMarkdownLoader,
-    UnstructuredHTMLLoader,
+    BSHTMLLoader,
     Docx2txtLoader,
 )
 from langchain_community.document_loaders import UnstructuredExcelLoader
@@ -28,8 +28,8 @@ LOADER_MAP: dict[str, type | None] = {
     ".pdf": PyPDFLoader,
     ".txt": TextLoader,
     ".md": UnstructuredMarkdownLoader,
-    ".html": UnstructuredHTMLLoader,
-    ".htm": UnstructuredHTMLLoader,
+    ".html": BSHTMLLoader,
+    ".htm": BSHTMLLoader,
     ".docx": Docx2txtLoader,
     ".doc": None,  # Handled via LibreOffice conversion
     ".xlsx": UnstructuredExcelLoader,
