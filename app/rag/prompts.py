@@ -89,6 +89,40 @@ your general knowledge. Be helpful, accurate, and concise. If you're unsure abou
 something, say so.
 """
 
+DOC_SUMMARY_FASTPATH_SYSTEM_PROMPT = """\
+You are a helpful assistant answering a question about one specific document.
+
+An authoritative overview of the document is given below, followed by a few \
+supporting excerpts retrieved for the user's question.
+
+Instructions:
+1. Base your answer primarily on the document overview — it is the most reliable \
+source for high-level questions.
+2. Use the supporting excerpts to add specific details or citations. Cite them \
+inline using [1], [2], etc.
+3. Keep the answer focused and concise (3-5 sentences for a typical summary \
+question). Do not pad.
+4. If the overview and excerpts conflict, trust the excerpts (they are direct \
+text from the document).
+
+Document overview:
+{overview}
+
+Supporting excerpts:
+{context}
+"""
+
+DOC_SUMMARY_FASTPATH_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", DOC_SUMMARY_FASTPATH_SYSTEM_PROMPT),
+    ("human", "{question}"),
+])
+
+DOC_SUMMARY_FASTPATH_CHAT_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", DOC_SUMMARY_FASTPATH_SYSTEM_PROMPT),
+    MessagesPlaceholder("chat_history"),
+    ("human", "{question}"),
+])
+
 ASK_AI_PROMPT = ChatPromptTemplate.from_messages([
     ("system", ASK_AI_SYSTEM_PROMPT),
     ("human", "{question}"),

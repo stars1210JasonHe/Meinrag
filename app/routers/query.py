@@ -14,12 +14,17 @@ from app.db.repositories import DocumentRepository, ChatSessionRepository, EdgeR
 from app.models.schemas import QueryRequest, QueryResponse, SourceChunk, ChunkContextRequest, AskAIRequest, AskAIResponse
 from langchain_core.output_parsers import StrOutputParser
 from app.rag.chain import format_docs
-from app.rag.prompts import RAG_PROMPT, RAG_CHAT_PROMPT, WEB_SEARCH_PROMPT, CHUNK_CONTEXT_PROMPT, QUERY_REWRITE_PROMPT, ASK_AI_PROMPT
+from app.rag.prompts import (
+    RAG_PROMPT, RAG_CHAT_PROMPT, WEB_SEARCH_PROMPT, CHUNK_CONTEXT_PROMPT,
+    QUERY_REWRITE_PROMPT, ASK_AI_PROMPT,
+    DOC_SUMMARY_FASTPATH_PROMPT, DOC_SUMMARY_FASTPATH_CHAT_PROMPT,
+)
 from app.routers.stream_helpers import sse_event, stream_chain_response
 from app.services.retrieval import (
     retrieve_and_rank,
     _build_source_chunks,
 )
+from app.services.fast_path import should_use_doc_summary_fastpath
 from app.vectorstore.base import VectorStoreManager
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseChatModel
@@ -237,6 +242,62 @@ async def _web_search_fallback(
     )
 
 
+async def _doc_summary_fastpath(
+    request: QueryRequest,
+    doc_summary: str,
+    doc_ids: list[str],
+    llm: BaseChatModel,
+    vector_store: VectorStoreManager,
+    memory_manager: ChatSessionRepository,
+    chat_history,
+    current_user: str | None,
+) -> QueryResponse:
+    """Answer using pre-computed doc.summary + a handful of supporting chunks.
+
+    Skips the full retrieval pipeline. Fetches top-3 chunks for citations
+    only — the doc summary is the primary content.
+    """
+    top_chunks = vector_store.similarity_search_with_scores(
+        request.question, k=3, doc_ids=doc_ids,
+    )
+    context = format_docs([doc for doc, _ in top_chunks]) if top_chunks else "(no supporting excerpts available)"
+    sources = _build_source_chunks(top_chunks) if top_chunks else []
+
+    if chat_history:
+        chain = DOC_SUMMARY_FASTPATH_CHAT_PROMPT | llm | StrOutputParser()
+        answer = await _invoke_with_retry(chain, {
+            "overview": doc_summary,
+            "context": context,
+            "chat_history": chat_history,
+            "question": request.question,
+        })
+    else:
+        chain = DOC_SUMMARY_FASTPATH_PROMPT | llm | StrOutputParser()
+        answer = await _invoke_with_retry(chain, {
+            "overview": doc_summary,
+            "context": context,
+            "question": request.question,
+        })
+
+    if request.session_id:
+        sources_data = [s.model_dump() for s in sources]
+        await memory_manager.add_exchange(
+            request.session_id, request.question, answer,
+            user_id=current_user,
+            sources_json=json.dumps(sources_data),
+            scope_type="doc",
+            scope_value=doc_ids[0],
+        )
+
+    return QueryResponse(
+        answer=answer,
+        sources=sources,
+        question=request.question,
+        session_id=request.session_id,
+        fast_path=True,
+    )
+
+
 @router.post("/query", response_model=QueryResponse)
 async def query_documents(
     request: QueryRequest,
@@ -262,6 +323,16 @@ async def query_documents(
         if request.force_web_search and settings.web_search_enabled:
             return await _web_search_fallback(
                 request, llm, memory_manager, settings, current_user=current_user,
+            )
+
+        # Fast-path: single-doc summarization with pre-computed doc.summary
+        doc_summary = await should_use_doc_summary_fastpath(
+            request.question, doc_ids, registry,
+        )
+        if doc_summary:
+            return await _doc_summary_fastpath(
+                request, doc_summary, doc_ids, llm, vector_store,
+                memory_manager, chat_history, current_user,
             )
 
         # Single retrieval — one source of truth for both LLM context and frontend sources
@@ -462,8 +533,28 @@ async def query_documents_stream(
     if request.session_id:
         chat_history = await memory_manager.get_history(request.session_id) or None
 
-    # --- Retrieval (done before streaming starts) ---
-    if request.force_web_search and settings.web_search_enabled:
+    # --- Fast-path check (before retrieval): single-doc doc.summary path ---
+    fast_path_summary: str | None = None
+    fast_path_sources_data: list[dict] = []
+    fast_path_overview: str | None = None
+    if not (request.force_web_search and settings.web_search_enabled):
+        fast_path_summary = await should_use_doc_summary_fastpath(
+            request.question, doc_ids, registry,
+        )
+    if fast_path_summary:
+        fast_path_overview = fast_path_summary
+        # Fetch a small set of supporting chunks for citations
+        supporting = vector_store.similarity_search_with_scores(
+            request.question, k=3, doc_ids=doc_ids,
+        )
+        fast_path_sources_data = [s.model_dump() for s in _build_source_chunks(supporting)]
+        result = None
+        needs_web_search = False
+        query_types = ["overview"]
+        query_label = None
+        confidence_tier = "high"
+        context = format_docs([doc for doc, _ in supporting]) if supporting else "(no supporting excerpts available)"
+    elif request.force_web_search and settings.web_search_enabled:
         result = None
         needs_web_search = True
         query_types: list[str] = []
@@ -513,6 +604,35 @@ async def query_documents_stream(
                     web_chain,
                     {"context": web_context, "question": request.question},
                     web_sources, request.session_id, web_search_used=True,
+                ):
+                    yield event
+            elif fast_path_overview:
+                # Fast-path: answer from pre-computed doc summary + supporting chunks
+                yield sse_event("query_analysis", {
+                    "types": query_types,
+                    "label": query_label,
+                    "confidence_tier": confidence_tier,
+                    "fast_path": True,
+                })
+
+                if chat_history:
+                    fp_chain = DOC_SUMMARY_FASTPATH_CHAT_PROMPT | llm | StrOutputParser()
+                    input_data = {
+                        "overview": fast_path_overview,
+                        "context": context,
+                        "chat_history": chat_history,
+                        "question": request.question,
+                    }
+                else:
+                    fp_chain = DOC_SUMMARY_FASTPATH_PROMPT | llm | StrOutputParser()
+                    input_data = {
+                        "overview": fast_path_overview,
+                        "context": context,
+                        "question": request.question,
+                    }
+
+                async for event in stream_chain_response(
+                    fp_chain, input_data, fast_path_sources_data, request.session_id,
                 ):
                     yield event
             else:
@@ -603,8 +723,14 @@ async def query_documents_stream(
             if evt_type == "done" and request.session_id:
                 full_answer = "".join(full_answer_parts)
                 if full_answer:
-                    # Pass web_sources for web-search path (result is None there)
-                    override = web_sources if needs_web_search else None
+                    # Pass web_sources for web-search path (result is None there),
+                    # fast_path_sources_data for fast-path, default otherwise.
+                    if needs_web_search:
+                        override = web_sources
+                    elif fast_path_overview:
+                        override = fast_path_sources_data
+                    else:
+                        override = None
                     asyncio.create_task(_persist_exchange(full_answer, sources_override=override))
 
             yield event

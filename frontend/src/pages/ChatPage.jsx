@@ -15,6 +15,7 @@ import QueryTypeBadges from '@/components/QueryTypeBadges'
 import ConfidenceBadge from '@/components/ConfidenceBadge'
 import ContextTag from '@/components/ContextTag'
 import SupplementActions from '@/components/SupplementActions'
+import FastPathBadge from '@/components/FastPathBadge'
 
 // Substring that identifies a corpus-refusal answer. Anchored to the exact
 // phrase the RAG_SYSTEM_PROMPT instructs the LLM to emit.
@@ -99,6 +100,7 @@ export default function ChatPage() {
   const [sources, setSources] = useState([])
   const [queryTypes, setQueryTypes] = useState([])
   const [confidenceTier, setConfidenceTier] = useState(null)
+  const [fastPath, setFastPath] = useState(false)
   const [contextInfo, setContextInfo] = useState(null)
   const [selectedSource, setSelectedSource] = useState(null)
   const [showSources, setShowSources] = useState(false)
@@ -145,6 +147,7 @@ export default function ChatPage() {
     setSources([])
     setQueryTypes([])
     setConfidenceTier(null)
+    setFastPath(false)
     setContextInfo(null)
     setSelectedSource(null)
     setShowSources(false)
@@ -160,6 +163,7 @@ export default function ChatPage() {
     setSources([])
     setQueryTypes([])
     setConfidenceTier(null)
+    setFastPath(false)
     setContextInfo(null)
     setSelectedSource(null)
     setShowSources(false)
@@ -202,6 +206,7 @@ export default function ChatPage() {
       }
       setQueryTypes([])
       setConfidenceTier(null)
+    setFastPath(false)
     setContextInfo(null)
       setSelectedSource(null)
     } catch (err) {
@@ -226,6 +231,7 @@ export default function ChatPage() {
     setSources([])
     setQueryTypes([])
     setConfidenceTier(null)
+    setFastPath(false)
     setContextInfo(null)
     setSelectedSource(null)
     setShowSources(false)
@@ -310,6 +316,8 @@ export default function ChatPage() {
           } else if (data.types) {
             setQueryTypes(data.types)
             if (data.confidence_tier) setConfidenceTier(data.confidence_tier)
+            if (data.fast_path) setFastPath(true)
+            else if (data.fast_path === false) setFastPath(false)
             if (data.chunks_included != null) {
               setContextInfo({
                 chunks: data.chunks_included,
@@ -379,6 +387,7 @@ export default function ChatPage() {
     setSources([])
     setQueryTypes([])
     setConfidenceTier(null)
+    setFastPath(false)
     setContextInfo(null)
     setSelectedSource(null)
     setShowSources(false)
@@ -653,6 +662,7 @@ export default function ChatPage() {
                             <div className="flex flex-wrap items-center gap-2 mt-2">
                               {queryTypes.length > 0 && <QueryTypeBadges types={queryTypes} />}
                               {confidenceTier && <ConfidenceBadge tier={confidenceTier} />}
+                              {fastPath && <FastPathBadge />}
                               {contextInfo && <ContextTag {...contextInfo} />}
                             </div>
                           )}

@@ -90,6 +90,7 @@ class QueryResponse(BaseModel):
     context_mode: str | None = None  # "chunks" | "summary" (phase 3, future)
     chunks_included: int | None = None
     chunks_available: int | None = None
+    fast_path: bool = False  # true when answered via pre-computed doc summary
 
 
 class UserInfo(BaseModel):
