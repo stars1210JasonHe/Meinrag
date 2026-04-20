@@ -181,6 +181,8 @@
     "askAi": "Ask general AI",
     "searchWeb": "Search the web",
     "fromAi": "From general AI knowledge (not your documents)",
-    "fromWeb": "From web search"
+    "fromWeb": "From web search",
+    "fetchingAi": "Fetching AI knowledge…",
+    "fetchingWeb": "Searching the web…"
   }
 }

@@ -351,15 +351,34 @@ export default function ChatPage() {
   const handleSupplement = async (refusalMsgIdx, question, source) => {
     if (loading) return
 
+    // Clear stale sidebar state from the previous corpus query — the supplement
+    // message won't have these (ask-ai has no sources; web has its own).
+    setSources([])
+    setQueryTypes([])
+    setConfidenceTier(null)
+    setContextInfo(null)
+    setSelectedSource(null)
+    setShowSources(false)
+
     // Mark original refusal message as acted-upon (hides buttons)
     setMessages(prev => prev.map((m, i) =>
       i === refusalMsgIdx ? { ...m, supplementUsed: true } : m
     ))
 
-    // Append a new assistant placeholder with the supplement source
+    // Append a new assistant placeholder with the supplement source + a
+    // loading banner message so the user sees "Fetching AI knowledge..." /
+    // "Searching the web..." while the stream spins up.
     setMessages(prev => [
       ...prev,
-      { role: 'ai', content: '', loading: true, supplementSource: source },
+      {
+        role: 'ai',
+        content: '',
+        loading: true,
+        supplementSource: source,
+        supplementBanner: source === 'ai'
+          ? t('supplement.fetchingAi', { defaultValue: 'Fetching AI knowledge…' })
+          : t('supplement.fetchingWeb', { defaultValue: 'Searching the web…' }),
+      },
     ])
 
     setLoading(true)
@@ -557,7 +576,15 @@ export default function ChatPage() {
                       }}
                     >
                       {msg.loading ? (
-                        <Loader2 size={16} className="animate-spin opacity-40" />
+                        msg.supplementBanner ? (
+                          <div className="flex items-center gap-2 text-sm"
+                               style={{ color: 'hsl(215 20% 65%)' }}>
+                            <Loader2 size={14} className="animate-spin" />
+                            <span>{msg.supplementBanner}</span>
+                          </div>
+                        ) : (
+                          <Loader2 size={16} className="animate-spin opacity-40" />
+                        )
                       ) : msg.role === 'ai' ? (
                         <>
                           {msg.supplementSource && (

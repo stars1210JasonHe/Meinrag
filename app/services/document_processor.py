@@ -13,9 +13,9 @@ from langchain_community.document_loaders import (
     PyPDFLoader,
     TextLoader,
     UnstructuredMarkdownLoader,
-    BSHTMLLoader,
     Docx2txtLoader,
 )
+from app.services.html_loader import MarkdownifyHTMLLoader
 from langchain_community.document_loaders import UnstructuredExcelLoader
 from langchain_community.document_loaders import UnstructuredPowerPointLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -28,8 +28,8 @@ LOADER_MAP: dict[str, type | None] = {
     ".pdf": PyPDFLoader,
     ".txt": TextLoader,
     ".md": UnstructuredMarkdownLoader,
-    ".html": BSHTMLLoader,
-    ".htm": BSHTMLLoader,
+    ".html": MarkdownifyHTMLLoader,
+    ".htm": MarkdownifyHTMLLoader,
     ".docx": Docx2txtLoader,
     ".doc": None,  # Handled via LibreOffice conversion
     ".xlsx": UnstructuredExcelLoader,

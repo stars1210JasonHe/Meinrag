@@ -35,7 +35,7 @@ def load_query_types(config_path: str = "data/query_types.json") -> dict:
     path = Path(config_path)
     if path.exists():
         try:
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             logger.info("Loaded %d query types from %s", len(data.get("types", [])), path)
             return data

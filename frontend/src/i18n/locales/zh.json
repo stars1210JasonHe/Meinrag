@@ -179,6 +179,8 @@
     "askAi": "询问通用 AI",
     "searchWeb": "网络搜索",
     "fromAi": "来自通用 AI 知识（非您的文档）",
-    "fromWeb": "来自网络搜索"
+    "fromWeb": "来自网络搜索",
+    "fetchingAi": "正在获取 AI 知识…",
+    "fetchingWeb": "正在搜索网络…"
   }
 }
