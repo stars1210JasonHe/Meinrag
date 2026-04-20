@@ -92,6 +92,69 @@ Respond in JSON (no other text):
 """
 
 
+CORRECTNESS_JUDGE_PROMPT = """You evaluate whether a candidate answer is correct.
+
+QUESTION: {question}
+
+EXPECTED KEY CONCEPTS (paraphrasing is fine — exact wording is NOT required):
+{expected}
+
+CANDIDATE ANSWER:
+{answer}
+
+Rules:
+- YES if the candidate answer addresses the question AND covers the spirit of the
+  expected concepts (paraphrases, synonyms, equivalent terminology are all fine).
+- For multi-doc questions: covering the key CONCEPTS is enough — you do not need
+  every doc to be named explicitly.
+- NO only if the answer is unrelated, missing the core concepts, or contradicts them.
+
+Respond in JSON (no other text):
+{{"correct": true|false, "reason": "brief explanation"}}
+"""
+
+
+def _judge_answer_correct(
+    question: str,
+    answer: str,
+    expected_keywords: list,
+    llm,
+) -> tuple[bool, str]:
+    """LLM judge — more forgiving than keyword match for overview/synthesis queries.
+
+    `expected_keywords` is the `must_contain` spec (mix of strings and any-of
+    lists). We stringify it for the LLM to convey what the ANSWER should cover.
+    """
+    if not answer or not expected_keywords:
+        return False, "no answer or no expected keywords"
+
+    # Stringify must_contain into a readable list
+    concept_lines = []
+    for spec in expected_keywords:
+        if isinstance(spec, str):
+            concept_lines.append(f"- {spec}")
+        elif isinstance(spec, list):
+            concept_lines.append(f"- any of: {', '.join(spec)}")
+    expected_text = "\n".join(concept_lines)
+
+    prompt = CORRECTNESS_JUDGE_PROMPT.format(
+        question=question[:500], expected=expected_text, answer=answer[:3000],
+    )
+    try:
+        response = llm.invoke(prompt, temperature=0)
+        raw = response.content if hasattr(response, "content") else str(response)
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```", 2)[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip().rstrip("`").strip()
+        j = json.loads(raw)
+        return bool(j.get("correct", False)), str(j.get("reason", ""))[:300]
+    except Exception as e:
+        return False, f"judge error: {type(e).__name__}: {str(e)[:100]}"
+
+
 def _judge_grounded(answer: str, source_chunks: list[dict], llm) -> tuple[bool, str]:
     """Call LLM at temperature=0 to judge groundedness. Returns (grounded, reason)."""
     if not answer or not source_chunks:
@@ -319,7 +382,23 @@ class TestQueryCredibility:
 
                 must_ok, missing = _all_match(answer, query.get("must_contain", []))
                 forbidden_found = _any_forbidden(answer, query.get("must_not_contain", []))
+                # Baseline: keyword match
                 answer_correct = must_ok and not forbidden_found
+                judge_correct_reason = ""
+
+                # For overview / synthesis / ambiguous / filtered: the keyword
+                # match is too strict (LLM often paraphrases). Upgrade to an
+                # LLM judge — more forgiving, measures actual correctness.
+                if query["type"] in ("overview", "synthesis", "ambiguous", "filtered"):
+                    jc, jr = _judge_answer_correct(
+                        query["question"], answer,
+                        query.get("must_contain", []), llm,
+                    )
+                    judge_correct_reason = jr
+                    # Overwrite keyword verdict with judge verdict (judge is
+                    # authoritative for these types). Still respect must_not_contain
+                    # as a hard hallucination gate.
+                    answer_correct = jc and not forbidden_found
 
                 # For impossible queries — invert: answer is "correct" if it says "don't know".
                 # Skip the must_not_contain check entirely because a faithful refusal
@@ -368,6 +447,7 @@ class TestQueryCredibility:
                     "forbidden_hit": forbidden_found,
                     "grounded": grounded,
                     "judge_reason": judge_reason,
+                    "judge_correct_reason": judge_correct_reason,
                     "confidence_tier": confidence_tier,
                     "expected_confidence": expected_conf,
                     "confidence_calibrated": conf_ok,

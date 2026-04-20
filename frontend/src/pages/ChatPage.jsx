@@ -514,7 +514,7 @@ export default function ChatPage() {
             <button
               onClick={startNewChat}
               className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-xs"
-              style={{ backgroundColor: 'hsl(250 80% 65%)', color: '#fff' }}
+              style={{ backgroundColor: 'var(--signature, #5b7ec9)', color: '#fff' }}
             >
               <Plus size={14} /> {t('chat.newChat')}
             </button>
@@ -570,7 +570,7 @@ export default function ChatPage() {
                       style={{
                         backgroundColor:
                           msg.role === 'user'
-                            ? 'hsl(250 80% 65%)'
+                            ? 'var(--signature, #5b7ec9)'
                             : 'hsl(222 47% 12%)',
                         color: 'hsl(210 40% 98%)',
                       }}
@@ -633,7 +633,13 @@ export default function ChatPage() {
                           )}
                         </>
                       ) : (
-                        <p>{msg.content}</p>
+                        <p style={{
+                          fontFamily: "var(--display, 'Fraunces'), Georgia, serif",
+                          fontStyle: 'italic',
+                          fontWeight: 400,
+                          letterSpacing: '-0.01em',
+                          lineHeight: 1.45,
+                        }}>{msg.content}</p>
                       )}
                     </div>
                   </div>
@@ -717,7 +723,7 @@ export default function ChatPage() {
                 disabled={!input.trim()}
                 className="p-2.5 rounded-lg transition-opacity disabled:opacity-40"
                 style={{
-                  backgroundColor: 'hsl(250 80% 65%)',
+                  backgroundColor: 'var(--signature, #5b7ec9)',
                   color: 'hsl(210 40% 98%)',
                 }}
               >

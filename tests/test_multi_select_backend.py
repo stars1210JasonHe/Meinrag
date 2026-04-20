@@ -86,22 +86,10 @@ def client():
     with TestClient(app, raise_server_exceptions=True) as c:
         yield c
 
-    # Teardown — delete every test collection this module created so the
-    # persistent DB doesn't accumulate junk visible to the user.
-    try:
-        resp = c.get("/documents/collections", headers={"X-User-Id": "admin"})
-        if resp.status_code == 200:
-            for name in resp.json().get("existing_collections", []):
-                if name.startswith(("e2e-", "test-col-", "has-spaces")):
-                    # Find docs in that collection and PATCH each to remove the collection
-                    dl = c.get(f"/documents?collection={name}", headers={"X-User-Id": "admin"})
-                    for d in dl.json().get("documents", []):
-                        remaining = [col for col in d["collections"] if col != name]
-                        c.patch(f"/documents/{d['doc_id']}",
-                                json={"collections": remaining},
-                                headers={"X-User-Id": "admin"})
-    except Exception:
-        pass  # cleanup is best-effort; test result already recorded
+    # NOTE: This test uses an in-memory SQLite fixture — no persistent pollution.
+    # Real pollution comes from the Playwright E2E tests that hit the live
+    # backend (:8000 → postgres). Cleanup for THAT lives in
+    # tests/test_frontend_multi_select_e2e.py.
 
     app.dependency_overrides.clear()
 

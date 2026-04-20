@@ -1051,7 +1051,7 @@ async def retrieve_and_rank(
     strategy_name = primary_cfg.get("strategy", "top_k")
     strategy = get_strategy(qt_config, strategy_name)
     fetch_k = int(top_k * strategy.get("fetch_multiplier", 1.5))
-    logger.info("[TRACE] top_k=%d fetch_k=%d strategy=%s doc_ids=%d",
+    logger.debug("[TRACE] top_k=%d fetch_k=%d strategy=%s doc_ids=%d",
                 top_k, fetch_k, strategy_name,
                 len(doc_ids) if doc_ids else 0)
 
@@ -1059,7 +1059,7 @@ async def retrieve_and_rank(
     retrieved = vector_store.similarity_search_with_scores(
         question, k=fetch_k, doc_ids=doc_ids,
     )
-    logger.info("[TRACE] after vector_search: %d chunks", len(retrieved))
+    logger.debug("[TRACE] after vector_search: %d chunks", len(retrieved))
 
     # 4b. Summary index search (dual-index)
     if summary_store:
@@ -1105,7 +1105,7 @@ async def retrieve_and_rank(
         question, retrieved, llm, vector_store, settings, doc_ids, top_k,
         fetch_k=fetch_k,
     )
-    logger.info("[TRACE] after query_expansion: %d chunks", len(retrieved))
+    logger.debug("[TRACE] after query_expansion: %d chunks", len(retrieved))
 
     # Save pre-narrowing candidates for per-doc coverage backfill
     pre_narrow_candidates = list(retrieved)
@@ -1115,10 +1115,10 @@ async def retrieve_and_rank(
         text_only = [(doc, score) for doc, score in retrieved
                      if doc.metadata.get("chunk_type") == "text"]
         retrieved = _section_aware_sample(text_only, top_k=top_k)
-        logger.info("[TRACE] after text_only+section_aware_sample: %d chunks", len(retrieved))
+        logger.debug("[TRACE] after text_only+section_aware_sample: %d chunks", len(retrieved))
     elif strategy.get("demote_references"):
         retrieved = _demote_reference_results(retrieved, top_k)
-        logger.info("[TRACE] after demote_references: %d chunks", len(retrieved))
+        logger.debug("[TRACE] after demote_references: %d chunks", len(retrieved))
 
     # 6a. Multi-doc coverage guarantee — if user selected N docs, ensure each
     # has at least 1 chunk in the narrowed results. Falls back to per-doc
@@ -1127,13 +1127,13 @@ async def retrieve_and_rank(
         retrieved, pre_narrow_candidates, doc_ids,
         question=question, vector_store=vector_store,
     )
-    logger.info("[TRACE] after per_doc_coverage: %d chunks", len(retrieved))
+    logger.debug("[TRACE] after per_doc_coverage: %d chunks", len(retrieved))
 
     # Scoring stage — constants from scoring profile, resolved for query type
     retrieved = _apply_reference_penalty(retrieved, scoring)
     retrieved = _apply_section_weights(retrieved, scoring)
     retrieved = _apply_boilerplate_penalty(retrieved, scoring)
-    logger.info("[TRACE] after scoring penalties: %d chunks", len(retrieved))
+    logger.debug("[TRACE] after scoring penalties: %d chunks", len(retrieved))
 
     # 6b. Reranking (if enabled — Settings flag)
     if settings.rerank_enabled:
@@ -1145,7 +1145,7 @@ async def retrieve_and_rank(
         retrieved = await _rerank_results(
             retrieved, question, settings, llm, top_n=effective_top_n,
         )
-        logger.info("[TRACE] after rerank (top_n=%d): %d chunks", effective_top_n, len(retrieved))
+        logger.debug("[TRACE] after rerank (top_n=%d): %d chunks", effective_top_n, len(retrieved))
 
     # 7. Check web search
     if force_web_search or _needs_web_search(user_scoped, retrieved, settings):
@@ -1162,20 +1162,20 @@ async def retrieve_and_rank(
             question=question, embeddings=embeddings,
             proximity_pages=settings.visual_proximity_pages,
         )
-        logger.info("[TRACE] after visual_proximity: %d chunks", len(retrieved))
+        logger.debug("[TRACE] after visual_proximity: %d chunks", len(retrieved))
 
     # 9. Graph expansion (decay from scoring profile)
     retrieved = await _expand_via_edges(
         retrieved, edge_repo, vector_store, scoring,
         relations=["describes", "references"],
     )
-    logger.info("[TRACE] after graph_expansion: %d chunks", len(retrieved))
+    logger.debug("[TRACE] after graph_expansion: %d chunks", len(retrieved))
 
     # 10. Composite scoring (weights from query_types.json, graph math from profile)
     retrieved = await _apply_composite_scoring(
         retrieved, edge_repo, primary_type, settings, scoring,
     )
-    logger.info("[TRACE] after composite_scoring: %d chunks", len(retrieved))
+    logger.debug("[TRACE] after composite_scoring: %d chunks", len(retrieved))
 
     # 11. Confidence tier (from raw scores, before normalization)
     confidence_tier = _compute_confidence_tier(retrieved, profile)

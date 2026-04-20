@@ -87,6 +87,35 @@ def browser():
         b.close()
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _cleanup_test_collections(preflight_check):
+    """Session-scoped teardown that deletes any e2e-* / test-col-* collections
+    the Save-dialog tests create in the LIVE postgres DB.
+
+    Runs after ALL tests in this module finish. Best-effort — if the backend
+    is down by then, we silently skip.
+    """
+    yield
+    import httpx as _httpx
+    try:
+        r = _httpx.get(f"{BACKEND_URL}/documents/collections",
+                       headers={"X-User-Id": USER_ID}, timeout=5.0)
+        if r.status_code != 200:
+            return
+        for name in r.json().get("existing_collections", []):
+            if name.startswith(("e2e-", "test-col-", "has-spaces", "selection-")):
+                # For each doc in that collection, PATCH to remove it
+                dl = _httpx.get(f"{BACKEND_URL}/documents?collection={name}",
+                                headers={"X-User-Id": USER_ID}, timeout=5.0)
+                for d in dl.json().get("documents", []):
+                    remaining = [c for c in d["collections"] if c != name]
+                    _httpx.patch(f"{BACKEND_URL}/documents/{d['doc_id']}",
+                                 json={"collections": remaining},
+                                 headers={"X-User-Id": USER_ID}, timeout=5.0)
+    except Exception:
+        pass  # best-effort cleanup
+
+
 @pytest.fixture
 def page(browser: Browser, preflight_check):
     """Fresh context per test — isolates localStorage / cookies."""
