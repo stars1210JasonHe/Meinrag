@@ -114,6 +114,17 @@ export default function ChatPage() {
     [sources.length]
   )
 
+  // Sources are sent in "lost in the middle" U-shape order for the LLM
+  // (best first, 2nd-best last). Display them sorted by score instead, while
+  // keeping the original array index as the click target so citations [N]
+  // in the answer text still resolve to the correct source.
+  const displaySources = useMemo(
+    () => sources
+      .map((s, i) => ({ source: s, originalIndex: i }))
+      .sort((a, b) => (b.source.score ?? 0) - (a.source.score ?? 0)),
+    [sources]
+  )
+
   const { data: sessions = [] } = useQuery({
     queryKey: ['sessions', USER_ID, scopeDocId, scopeCollection],
     queryFn: () => {
@@ -769,8 +780,14 @@ export default function ChatPage() {
                 {t('chat.sourcesWithCount', { count: sources.length })}
               </div>
               <div className="flex-1 overflow-y-auto py-1">
-                {sources.map((s, i) => (
-                  <SourceItem key={i} source={s} index={i} isActive={i === selectedSource} onClick={setSelectedSource} />
+                {displaySources.map(({ source: s, originalIndex }) => (
+                  <SourceItem
+                    key={originalIndex}
+                    source={s}
+                    index={originalIndex}
+                    isActive={originalIndex === selectedSource}
+                    onClick={setSelectedSource}
+                  />
                 ))}
               </div>
             </>
