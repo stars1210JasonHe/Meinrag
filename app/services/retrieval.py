@@ -981,22 +981,47 @@ def _reorder_for_attention(retrieved: list[tuple]) -> list[tuple]:
     return [best] + middle + [second]
 
 
-def _merge_dual_results(raw_results: list[tuple], summary_results: list[tuple]) -> list[tuple]:
-    """Merge raw and summary search results, keeping best score per chunk."""
-    best: dict = {}  # (doc_id, chunk_index) -> (doc, score)
-    for doc, score in raw_results:
+def _rrf_merge_dual(
+    raw_results: list[tuple],
+    summary_results: list[tuple],
+    k: int = 60,
+) -> list[tuple]:
+    """Merge raw-chunk and summary-chunk vector search results via Reciprocal Rank Fusion.
+
+    Both retrievers produce cosine scores, but on different distributions:
+    summary text is 5-8x shorter than raw chunks, so summary cosines skew high
+    by compression — taking max(raw_cosine, summary_cosine) systematically
+    favors summary matches even when the raw match is the better signal.
+
+    RRF is scale-agnostic: each chunk's score is the sum of 1/(k+rank) from
+    each retriever that found it. Chunks found by both retrievers get consensus
+    credit. Same primitive as _rrf_merge_bm25 (SIGIR 2009, Cormack et al.).
+
+    When a chunk is found by both retrievers, the raw Document object is kept
+    (has full content); the score is the RRF sum.
+    """
+    rrf: dict[tuple, list] = {}  # (doc_id, chunk_index) -> [doc, rrf_score]
+
+    for rank, (doc, _cosine) in enumerate(raw_results, 1):
         key = (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index"))
-        if key not in best or score > best[key][1]:
-            best[key] = (doc, score)
-    for doc, score in summary_results:
+        rrf[key] = [doc, 1.0 / (k + rank)]
+
+    for rank, (doc, _cosine) in enumerate(summary_results, 1):
         key = (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index"))
-        if key not in best or score > best[key][1]:
-            # Keep raw doc object if available (has full content), use higher score
-            if key in best:
-                best[key] = (best[key][0], score)
-            else:
-                best[key] = (doc, score)
-    return list(best.values())
+        contribution = 1.0 / (k + rank)
+        if key in rrf:
+            rrf[key][1] += contribution  # consensus — keep raw doc object
+        else:
+            rrf[key] = [doc, contribution]
+
+    merged = [(doc, score) for doc, score in rrf.values()]
+
+    if merged:
+        max_s = max(s for _, s in merged)
+        if max_s > 0:
+            merged = [(d, s / max_s) for d, s in merged]
+
+    return merged
 
 
 async def retrieve_and_rank(
@@ -1069,7 +1094,8 @@ async def retrieve_and_rank(
             )
             if summary_results:
                 before = len(retrieved)
-                retrieved = _merge_dual_results(retrieved, summary_results)
+                retrieved = _rrf_merge_dual(retrieved, summary_results,
+                                            k=settings.rrf_k)
                 logger.info("Dual-index: merged %d raw + %d summary -> %d results",
                            before, len(summary_results), len(retrieved))
         except Exception as e:

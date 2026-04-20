@@ -1,6 +1,6 @@
 """Unit tests for app/services/retrieval.py.
 
-Covers _merge_dual_results, _normalize_scores, _section_aware_sample,
+Covers _rrf_merge_dual, _normalize_scores, _section_aware_sample,
 _lookup_by_label, _analyze_query, and _apply_composite_scoring.
 
 Functions already covered in test_chunk_quality.py are NOT duplicated:
@@ -13,7 +13,7 @@ import pytest
 from langchain_core.documents import Document
 
 from app.services.retrieval import (
-    _merge_dual_results,
+    _rrf_merge_dual,
     _normalize_scores,
     _section_aware_sample,
     _lookup_by_label,
@@ -34,81 +34,89 @@ def _doc(doc_id="d1", chunk_index=0, section="methods", content="text", **extra_
 
 
 # ---------------------------------------------------------------------------
-# 1. _merge_dual_results
+# 1. _rrf_merge_dual
 # ---------------------------------------------------------------------------
 
-class TestMergeDualResults:
-    def test_merge_keeps_best_score(self):
-        """Same chunk in both lists — keep the higher score."""
-        doc = _doc(doc_id="d1", chunk_index=0, content="chunk A")
-        raw = [(doc, 0.6)]
-        summary = [(doc, 0.85)]
-        result = _merge_dual_results(raw, summary)
-        assert len(result) == 1
-        _, score = result[0]
-        assert score == pytest.approx(0.85)
-
-    def test_merge_keeps_best_score_raw_wins(self):
-        """Same chunk, raw score is higher — keep raw score."""
-        doc = _doc(doc_id="d1", chunk_index=0, content="chunk A")
-        raw = [(doc, 0.9)]
-        summary = [(doc, 0.5)]
-        result = _merge_dual_results(raw, summary)
-        assert len(result) == 1
-        _, score = result[0]
-        assert score == pytest.approx(0.9)
-
-    def test_merge_combines_unique(self):
-        """Distinct chunks from each list are all kept."""
-        raw = [(_doc(doc_id="d1", chunk_index=0, content="A"), 0.7)]
-        summary = [(_doc(doc_id="d1", chunk_index=1, content="B"), 0.6)]
-        result = _merge_dual_results(raw, summary)
-        assert len(result) == 2
-
-    def test_raw_doc_preferred_over_summary(self):
-        """When summary has higher score, raw doc object is kept (full content),
-        but the score is updated to the higher summary score."""
-        raw_doc = _doc(doc_id="d1", chunk_index=0, content="full raw content")
-        summary_doc = _doc(doc_id="d1", chunk_index=0, content="summary snippet")
-        raw = [(raw_doc, 0.5)]
-        summary = [(summary_doc, 0.9)]
-        result = _merge_dual_results(raw, summary)
-        assert len(result) == 1
-        doc, score = result[0]
-        # Raw doc object preserved (has full content)
-        assert doc.page_content == "full raw content"
-        # But score is updated to the higher value from summary
-        assert score == pytest.approx(0.9)
+class TestRRFMergeDual:
+    """RRF fuses raw-chunk and summary-chunk rankings. Scale-agnostic — cosine
+    scores are ignored; only ranks matter. Output is re-normalized to 0-1."""
 
     def test_empty_inputs(self):
-        """Both empty."""
-        assert _merge_dual_results([], []) == []
+        assert _rrf_merge_dual([], []) == []
 
-    def test_one_empty(self):
-        """Only raw list has data."""
-        raw = [(_doc(doc_id="d1", chunk_index=0), 0.7)]
-        result = _merge_dual_results(raw, [])
-        assert len(result) == 1
-
-        result2 = _merge_dual_results([], raw)
-        assert len(result2) == 1
-
-    def test_multiple_chunks_mixed(self):
-        """Three chunks: two unique and one overlap; overlap keeps max score."""
+    def test_only_raw_results(self):
+        """Summary empty → each raw chunk gets a single 1/(k+rank) contribution."""
         raw = [
-            (_doc(doc_id="d1", chunk_index=0, content="A"), 0.8),
-            (_doc(doc_id="d1", chunk_index=1, content="B"), 0.6),
+            (_doc(chunk_index=0), 0.9),
+            (_doc(chunk_index=1), 0.7),
+            (_doc(chunk_index=2), 0.5),
+        ]
+        result = _rrf_merge_dual(raw, [], k=60)
+        assert len(result) == 3
+        # After normalization, rank-1 chunk gets 1.0; rank-2 and rank-3 strictly less
+        score_map = {doc.metadata["chunk_index"]: s for doc, s in result}
+        assert score_map[0] == pytest.approx(1.0)
+        assert score_map[0] > score_map[1] > score_map[2]
+
+    def test_only_summary_results(self):
+        """Raw empty → each summary chunk contributes alone."""
+        summary = [
+            (_doc(chunk_index=5), 0.9),
+            (_doc(chunk_index=6), 0.3),
+        ]
+        result = _rrf_merge_dual([], summary, k=60)
+        assert len(result) == 2
+        score_map = {doc.metadata["chunk_index"]: s for doc, s in result}
+        assert score_map[5] == pytest.approx(1.0)
+        assert score_map[5] > score_map[6]
+
+    def test_consensus_outranks_solo(self):
+        """Key RRF property: a chunk found by BOTH retrievers outscores a
+        chunk found by only one, even when the solo match was at rank 1."""
+        raw = [
+            (_doc(chunk_index=0, content="solo-raw"), 0.95),   # rank 1 in raw only
+            (_doc(chunk_index=1, content="both-chunk"), 0.50),  # rank 2 in raw
         ]
         summary = [
-            (_doc(doc_id="d1", chunk_index=1, content="B-sum"), 0.75),  # overlap, higher
-            (_doc(doc_id="d1", chunk_index=2, content="C"), 0.5),
+            (_doc(chunk_index=1, content="both-sum"), 0.40),    # rank 1 in summary
+            (_doc(chunk_index=2, content="solo-sum"), 0.30),    # rank 2 in summary
         ]
-        result = _merge_dual_results(raw, summary)
-        assert len(result) == 3
-        score_map = {doc.metadata["chunk_index"]: score for doc, score in result}
-        assert score_map[0] == pytest.approx(0.8)
-        assert score_map[1] == pytest.approx(0.75)  # summary was higher
-        assert score_map[2] == pytest.approx(0.5)
+        result = _rrf_merge_dual(raw, summary, k=60)
+        score_map = {doc.metadata["chunk_index"]: s for doc, s in result}
+        # chunk_index=1 was found in both → consensus bonus → should score highest
+        assert score_map[1] > score_map[0]
+        assert score_map[1] > score_map[2]
+
+    def test_raw_doc_preferred_on_overlap(self):
+        """When both retrievers find the same chunk, the raw Document object is
+        kept (has full content), not the summary one."""
+        raw_doc = _doc(chunk_index=0, content="full raw content")
+        summary_doc = _doc(chunk_index=0, content="summary snippet")
+        raw = [(raw_doc, 0.6)]
+        summary = [(summary_doc, 0.9)]
+        result = _rrf_merge_dual(raw, summary, k=60)
+        assert len(result) == 1
+        doc, _ = result[0]
+        assert doc.page_content == "full raw content"
+
+    def test_normalization_to_unit_scale(self):
+        """After RRF, top chunk is exactly 1.0; all scores in [0, 1]."""
+        raw = [(_doc(chunk_index=i), 0.5) for i in range(5)]
+        summary = [(_doc(chunk_index=i), 0.5) for i in range(2, 7)]  # 2,3,4 overlap
+        result = _rrf_merge_dual(raw, summary, k=60)
+        scores = [s for _, s in result]
+        assert max(scores) == pytest.approx(1.0)
+        assert all(0.0 <= s <= 1.0 for s in scores)
+
+    def test_later_rank_contributes_less(self):
+        """A chunk at raw-rank 1 beats one at raw-rank 10 when neither appears
+        in summary."""
+        raw = [(_doc(chunk_index=i), 0.9 - i * 0.05) for i in range(10)]
+        result = _rrf_merge_dual(raw, [], k=60)
+        score_map = {doc.metadata["chunk_index"]: s for doc, s in result}
+        # rank 1 (chunk 0) > rank 2 (chunk 1) > ... > rank 10 (chunk 9)
+        for i in range(9):
+            assert score_map[i] > score_map[i + 1]
 
 
 # ---------------------------------------------------------------------------
