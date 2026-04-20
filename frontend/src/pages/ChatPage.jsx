@@ -14,6 +14,11 @@ import SourceViewer from '@/components/SourceViewer'
 import QueryTypeBadges from '@/components/QueryTypeBadges'
 import ConfidenceBadge from '@/components/ConfidenceBadge'
 import ContextTag from '@/components/ContextTag'
+import SupplementActions from '@/components/SupplementActions'
+
+// Substring that identifies a corpus-refusal answer. Anchored to the exact
+// phrase the RAG_SYSTEM_PROMPT instructs the LLM to emit.
+const REFUSAL_MARKER = 'do not contain information'
 import { splitCitations } from '@/lib/citations'
 
 const API_BASE = import.meta.env.VITE_API_URL
@@ -301,6 +306,12 @@ export default function ChatPage() {
 
       // Clear loading flag in case we never got a token
       updateAi(msg => (msg.loading ? { ...msg, loading: false } : msg))
+
+      // Flag the AI message as a refusal if the LLM said it couldn't answer
+      // from the corpus. UI will render SupplementActions below it.
+      if (fullAnswer.toLowerCase().includes(REFUSAL_MARKER)) {
+        updateAi(msg => ({ ...msg, refusal: true, originalQuestion: question }))
+      }
     } catch (err) {
       if (err.name === 'AbortError') {
         updateAi(msg => ({
@@ -325,6 +336,112 @@ export default function ChatPage() {
 
   const handleStop = () => {
     abortControllerRef.current?.abort()
+  }
+
+  /**
+   * Run a supplement query when the corpus refused. Appends a NEW ai message
+   * with a `supplementSource` marker (UI renders a "From general AI" /
+   * "From web search" badge). Marks the originating refusal message so the
+   * action buttons hide.
+   *
+   * @param {number} refusalMsgIdx - index of the ai message flagged refusal
+   * @param {string} question - original user question
+   * @param {"ai"|"web"} source - which endpoint to use
+   */
+  const handleSupplement = async (refusalMsgIdx, question, source) => {
+    if (loading) return
+
+    // Mark original refusal message as acted-upon (hides buttons)
+    setMessages(prev => prev.map((m, i) =>
+      i === refusalMsgIdx ? { ...m, supplementUsed: true } : m
+    ))
+
+    // Append a new assistant placeholder with the supplement source
+    setMessages(prev => [
+      ...prev,
+      { role: 'ai', content: '', loading: true, supplementSource: source },
+    ])
+
+    setLoading(true)
+    const controller = new AbortController()
+    abortControllerRef.current = controller
+
+    const updateLast = (updater) =>
+      setMessages(prev => {
+        const updated = [...prev]
+        const last = updated.length - 1
+        if (updated[last]?.role === 'ai') {
+          updated[last] = updater(updated[last])
+        }
+        return updated
+      })
+
+    try {
+      const url = source === 'ai'
+        ? `${API_BASE}/query/ask-ai/stream`
+        : `${API_BASE}/query/stream`
+      const body = source === 'ai'
+        ? { question, session_id: sessionId }
+        : {
+            question, top_k: 8,
+            session_id: sessionId,
+            force_web_search: true,
+          }
+
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'X-User-Id': USER_ID, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      })
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+
+      const reader = resp.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let fullAnswer = ''
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+        for (const line of lines) {
+          if (line.startsWith('event:')) continue
+          if (!line.startsWith('data:')) continue
+          const dataStr = line.slice(5).trim()
+          if (!dataStr) continue
+          let data
+          try { data = JSON.parse(dataStr) } catch { continue }
+          if (data.token) {
+            fullAnswer += data.token
+            updateLast(msg => ({ ...msg, content: fullAnswer, loading: false }))
+          } else if (data.sources && source === 'web') {
+            // Web search sources attach to this supplement message
+            updateLast(msg => ({ ...msg, sources: data.sources }))
+          } else if (data.error) {
+            toast.error(t('chat.backendError', { message: data.error }))
+          }
+        }
+      }
+      updateLast(msg => (msg.loading ? { ...msg, loading: false } : msg))
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        toast.error(t('chat.requestFailed', { message: err.message }))
+        updateLast(() => ({
+          role: 'ai',
+          content: t('chat.responseFailed', { message: err.message }),
+          loading: false,
+          supplementSource: source,
+        }))
+      }
+    } finally {
+      setLoading(false)
+      abortControllerRef.current = null
+      inputRef.current?.focus()
+    }
   }
 
   const handleKeyDown = (e) => {
@@ -443,12 +560,32 @@ export default function ChatPage() {
                         <Loader2 size={16} className="animate-spin opacity-40" />
                       ) : msg.role === 'ai' ? (
                         <>
+                          {msg.supplementSource && (
+                            <div className="mb-2 flex items-center gap-1 text-[10px] uppercase tracking-wider"
+                                 style={{ color: 'hsl(215 20% 65%)', fontFamily: 'var(--mono)' }}>
+                              <span className="inline-block w-1.5 h-1.5 rounded-full"
+                                    style={{ backgroundColor: msg.supplementSource === 'ai'
+                                      ? 'var(--signature, #5b7ec9)'
+                                      : '#10b981' }} />
+                              {msg.supplementSource === 'ai'
+                                ? t('supplement.fromAi', { defaultValue: 'From general AI knowledge (not your documents)' })
+                                : t('supplement.fromWeb', { defaultValue: 'From web search' })}
+                            </div>
+                          )}
                           <ReactMarkdown
                             remarkPlugins={[remarkGfm]}
                             components={citationComponents}
                           >
                             {msg.content}
                           </ReactMarkdown>
+                          {msg.refusal && !msg.supplementUsed && (
+                            <SupplementActions
+                              question={msg.originalQuestion}
+                              busy={loading ? 'loading' : null}
+                              onAskAi={(q) => handleSupplement(i, q, 'ai')}
+                              onSearchWeb={(q) => handleSupplement(i, q, 'web')}
+                            />
+                          )}
                           {isLastAi && sources.length > 0 && (
                             <div className="flex items-center gap-1 mt-2 pt-2 border-t border-white/10 flex-wrap">
                               <span className="text-[11px] opacity-40 mr-1">{t('chat.sourcesLabel')}</span>

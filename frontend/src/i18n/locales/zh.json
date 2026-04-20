@@ -173,5 +173,12 @@
     "conflictBody": "集合 \"{{name}}\" 已包含 {{count}} 篇文档。请选择其他名称，或合并到该集合。",
     "merge": "合并",
     "rename": "重命名"
+  },
+  "supplement": {
+    "prompt": "语料库无法回答。尝试其他来源？",
+    "askAi": "询问通用 AI",
+    "searchWeb": "网络搜索",
+    "fromAi": "来自通用 AI 知识（非您的文档）",
+    "fromWeb": "来自网络搜索"
   }
 }

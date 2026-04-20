@@ -175,5 +175,12 @@
     "conflictBody": "Collection \"{{name}}\" already has {{count}} documents. Pick a different name, or merge your selection into it.",
     "merge": "Merge",
     "rename": "Rename"
+  },
+  "supplement": {
+    "prompt": "The corpus couldn't answer. Try another source?",
+    "askAi": "Ask general AI",
+    "searchWeb": "Search the web",
+    "fromAi": "From general AI knowledge (not your documents)",
+    "fromWeb": "From web search"
   }
 }
