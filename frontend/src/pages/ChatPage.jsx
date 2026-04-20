@@ -160,14 +160,26 @@ export default function ChatPage() {
       const msgs = await fetchSessionMessages(sid, USER_ID)
       const restored = []
       let lastSources = null
+      let lastUserQuestion = null
       for (const m of msgs) {
-        const entry = { role: m.role === 'human' ? 'user' : 'ai', content: m.content }
-        restored.push(entry)
-        if (m.role === 'ai' && m.sources) {
-          try {
-            lastSources = JSON.parse(m.sources)
-          } catch { /* ignore malformed */ }
+        const role = m.role === 'human' ? 'user' : 'ai'
+        const entry = { role, content: m.content }
+        if (role === 'user') {
+          lastUserQuestion = m.content
+        } else {
+          // Re-derive refusal flag from text (not persisted in DB). Carry the
+          // preceding user question so the supplement buttons can resend it.
+          if (typeof m.content === 'string' && m.content.toLowerCase().includes(REFUSAL_MARKER)) {
+            entry.refusal = true
+            entry.originalQuestion = lastUserQuestion
+          }
+          if (m.sources) {
+            try {
+              lastSources = JSON.parse(m.sources)
+            } catch { /* ignore malformed */ }
+          }
         }
+        restored.push(entry)
       }
       setMessages(restored)
       if (lastSources) {
@@ -710,7 +722,7 @@ export default function ChatPage() {
                 onClick={handleStop}
                 className="p-2.5 rounded-lg transition-opacity hover:opacity-90"
                 style={{
-                  backgroundColor: 'hsl(0 84% 60%)',
+                  backgroundColor: 'var(--bad)',
                   color: 'var(--fg, #f4f2ee)',
                 }}
                 title={t('chat.stopGeneration')}
