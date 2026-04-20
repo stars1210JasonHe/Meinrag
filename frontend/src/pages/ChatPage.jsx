@@ -504,13 +504,15 @@ export default function ChatPage() {
         setSelectedSource(num - 1)
         return
       }
-      if (e.key === 'ArrowUp' && selectedSource != null && selectedSource > 0) {
+      // ArrowUp/Down step through the visually-displayed (score-sorted) order,
+      // not the raw array order — selectedSource stores the original array index.
+      if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && selectedSource != null) {
+        const displayPos = displaySources.findIndex(d => d.originalIndex === selectedSource)
+        if (displayPos < 0) return
+        const nextPos = e.key === 'ArrowUp' ? displayPos - 1 : displayPos + 1
+        if (nextPos < 0 || nextPos >= displaySources.length) return
         e.preventDefault()
-        setSelectedSource(selectedSource - 1)
-      }
-      if (e.key === 'ArrowDown' && selectedSource != null && selectedSource < sources.length - 1) {
-        e.preventDefault()
-        setSelectedSource(selectedSource + 1)
+        setSelectedSource(displaySources[nextPos].originalIndex)
       }
       if (e.key === 'Escape') {
         if (selectedSource != null) {
@@ -522,7 +524,7 @@ export default function ChatPage() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [sources, selectedSource])
+  }, [sources, selectedSource, displaySources])
 
   return (
     // overflow-hidden so the inner areas control their own scrolling
