@@ -246,9 +246,6 @@ class ChatSessionRepository:
         self._session_ttl = session_ttl
 
     async def get_history(self, session_id: str) -> list[BaseMessage]:
-        # Clean up expired sessions
-        await self._cleanup_expired()
-
         result = await self._session.execute(
             select(ChatSessionModel).where(
                 ChatSessionModel.session_id == session_id

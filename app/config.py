@@ -142,7 +142,7 @@ class Settings(BaseSettings):
 
     # Chat memory
     memory_max_messages: int = 20
-    memory_session_ttl: int = 3600
+    memory_session_ttl: int = 2592000  # 30 days — safety floor; chat history is persistent
 
     # Web search fallback
     web_search_enabled: bool = True

@@ -56,10 +56,16 @@ class TestMemoryTrimming:
 
 
 class TestMemoryTTL:
-    """A4.5: TTL expiry."""
+    """Chat history is persistent — get_history must never delete data."""
 
-    async def test_ttl_expiry(self, db_session):
-        """Session data cleared after TTL seconds."""
+    async def test_history_persists_past_ttl(self, db_session):
+        """get_history must NOT side-effect-delete stale sessions.
+
+        Chat history is user data, not an LRU cache. A prior bug made
+        get_history invoke _cleanup_expired, which cascade-deleted any
+        session whose last_access was older than session_ttl — destroying
+        the user's chat data on the next query that loaded context.
+        """
         mgr = ChatSessionRepository(db_session, max_messages=20, session_ttl=1)
         await mgr.add_exchange("s1", "Q1", "A1")
         history = await mgr.get_history("s1")
@@ -68,7 +74,9 @@ class TestMemoryTTL:
         await asyncio.sleep(1.5)
 
         history = await mgr.get_history("s1")
-        assert history == []
+        assert len(history) == 2
+        assert history[0].content == "Q1"
+        assert history[1].content == "A1"
 
 
 class TestMemoryIsolation:
