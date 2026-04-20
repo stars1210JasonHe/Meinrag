@@ -142,6 +142,7 @@ export default function SaveCollectionDialog({ open, count, docIds, onClose, onS
             </div>
             <div className="text-[color:var(--fg-dim,#9a9690)] mb-2">
               {t('selection.conflictBody', {
+                name,
                 count: conflict.existingCount ?? '?',
                 defaultValue: `Collection "${name}" already has ${conflict.existingCount ?? '?'} documents. Pick a different name, or merge your selection into it.`,
               })}
