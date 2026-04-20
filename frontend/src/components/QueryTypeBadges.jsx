@@ -16,7 +16,7 @@ export default function QueryTypeBadges({ types }) {
         <span
           key={type}
           className="px-1.5 py-0.5 rounded text-[10px] font-medium"
-          style={{ backgroundColor: TYPE_COLORS[type] ?? 'hsl(217 33% 17%)', color: '#fff' }}
+          style={{ backgroundColor: TYPE_COLORS[type] ?? 'var(--border-strong)', color: '#fff' }}
         >
           {i18n.exists(`queryType.${type}`) ? t(`queryType.${type}`) : type}
         </span>

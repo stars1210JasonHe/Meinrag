@@ -31,19 +31,19 @@ export default function ContextMenu({ x, y, items, onClose }) {
       style={{
         left: x,
         top: y,
-        backgroundColor: 'hsl(222 47% 12%)',
-        border: '1px solid hsl(217 33% 22%)',
+        backgroundColor: 'var(--bg-2)',
+        border: '1px solid var(--border-strong)',
       }}
     >
       {items.map((item, i) =>
         item.separator ? (
-          <div key={i} className="my-1 border-t" style={{ borderColor: 'hsl(217 33% 17%)' }} />
+          <div key={i} className="my-1 border-t" style={{ borderColor: 'var(--border-strong)' }} />
         ) : (
           <button
             key={i}
             onClick={() => { item.action(); onClose() }}
             className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-left transition-colors hover:bg-white/10"
-            style={{ color: item.danger ? 'hsl(0 84% 60%)' : 'hsl(210 40% 98%)' }}
+            style={{ color: item.danger ? 'var(--bad)' : 'var(--fg)' }}
           >
             {item.icon && <item.icon size={12} />}
             {item.label}

@@ -15,7 +15,7 @@ export default function LanguageSwitcher() {
     <button
       onClick={() => i18n.changeLanguage(next.code)}
       className="flex items-center gap-3 px-4 py-2.5 text-sm transition-colors opacity-60 hover:opacity-100 w-full"
-      style={{ color: 'hsl(215 20% 65%)' }}
+      style={{ color: 'var(--fg-dim)' }}
       title={`Switch to ${next.label === 'EN' ? 'English' : '中文'}`}
     >
       <Languages size={18} className="shrink-0" />

@@ -91,10 +91,10 @@ export default function SourceViewer({ source, sourceIndex, sources, onBack, onS
     <div className="flex flex-col h-full">
       {/* Header: back + source mini-list + nav */}
       <div className="flex items-center gap-1 px-2 py-1.5 border-b shrink-0"
-           style={{ borderColor: 'hsl(217 33% 17%)' }}>
+           style={{ borderColor: 'var(--border-strong)' }}>
         <button onClick={onBack}
                 className="flex items-center gap-0.5 text-xs opacity-60 hover:opacity-100 shrink-0"
-                style={{ color: 'hsl(210 40% 98%)' }}>
+                style={{ color: 'var(--fg)' }}>
           <ChevronLeft size={14} /> {t('sourceViewer.sources')}
         </button>
 
@@ -108,7 +108,7 @@ export default function SourceViewer({ source, sourceIndex, sources, onBack, onS
             return (
               <button key={i} onClick={() => onSelectSource(i)}
                       className={cn('p-1 rounded transition-opacity', isActive ? 'opacity-100' : 'opacity-30 hover:opacity-60')}
-                      style={{ color: isActive ? TYPE_BBOX_COLORS[s.chunk_type] || '#3b82f6' : 'hsl(210 40% 98%)' }}
+                      style={{ color: isActive ? TYPE_BBOX_COLORS[s.chunk_type] || '#3b82f6' : 'var(--fg)' }}
                       title={`[${i+1}] ${s.chunk_type}`}>
                 <Icon size={12} />
               </button>
@@ -125,7 +125,7 @@ export default function SourceViewer({ source, sourceIndex, sources, onBack, onS
                     className="p-0.5 opacity-40 hover:opacity-100 disabled:opacity-10">
               <ChevronLeft size={12} />
             </button>
-            <span className="text-[10px] tabular-nums" style={{ color: 'hsl(210 40% 98%)' }}>
+            <span className="text-[10px] tabular-nums" style={{ color: 'var(--fg)' }}>
               {currentPage}/{numPages}
             </span>
             <button onClick={() => setCurrentPage(p => Math.min(numPages, p + 1))} disabled={currentPage >= numPages}
@@ -140,7 +140,7 @@ export default function SourceViewer({ source, sourceIndex, sources, onBack, onS
           <button onClick={() => setZoom(z => Math.max(0.3, z - 0.2))} className="p-0.5 opacity-40 hover:opacity-100">
             <ZoomOut size={12} />
           </button>
-          <span className="text-[10px] tabular-nums w-7 text-center" style={{ color: 'hsl(210 40% 98%)' }}>
+          <span className="text-[10px] tabular-nums w-7 text-center" style={{ color: 'var(--fg)' }}>
             {Math.round(zoom * 100)}%
           </span>
           <button onClick={() => setZoom(z => Math.min(3, z + 0.2))} className="p-0.5 opacity-40 hover:opacity-100">
@@ -174,7 +174,7 @@ export default function SourceViewer({ source, sourceIndex, sources, onBack, onS
             </Document>
           </div>
         ) : (
-          <div className="p-4 text-sm leading-relaxed" style={{ color: 'hsl(210 40% 98%)' }}>
+          <div className="p-4 text-sm leading-relaxed" style={{ color: 'var(--fg)' }}>
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {source.content || t('sourceViewer.noContent')}
             </ReactMarkdown>

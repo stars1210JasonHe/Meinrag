@@ -53,7 +53,7 @@ export default function SourceItem({ source, index, isActive, onClick }) {
     >
       <Icon size={14} className="mt-0.5 shrink-0 opacity-60" />
       <div className="flex-1 min-w-0">
-        <div className="text-xs font-medium truncate" style={{ color: 'hsl(210 40% 98%)' }}>
+        <div className="text-xs font-medium truncate" style={{ color: 'var(--fg)' }}>
           {displayName}
         </div>
         <div className="flex items-center gap-2 mt-0.5">

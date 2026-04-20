@@ -18,7 +18,7 @@ export default function SupplementActions({ question, onAskAi, onSearchWeb, busy
 
   return (
     <div className="mt-3 flex flex-col gap-2">
-      <div className="text-xs" style={{ color: 'hsl(215 20% 65%)' }}>
+      <div className="text-xs" style={{ color: 'var(--fg-dim)' }}>
         {t('supplement.prompt', {
           defaultValue: "The corpus couldn't answer. Try another source?",
         })}

@@ -118,7 +118,7 @@ export default function PdfViewerPage() {
     <div className="flex flex-col h-full">
       {/* Toolbar */}
       <div className="flex items-center gap-2 px-3 py-2 border-b"
-           style={{ borderColor: 'hsl(217 33% 17%)', backgroundColor: 'hsl(222 47% 8%)' }}>
+           style={{ borderColor: 'var(--border-strong)', backgroundColor: 'var(--bg)' }}>
         <button onClick={() => navigate('/')} className="text-xs opacity-40 hover:opacity-100 mr-2">
           <ChevronLeft size={16} />
         </button>
@@ -127,7 +127,7 @@ export default function PdfViewerPage() {
                 className="p-1 opacity-60 hover:opacity-100 disabled:opacity-20">
           <ChevronLeft size={16} />
         </button>
-        <span className="text-xs tabular-nums" style={{ color: 'hsl(210 40% 98%)' }}>
+        <span className="text-xs tabular-nums" style={{ color: 'var(--fg)' }}>
           {currentPage} / {numPages || '?'}
         </span>
         <button onClick={() => numPages && setCurrentPage(p => Math.min(numPages, p + 1))} disabled={currentPage >= numPages}
@@ -140,7 +140,7 @@ export default function PdfViewerPage() {
         <button onClick={() => setZoom(z => Math.max(0.3, z - 0.1))} className="p-1 opacity-60 hover:opacity-100">
           <ZoomOut size={14} />
         </button>
-        <span className="text-xs tabular-nums w-10 text-center" style={{ color: 'hsl(210 40% 98%)' }}>
+        <span className="text-xs tabular-nums w-10 text-center" style={{ color: 'var(--fg)' }}>
           {Math.round(zoom * 100)}%
         </span>
         <button onClick={() => setZoom(z => Math.min(3, z + 0.1))} className="p-1 opacity-60 hover:opacity-100">
@@ -164,7 +164,7 @@ export default function PdfViewerPage() {
       {/* Search bar */}
       {searchOpen && (
         <div className="flex items-center gap-2 px-3 py-1.5 border-b"
-             style={{ borderColor: 'hsl(217 33% 17%)', backgroundColor: 'hsl(222 47% 10%)' }}>
+             style={{ borderColor: 'var(--border-strong)', backgroundColor: 'var(--bg-1)' }}>
           <Search size={12} className="opacity-40" />
           <input
             type="text"
@@ -173,7 +173,7 @@ export default function PdfViewerPage() {
             placeholder={t('pdfViewer.searchPlaceholder')}
             autoFocus
             className="flex-1 text-xs bg-transparent outline-none"
-            style={{ color: 'hsl(210 40% 98%)' }}
+            style={{ color: 'var(--fg)' }}
           />
           <button onClick={() => { setSearchOpen(false); setSearchQuery('') }} className="opacity-40 hover:opacity-100">
             <X size={12} />
@@ -208,9 +208,9 @@ export default function PdfViewerPage() {
 
         {/* Page chunks sidebar */}
         <div className="w-64 border-l overflow-auto shrink-0"
-             style={{ borderColor: 'hsl(217 33% 17%)', backgroundColor: 'hsl(222 47% 8%)' }}>
+             style={{ borderColor: 'var(--border-strong)', backgroundColor: 'var(--bg)' }}>
           <div className="px-3 py-2 border-b text-xs font-medium uppercase tracking-wider opacity-40"
-               style={{ borderColor: 'hsl(217 33% 17%)' }}>
+               style={{ borderColor: 'var(--border-strong)' }}>
             {t('pdfViewer.pageChunks', { count: pageChunks.length })}
           </div>
           {pageChunks.length === 0 ? (
@@ -234,7 +234,7 @@ export default function PdfViewerPage() {
                   >
                     <Icon size={12} className="mt-0.5 shrink-0" style={{ color }} />
                     <div className="min-w-0">
-                      <div className="truncate font-medium" style={{ color: 'hsl(210 40% 98%)' }}>
+                      <div className="truncate font-medium" style={{ color: 'var(--fg)' }}>
                         {label}
                       </div>
                       <span className="opacity-40">{chunk.chunk_type}</span>

@@ -39,16 +39,16 @@ export default function ConfirmDialog({
       <div
         className="w-full max-w-sm rounded-lg border p-5 shadow-2xl"
         style={{
-          backgroundColor: 'hsl(222 47% 10%)',
-          borderColor: 'hsl(217 33% 17%)',
-          color: 'hsl(210 40% 98%)',
+          backgroundColor: 'var(--bg-1)',
+          borderColor: 'var(--border-strong)',
+          color: 'var(--fg)',
         }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start gap-3">
           {danger && (
             <div className="shrink-0 mt-0.5">
-              <AlertTriangle size={20} style={{ color: 'hsl(0 84% 60%)' }} />
+              <AlertTriangle size={20} style={{ color: 'var(--bad)' }} />
             </div>
           )}
           <div className="flex-1 min-w-0">
@@ -60,7 +60,7 @@ export default function ConfirmDialog({
           <button
             onClick={onCancel}
             className="px-3 py-1.5 text-xs rounded transition-opacity opacity-70 hover:opacity-100"
-            style={{ backgroundColor: 'hsl(217 33% 17%)' }}
+            style={{ backgroundColor: 'var(--bg-3)' }}
           >
             {cancelText}
           </button>
@@ -68,7 +68,7 @@ export default function ConfirmDialog({
             onClick={onConfirm}
             className="px-3 py-1.5 text-xs rounded font-medium text-white transition-opacity hover:opacity-90"
             style={{
-              backgroundColor: danger ? 'hsl(0 84% 60%)' : 'hsl(250 80% 65%)',
+              backgroundColor: danger ? 'var(--bad)' : 'var(--signature)',
             }}
           >
             {confirmText}

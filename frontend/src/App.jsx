@@ -12,12 +12,12 @@ export default function App() {
         <RouterProvider router={router} />
         <Toaster
           position="bottom-right"
-          theme="dark"
+          theme="system"
           toastOptions={{
             style: {
-              background: 'hsl(222 47% 12%)',
-              border: '1px solid hsl(217 33% 17%)',
-              color: 'hsl(210 40% 98%)',
+              background: 'var(--bg-2)',
+              border: '1px solid var(--border-strong)',
+              color: 'var(--fg)',
             },
           }}
         />
