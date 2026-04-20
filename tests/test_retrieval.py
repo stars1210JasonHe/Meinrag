@@ -118,6 +118,23 @@ class TestRRFMergeDual:
         for i in range(9):
             assert score_map[i] > score_map[i + 1]
 
+    def test_output_sorted_desc(self):
+        """Downstream pipeline (_section_aware_sample, _reorder_for_attention)
+        requires the returned list to be sorted by score descending."""
+        raw = [
+            (_doc(chunk_index=2), 0.5),
+            (_doc(chunk_index=0), 0.5),
+            (_doc(chunk_index=4), 0.5),
+        ]
+        summary = [
+            (_doc(chunk_index=0), 0.5),  # consensus bump on chunk 0
+        ]
+        result = _rrf_merge_dual(raw, summary, k=60)
+        scores = [s for _, s in result]
+        assert scores == sorted(scores, reverse=True), (
+            f"RRF output must be sorted desc, got {scores}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # 2. _normalize_scores
@@ -700,3 +717,13 @@ class TestRRFMerge:
         spread_k10 = result_k10[0][1] - result_k10[-1][1]
         spread_k100 = result_k100[0][1] - result_k100[-1][1]
         assert spread_k10 > spread_k100
+
+    def test_output_sorted_desc(self):
+        """Downstream pipeline invariant: output must be sorted score desc."""
+        vector = [(_doc(chunk_index=i), 0.5) for i in range(5)]
+        bm25 = [_doc(chunk_index=i) for i in [2, 0]]  # consensus on 0, 2
+        result = _rrf_merge_bm25(vector, bm25, k=60)
+        scores = [s for _, s in result]
+        assert scores == sorted(scores, reverse=True), (
+            f"output must be sorted desc, got {scores}"
+        )

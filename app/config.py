@@ -112,6 +112,7 @@ class Settings(BaseSettings):
     summary_provider: str = "openai"  # "openai" or "openrouter"
     summary_model: str = "gpt-4o-mini"
     summary_min_chars: int = 200
+    summary_max_chunks_for_overview: int = 30  # stride-sampled across doc for doc-level overview
     scoring_profile: str = "general"
     scoring_recency_decay: float = 0.001  # unused until recency signal is wired into _composite_score
 

@@ -281,12 +281,18 @@ async def _doc_summary_fastpath(
 
     if request.session_id:
         sources_data = [s.model_dump() for s in sources]
+        # Match the non-fast-path scope convention: use request.doc_ids (not
+        # the resolved list) so session history stays under one scope_value.
+        scope_value = (
+            request.doc_ids[0] if request.doc_ids and len(request.doc_ids) == 1
+            else doc_ids[0]
+        )
         await memory_manager.add_exchange(
             request.session_id, request.question, answer,
             user_id=current_user,
             sources_json=json.dumps(sources_data),
             scope_type="doc",
-            scope_value=doc_ids[0],
+            scope_value=scope_value,
         )
 
     return QueryResponse(
@@ -552,7 +558,11 @@ async def query_documents_stream(
         needs_web_search = False
         query_types = ["overview"]
         query_label = None
-        confidence_tier = "high"
+        # Don't hardcode "high" — we bypassed the composite scoring that
+        # normally feeds confidence. Gate on doc summary length: a substantive
+        # summary (>200 chars) signals real content; anything shorter might
+        # be a degenerate one-liner and should read as moderate.
+        confidence_tier = "high" if len(fast_path_overview) > 200 else "moderate"
         context = format_docs([doc for doc, _ in supporting]) if supporting else "(no supporting excerpts available)"
     elif request.force_web_search and settings.web_search_enabled:
         result = None

@@ -185,11 +185,19 @@ async def generate_all_summaries(doc_id: str, settings, vector_store=None, summa
     # first summary per section — which collapsed to a single "body" entry
     # whenever docling didn't populate section_type (which is most of the time
     # on current corpora), making the doc-level overview useless.
+    #
+    # Stride-sample evenly across the document instead of head-only [:N], so
+    # the overview covers intro + body + conclusion for long docs (books,
+    # reports) rather than just the first N chunks.
     all_chunk_summaries = [
         c.metadata["summary"] for c in chunks if c.metadata.get("summary")
     ]
-    MAX_CHUNKS_FOR_OVERVIEW = 30  # ~1800 input tokens for gpt-4o-mini
-    sampled = all_chunk_summaries[:MAX_CHUNKS_FOR_OVERVIEW]
+    cap = settings.summary_max_chunks_for_overview
+    if len(all_chunk_summaries) <= cap:
+        sampled = all_chunk_summaries
+    else:
+        stride = len(all_chunk_summaries) / cap
+        sampled = [all_chunk_summaries[int(i * stride)] for i in range(cap)]
     section_sums = {f"part_{i}": s for i, s in enumerate(sampled)}
 
     doc_summary = await generate_doc_summary(section_sums, settings, llm=llm)

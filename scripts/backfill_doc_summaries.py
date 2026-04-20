@@ -36,7 +36,6 @@ from sqlalchemy import update, select
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 
 
-MAX_CHUNKS_FOR_OVERVIEW = 30
 
 
 async def main(force: bool = False) -> None:
@@ -109,8 +108,14 @@ async def main(force: bool = False) -> None:
                 print(f"[fail] {doc_id}: full pipeline completed but DB still has NULL summary")
             continue
 
-        # Chunk summaries exist — just backfill doc-level summary
-        sampled = chunk_sums[:MAX_CHUNKS_FOR_OVERVIEW]
+        # Chunk summaries exist — just backfill doc-level summary.
+        # Stride-sample for even doc coverage (matches generate_all_summaries).
+        cap = settings.summary_max_chunks_for_overview
+        if len(chunk_sums) <= cap:
+            sampled = chunk_sums
+        else:
+            stride = len(chunk_sums) / cap
+            sampled = [chunk_sums[int(i * stride)] for i in range(cap)]
         section_sums = {f"part_{i}": c.page_content for i, c in enumerate(sampled)}
 
         print(f"[gen]  {doc_id}: combining {len(sampled)} existing chunk summaries")

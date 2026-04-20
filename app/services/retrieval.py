@@ -713,6 +713,9 @@ def _rrf_merge_bm25(
         if max_s > 0:
             merged = [(d, s / max_s) for d, s in merged]
 
+    # Sort desc — downstream pipeline (_section_aware_sample, _reorder_for_attention)
+    # assumes this invariant on entry.
+    merged.sort(key=lambda x: x[1], reverse=True)
     return merged
 
 
@@ -1021,6 +1024,8 @@ def _rrf_merge_dual(
         if max_s > 0:
             merged = [(d, s / max_s) for d, s in merged]
 
+    # Sort desc — downstream pipeline assumes this invariant.
+    merged.sort(key=lambda x: x[1], reverse=True)
     return merged
 
 
