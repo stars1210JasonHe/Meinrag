@@ -180,12 +180,17 @@ async def generate_all_summaries(doc_id: str, settings, vector_store=None, summa
             except Exception as e:
                 logger.warning("Failed to add summary embeddings: %s", e)
 
-    # Generate document-level summary from section summaries
-    section_sums = {}
-    for chunk in chunks:
-        st = chunk.metadata.get("section_type", "body")
-        if chunk.metadata.get("summary") and st not in section_sums:
-            section_sums[st] = chunk.metadata["summary"]
+    # Generate document-level summary from ALL chunk summaries (capped for
+    # prompt size). Previous logic grouped by section_type and kept only the
+    # first summary per section — which collapsed to a single "body" entry
+    # whenever docling didn't populate section_type (which is most of the time
+    # on current corpora), making the doc-level overview useless.
+    all_chunk_summaries = [
+        c.metadata["summary"] for c in chunks if c.metadata.get("summary")
+    ]
+    MAX_CHUNKS_FOR_OVERVIEW = 30  # ~1800 input tokens for gpt-4o-mini
+    sampled = all_chunk_summaries[:MAX_CHUNKS_FOR_OVERVIEW]
+    section_sums = {f"part_{i}": s for i, s in enumerate(sampled)}
 
     doc_summary = await generate_doc_summary(section_sums, settings, llm=llm)
 
