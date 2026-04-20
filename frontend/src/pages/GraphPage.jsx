@@ -28,6 +28,16 @@ const EDGE_COLORS = {
 }
 const TYPE_ICONS = { text: FileText, table: Table2, image: Image, formula: Calculator }
 
+// Reads a CSS custom property off the root so the force-graph canvas can track theme
+function cssVar(name, fallback = '#08080a') {
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+    return v || fallback
+  } catch {
+    return fallback
+  }
+}
+
 export default function GraphPage() {
   const { docId } = useParams()
   const [searchParams] = useSearchParams()
@@ -60,6 +70,14 @@ export default function GraphPage() {
   ) // 'all' | 'collection' | 'doc' | 'docs'
   const [scopeLabel, setScopeLabel] = useState('')
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
+  // Track theme so the force-graph canvas background re-renders on toggle
+  const [themeTick, setThemeTick] = useState(0)
+  useEffect(() => {
+    const obs = new MutationObserver(() => setThemeTick(t => t + 1))
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+    return () => obs.disconnect()
+  }, [])
+  const canvasBg = useMemo(() => cssVar('--bg', '#08080a'), [themeTick])
   const [contextMenu, setContextMenu] = useState(null) // {x, y, items}
 
   const { data: documents = [] } = useQuery({
@@ -337,7 +355,10 @@ export default function GraphPage() {
     // Label: show for active node, its neighbors, documents, or when nothing is active
     if (activeNode?.id === node.id || (activeNode && highlightNodes.has(node.id)) || node._data?.node_type === 'document' || !activeNode) {
       ctx.font = `${Math.max(3, r * 0.8)}px sans-serif`
-      ctx.fillStyle = isHighlighted ? '#e2e8f0' : '#64748b'
+      // Theme-aware label color: fg-1 / fg-dim from CSS vars, with dark fallbacks.
+      ctx.fillStyle = isHighlighted
+        ? cssVar('--fg-1', '#e2e8f0')
+        : cssVar('--fg-dim', '#64748b')
       ctx.textAlign = 'center'
       const label = node.label?.length > 20 ? node.label.slice(0, 18) + '..' : node.label
       ctx.fillText(label || '', node.x, node.y + r + 4)
@@ -377,27 +398,27 @@ export default function GraphPage() {
   }
 
   return (
-    <div className="flex flex-col h-full" style={{ backgroundColor: 'hsl(222 47% 4%)' }}>
+    <div className="flex flex-col h-full" style={{ backgroundColor: 'var(--bg, #08080a)' }}>
       {/* Breadcrumb */}
       {(scopeType !== 'all') && (
         <div className="flex items-center gap-1 px-4 py-1.5 text-xs border-b"
-             style={{ borderColor: 'hsl(217 33% 12%)', color: 'hsl(215 20% 65%)' }}>
+             style={{ borderColor: 'var(--border, rgba(255,255,255,0.08))', color: 'var(--fg-dim, #9a9690)' }}>
           <button onClick={() => handleScopeChange('')} className="hover:underline opacity-60 hover:opacity-100">
             {t('graph.allDocuments')}
           </button>
           <span className="opacity-30">→</span>
           {scopeType === 'collection' && (
-            <span style={{ color: 'hsl(210 40% 98%)' }}>{scopeLabel}</span>
+            <span style={{ color: 'var(--fg, #f4f2ee)' }}>{scopeLabel}</span>
           )}
           {scopeType === 'doc' && (
-            <span style={{ color: 'hsl(210 40% 98%)' }}>{scopeLabel}</span>
+            <span style={{ color: 'var(--fg, #f4f2ee)' }}>{scopeLabel}</span>
           )}
         </div>
       )}
 
       {/* Toolbar */}
       <div className="flex items-center gap-3 px-4 py-2 border-b flex-wrap"
-           style={{ borderColor: 'hsl(217 33% 17%)', backgroundColor: 'hsl(222 47% 8%)' }}>
+           style={{ borderColor: 'var(--border-strong, rgba(255,255,255,0.14))', backgroundColor: 'var(--bg-1, #0c0c0f)' }}>
         {Object.entries(NODE_COLORS).filter(([k]) => k !== 'document').map(([type, color]) => (
           <button
             key={type}
@@ -405,14 +426,14 @@ export default function GraphPage() {
             className={cn('flex items-center gap-1 text-xs transition-opacity',
               nodeFilter[type] ? 'opacity-100' : 'opacity-30'
             )}
-            style={{ color: 'hsl(210 40% 98%)' }}
+            style={{ color: 'var(--fg, #f4f2ee)' }}
           >
             <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
             {t(`nodeType.${type}`)}
           </button>
         ))}
 
-        <span className="opacity-20" style={{ color: 'hsl(210 40% 98%)' }}>|</span>
+        <span className="opacity-20" style={{ color: 'var(--fg, #f4f2ee)' }}>|</span>
 
         {EDGE_TYPES.map(type => (
           <button
@@ -422,8 +443,8 @@ export default function GraphPage() {
               edgeFilter[type] ? 'opacity-100' : 'opacity-30'
             )}
             style={{
-              backgroundColor: edgeFilter[type] ? 'hsl(217 33% 17%)' : 'transparent',
-              color: 'hsl(210 40% 98%)',
+              backgroundColor: edgeFilter[type] ? 'var(--border-strong, rgba(255,255,255,0.14))' : 'transparent',
+              color: 'var(--fg, #f4f2ee)',
             }}
           >
             <span className="w-3 h-0.5 inline-block rounded" style={{ backgroundColor: EDGE_COLORS[type] }} />
@@ -431,13 +452,13 @@ export default function GraphPage() {
           </button>
         ))}
 
-        <span className="opacity-20" style={{ color: 'hsl(210 40% 98%)' }}>|</span>
+        <span className="opacity-20" style={{ color: 'var(--fg, #f4f2ee)' }}>|</span>
 
         <select
           value={scopeType === 'collection' ? `col:${scopeLabel}` : scope}
           onChange={e => handleScopeChange(e.target.value)}
           className="text-xs rounded px-2 py-1 outline-none"
-          style={{ backgroundColor: 'hsl(217 33% 17%)', color: 'hsl(210 40% 98%)', border: 'none' }}
+          style={{ backgroundColor: 'var(--border-strong, rgba(255,255,255,0.14))', color: 'var(--fg, #f4f2ee)', border: 'none' }}
         >
           <option value="">{t('graph.allDocuments')}</option>
           {collections.length > 0 && (
@@ -456,7 +477,7 @@ export default function GraphPage() {
 
         {scopeType !== 'all' && (
           <button onClick={() => handleScopeChange('')}
-                  className="text-xs opacity-40 hover:opacity-100" style={{ color: 'hsl(210 40% 98%)' }}>
+                  className="text-xs opacity-40 hover:opacity-100" style={{ color: 'var(--fg, #f4f2ee)' }}>
             <X size={12} />
           </button>
         )}
@@ -466,7 +487,7 @@ export default function GraphPage() {
       <div className="flex-1 relative" ref={containerRef}>
         {isLoading && (
           <div className="absolute inset-0 flex items-center justify-center z-10 opacity-40"
-               style={{ color: 'hsl(210 40% 98%)' }}>
+               style={{ color: 'var(--fg, #f4f2ee)' }}>
             {t('graph.loadingGraph')}
           </div>
         )}
@@ -476,7 +497,7 @@ export default function GraphPage() {
             graphData={graphFormatted}
             width={dimensions.width}
             height={dimensions.height - (selectedNode ? 140 : 0)}
-            backgroundColor="hsl(222, 47%, 4%)"
+            backgroundColor={canvasBg}
             nodeCanvasObject={paintNode}
             nodePointerAreaPaint={(node, color, ctx) => {
               const r = (node.size || 4) + 2
@@ -507,7 +528,7 @@ export default function GraphPage() {
         )}
         {!isLoading && graphFormatted.nodes.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center opacity-40"
-               style={{ color: 'hsl(210 40% 98%)' }}>
+               style={{ color: 'var(--fg, #f4f2ee)' }}>
             {t('graph.noGraphData')}
           </div>
         )}
@@ -524,30 +545,30 @@ export default function GraphPage() {
 
       {/* Node preview panel */}
       {selectedNode && (
-        <div className="border-t px-4 py-3" style={{ borderColor: 'hsl(217 33% 17%)', backgroundColor: 'hsl(222 47% 8%)' }}>
+        <div className="border-t px-4 py-3" style={{ borderColor: 'var(--border-strong, rgba(255,255,255,0.14))', backgroundColor: 'var(--bg-1, #0c0c0f)' }}>
           <div className="flex items-start justify-between mb-2">
             <div className="flex items-center gap-2">
               {(() => {
                 const Icon = TYPE_ICONS[selectedNode.chunk_type] || FileText
                 return <Icon size={16} style={{ color: NODE_COLORS[selectedNode.chunk_type] }} />
               })()}
-              <span className="text-sm font-medium" style={{ color: 'hsl(210 40% 98%)' }}>
+              <span className="text-sm font-medium" style={{ color: 'var(--fg, #f4f2ee)' }}>
                 {selectedNode.label || selectedNode.chunk_type} · {selectedNode.source_file}
               </span>
             </div>
             <button onClick={() => setSelectedNode(null)} className="opacity-40 hover:opacity-100"
-                    style={{ color: 'hsl(210 40% 98%)' }}>
+                    style={{ color: 'var(--fg, #f4f2ee)' }}>
               <X size={14} />
             </button>
           </div>
-          <p className="text-xs mb-3 leading-relaxed" style={{ color: 'hsl(215 20% 65%)' }}>
+          <p className="text-xs mb-3 leading-relaxed" style={{ color: 'var(--fg-dim, #9a9690)' }}>
             {selectedNode.content_preview}
           </p>
           <div className="flex items-center gap-2">
             <button
               onClick={() => navigate(`/pdf/${selectedNode.doc_id}`)}
               className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs"
-              style={{ backgroundColor: 'hsl(217 33% 17%)', color: 'hsl(210 40% 98%)' }}
+              style={{ backgroundColor: 'var(--border-strong, rgba(255,255,255,0.14))', color: 'var(--fg, #f4f2ee)' }}
             >
               <ExternalLink size={12} /> {t('dashboard.openInPdf')}
             </button>
@@ -562,12 +583,12 @@ export default function GraphPage() {
                 navigate(`/chat?doc=${selectedNode.doc_id}&name=${encodeURIComponent(selectedNode.source_file || '')}${q ? `&q=${encodeURIComponent(q)}` : ''}`)
               }}
               className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs"
-              style={{ backgroundColor: 'hsl(217 33% 17%)', color: 'hsl(210 40% 98%)' }}
+              style={{ backgroundColor: 'var(--border-strong, rgba(255,255,255,0.14))', color: 'var(--fg, #f4f2ee)' }}
             >
               <MessageSquare size={12} /> {t('graph.askAboutThis')}
             </button>
             {selectedNode.page != null && (
-              <span className="text-xs opacity-40" style={{ color: 'hsl(210 40% 98%)' }}>
+              <span className="text-xs opacity-40" style={{ color: 'var(--fg, #f4f2ee)' }}>
                 {t('graph.page', { num: selectedNode.page + 1 })}
               </span>
             )}

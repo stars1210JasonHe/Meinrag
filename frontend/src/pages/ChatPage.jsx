@@ -55,14 +55,14 @@ function makeMarkdownComponents(onCitationClick) {
       className ? (
         <code
           className={cn('block p-2 rounded text-xs my-2 overflow-x-auto', className)}
-          style={{ backgroundColor: 'hsl(222 47% 6%)' }}
+          style={{ backgroundColor: 'var(--bg, #08080a)' }}
         >
           {children}
         </code>
       ) : (
         <code
           className="px-1 py-0.5 rounded text-xs"
-          style={{ backgroundColor: 'hsl(222 47% 6%)' }}
+          style={{ backgroundColor: 'var(--bg, #08080a)' }}
         >
           {children}
         </code>
@@ -508,9 +508,9 @@ export default function ChatPage() {
       {showHistory && (
         <div
           className="w-56 border-r flex flex-col shrink-0"
-          style={{ borderColor: 'hsl(217 33% 17%)', backgroundColor: 'hsl(222 47% 8%)' }}
+          style={{ borderColor: 'var(--border-strong, rgba(255,255,255,0.14))', backgroundColor: 'var(--bg-1, #0c0c0f)' }}
         >
-          <div className="p-2 border-b" style={{ borderColor: 'hsl(217 33% 17%)' }}>
+          <div className="p-2 border-b" style={{ borderColor: 'var(--border-strong, rgba(255,255,255,0.14))' }}>
             <button
               onClick={startNewChat}
               className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-xs"
@@ -531,7 +531,7 @@ export default function ChatPage() {
                     'w-full px-3 py-2 text-left text-xs truncate transition-colors',
                     sessionId === s.session_id ? 'bg-white/10' : 'hover:bg-white/5'
                   )}
-                  style={{ color: 'hsl(210 40% 98%)' }}
+                  style={{ color: 'var(--fg, #f4f2ee)' }}
                 >
                   <div className="truncate">{s.preview || t('common.empty')}</div>
                   <div className="opacity-30 mt-0.5">
@@ -571,14 +571,14 @@ export default function ChatPage() {
                         backgroundColor:
                           msg.role === 'user'
                             ? 'var(--signature, #5b7ec9)'
-                            : 'hsl(222 47% 12%)',
-                        color: 'hsl(210 40% 98%)',
+                            : 'var(--bg-2, #111115)',
+                        color: 'var(--fg, #f4f2ee)',
                       }}
                     >
                       {msg.loading ? (
                         msg.supplementBanner ? (
                           <div className="flex items-center gap-2 text-sm"
-                               style={{ color: 'hsl(215 20% 65%)' }}>
+                               style={{ color: 'var(--fg-dim, #9a9690)' }}>
                             <Loader2 size={14} className="animate-spin" />
                             <span>{msg.supplementBanner}</span>
                           </div>
@@ -589,7 +589,7 @@ export default function ChatPage() {
                         <>
                           {msg.supplementSource && (
                             <div className="mb-2 flex items-center gap-1 text-[10px] uppercase tracking-wider"
-                                 style={{ color: 'hsl(215 20% 65%)', fontFamily: 'var(--mono)' }}>
+                                 style={{ color: 'var(--fg-dim, #9a9690)', fontFamily: 'var(--mono)' }}>
                               <span className="inline-block w-1.5 h-1.5 rounded-full"
                                     style={{ backgroundColor: msg.supplementSource === 'ai'
                                       ? 'var(--signature, #5b7ec9)'
@@ -651,12 +651,12 @@ export default function ChatPage() {
         </div>
 
         {/* Scope indicator + Input bar */}
-        <div className="px-4 py-3 border-t shrink-0" style={{ borderColor: 'hsl(217 33% 17%)' }}>
+        <div className="px-4 py-3 border-t shrink-0" style={{ borderColor: 'var(--border-strong, rgba(255,255,255,0.14))' }}>
           {(scopeDocId || scopeCollection || scopeDocIds) && (
             <div className="max-w-3xl mx-auto mb-2 flex items-center gap-2 text-xs"
-                 style={{ color: 'hsl(215 20% 65%)' }}>
+                 style={{ color: 'var(--fg-dim, #9a9690)' }}>
               <FileText size={12} />
-              <span>{t('chat.searchingIn')} <strong style={{ color: 'hsl(210 40% 98%)' }}>
+              <span>{t('chat.searchingIn')} <strong style={{ color: 'var(--fg, #f4f2ee)' }}>
                 {scopeDocIds
                   ? t('chat.nDocs', { count: scopeDocIds.length, defaultValue: `${scopeDocIds.length} selected documents` })
                   : scopeDocId ? scopeDocName
@@ -673,7 +673,7 @@ export default function ChatPage() {
                 showHistory ? 'opacity-100' : 'opacity-40 hover:opacity-100'
               )}
               title={t('chat.chatHistory')}
-              style={{ color: 'hsl(210 40% 98%)' }}
+              style={{ color: 'var(--fg, #f4f2ee)' }}
             >
               <History size={16} />
             </button>
@@ -685,7 +685,7 @@ export default function ChatPage() {
                   showSources ? 'opacity-100' : 'opacity-40 hover:opacity-100'
                 )}
                 title={showSources ? t('chat.hideSources') : t('chat.showSources')}
-                style={{ color: 'hsl(210 40% 98%)' }}
+                style={{ color: 'var(--fg, #f4f2ee)' }}
               >
                 <FileText size={16} />
               </button>
@@ -700,9 +700,9 @@ export default function ChatPage() {
               disabled={loading}
               className="flex-1 px-4 py-2.5 rounded-lg text-sm outline-none disabled:opacity-50"
               style={{
-                backgroundColor: 'hsl(217 33% 17%)',
-                color: 'hsl(210 40% 98%)',
-                border: '1px solid hsl(217 33% 22%)',
+                backgroundColor: 'var(--border-strong, rgba(255,255,255,0.14))',
+                color: 'var(--fg, #f4f2ee)',
+                border: '1px solid var(--border-strong, rgba(255,255,255,0.18))',
               }}
             />
             {loading ? (
@@ -711,7 +711,7 @@ export default function ChatPage() {
                 className="p-2.5 rounded-lg transition-opacity hover:opacity-90"
                 style={{
                   backgroundColor: 'hsl(0 84% 60%)',
-                  color: 'hsl(210 40% 98%)',
+                  color: 'var(--fg, #f4f2ee)',
                 }}
                 title={t('chat.stopGeneration')}
               >
@@ -724,7 +724,7 @@ export default function ChatPage() {
                 className="p-2.5 rounded-lg transition-opacity disabled:opacity-40"
                 style={{
                   backgroundColor: 'var(--signature, #5b7ec9)',
-                  color: 'hsl(210 40% 98%)',
+                  color: 'var(--fg, #f4f2ee)',
                 }}
               >
                 <Send size={16} />
@@ -738,7 +738,7 @@ export default function ChatPage() {
       {showSources && sources.length > 0 && (
         <div
           className={cn(selectedSource != null ? 'w-[60%]' : 'w-80', 'border-l flex flex-col shrink-0')}
-          style={{ borderColor: 'hsl(217 33% 17%)', backgroundColor: 'hsl(222 47% 8%)', transition: 'width 0.2s ease' }}
+          style={{ borderColor: 'var(--border-strong, rgba(255,255,255,0.14))', backgroundColor: 'var(--bg-1, #0c0c0f)', transition: 'width 0.2s ease' }}
         >
           {selectedSource != null ? (
             <SourceViewer
@@ -752,7 +752,7 @@ export default function ChatPage() {
             <>
               <div
                 className="px-3 py-2.5 border-b text-xs font-medium uppercase tracking-wider opacity-40 shrink-0"
-                style={{ borderColor: 'hsl(217 33% 17%)' }}
+                style={{ borderColor: 'var(--border-strong, rgba(255,255,255,0.14))' }}
               >
                 {t('chat.sourcesWithCount', { count: sources.length })}
               </div>
