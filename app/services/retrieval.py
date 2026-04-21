@@ -305,6 +305,12 @@ async def _apply_composite_scoring(
                 pass
 
     rescored = []
+    # Breakdown capture for Score-B diagnostics — enabled via DEBUG logging.
+    # When active, we log per-chunk signal contributions so we can see which
+    # signal drives high composite on nonsense queries.
+    debug_enabled = logger.isEnabledFor(logging.DEBUG)
+    breakdown_rows: list[dict] = []
+
     for doc, similarity in retrieved:
         key = (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index"))
         rel_counts = edge_type_counts.get(key, {})
@@ -320,6 +326,39 @@ async def _apply_composite_scoring(
         authority = 1.0
         new_score = _composite_score(similarity, graph_score, recency, authority, weights)
         rescored.append((doc, new_score))
+
+        if debug_enabled:
+            w_sim, w_graph, w_rec, w_auth = weights
+            breakdown_rows.append({
+                "doc_id": key[0],
+                "chunk_idx": key[1],
+                "similarity": round(similarity, 4),
+                "graph_score": round(graph_score, 4),
+                "edge_sum": round(weighted_edge_sum, 2),
+                "w_sim": w_sim,
+                "w_graph": w_graph,
+                "sim_contrib": round(w_sim * similarity, 4),
+                "graph_contrib": round(w_graph * graph_score, 4),
+                "recency_contrib": round(w_rec * recency, 4),
+                "authority_contrib": round(w_auth * authority, 4),
+                "composite": round(new_score, 4),
+            })
+
+    if debug_enabled and breakdown_rows:
+        # Sort by composite desc and log top 5 — most interesting for false-high cases
+        top = sorted(breakdown_rows, key=lambda r: r["composite"], reverse=True)[:5]
+        logger.debug(
+            "[SCORE-B BREAKDOWN] query_type=%s weights=(sim=%s graph=%s rec=%s auth=%s) top-5:",
+            query_type, *weights,
+        )
+        for r in top:
+            logger.debug(
+                "  [%s:%s] sim=%.3f(x%.2f=%.3f) graph=%.3f(x%.2f=%.3f) | composite=%.3f",
+                r["doc_id"], r["chunk_idx"],
+                r["similarity"], r["w_sim"], r["sim_contrib"],
+                r["graph_score"], r["w_graph"], r["graph_contrib"],
+                r["composite"],
+            )
 
     return rescored
 
