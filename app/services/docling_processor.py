@@ -243,11 +243,14 @@ def _get_converter(settings: Settings):
         pipeline_options.do_picture_description = True
 
     _converter = DocumentConverter(
+        allowed_formats=[InputFormat.PDF, InputFormat.DOCX],
         format_options={
             InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
-        }
+            # DOCX uses default FormatOption — no OCR/table-structure config needed
+            # (python-docx underneath extracts paragraphs, tables, and images natively).
+        },
     )
-    logger.info("Docling: converter ready.")
+    logger.info("Docling: converter ready (PDF + DOCX).")
     return _converter
 
 
