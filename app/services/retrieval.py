@@ -164,7 +164,8 @@ async def _fact_keyword_expand(
     try:
         chain = FACT_KEYWORD_EXPANSION_PROMPT | llm | StrOutputParser()
         keywords = (await chain.ainvoke({"question": question})).strip()
-        if not keywords or len(keywords) > 200:
+        # Reject runaway / sentence-length responses: must be a short token list.
+        if not keywords or len(keywords.split()) > 20 or len(keywords) > 200:
             return retrieved
         augmented = f"{question} {keywords}"
         logger.info("Fact query keyword-expanded: +%r", keywords[:80])

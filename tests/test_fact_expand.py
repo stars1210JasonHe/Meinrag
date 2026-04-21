@@ -15,28 +15,6 @@ import pytest
 from langchain_core.documents import Document
 
 
-class _FakeLLM:
-    """Returns pre-scripted keyword expansion."""
-    def __init__(self, keywords: str):
-        self._keywords = keywords
-
-    async def ainvoke(self, *args, **kwargs):
-        class _R:
-            content: str
-        r = _R()
-        r.content = self._keywords
-        return r
-
-
-class _FakeChain:
-    """Mocks `prompt | llm | StrOutputParser()` — returns scripted string."""
-    def __init__(self, result: str):
-        self._result = result
-
-    async def ainvoke(self, inputs: dict) -> str:
-        return self._result
-
-
 class _FakeStore:
     """Records the query passed to similarity_search and returns scripted chunks."""
     def __init__(self, augmented_hits: list[Document]):
@@ -212,3 +190,81 @@ class TestFactKeywordExpand:
 
         result = asyncio.run(_run())
         assert result == original, "exception must return original unchanged"
+
+    def test_shared_chunk_keeps_augmented_score(self, monkeypatch):
+        """When the same chunk appears in both lists, the augmented-retrieval
+        score must be kept (augmented first, deduped). This locks in the
+        score-substitution behavior so future refactors don't silently swap
+        the source of the score."""
+        from app.services import retrieval
+        from app.services.retrieval import _fact_keyword_expand
+
+        class _PipedStub:
+            def __or__(self, other):
+                return self
+
+            async def ainvoke(self, inputs):
+                return "175B parameters"
+
+        monkeypatch.setattr(
+            retrieval, "FACT_KEYWORD_EXPANSION_PROMPT", _PipedStub(),
+        )
+
+        shared = _doc("d1", 0, "175 billion parameters")
+        original = [(shared, 0.55)]  # low-ish original score
+        # _FakeStore returns 0.8 for every augmented hit
+        store = _FakeStore([shared])
+
+        async def _run():
+            return await _fact_keyword_expand(
+                question="parameter count?",
+                retrieved=original,
+                llm=None,
+                vector_store=store,
+                doc_ids=["d1"],
+                fetch_k=10,
+            )
+
+        result = asyncio.run(_run())
+        assert len(result) == 1, "shared chunk must not be duplicated"
+        assert result[0][1] == 0.8, (
+            f"shared chunk must keep augmented score (0.8), got {result[0][1]}"
+        )
+
+    def test_runaway_llm_response_rejected(self, monkeypatch):
+        """LLM that ignores the prompt and returns a sentence must be rejected —
+        appending a sentence to the query degrades retrieval. Guard against
+        >20 words OR >200 chars."""
+        from app.services import retrieval
+        from app.services.retrieval import _fact_keyword_expand
+
+        class _ChattyStub:
+            def __or__(self, other):
+                return self
+
+            async def ainvoke(self, inputs):
+                # 25 words — exceeds word-count guard even though under 200 chars
+                return " ".join(["word"] * 25)
+
+        monkeypatch.setattr(
+            retrieval, "FACT_KEYWORD_EXPANSION_PROMPT", _ChattyStub(),
+        )
+
+        original = [(_doc("d1", 0, "abstract"), 0.9)]
+        store = _FakeStore([_doc("d1", 1, "should NOT be retrieved")])
+
+        async def _run():
+            return await _fact_keyword_expand(
+                question="anything",
+                retrieved=original,
+                llm=None,
+                vector_store=store,
+                doc_ids=["d1"],
+                fetch_k=10,
+            )
+
+        result = asyncio.run(_run())
+        assert result == original, "runaway keyword response must be rejected"
+        assert store.last_query == "", (
+            f"store must NOT be queried when keywords rejected. Got: {store.last_query}"
+        )
