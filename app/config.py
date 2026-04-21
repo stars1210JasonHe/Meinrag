@@ -120,8 +120,13 @@ class Settings(BaseSettings):
     visual_proximity_enabled: bool = True
     visual_proximity_pages: int = 1  # pages before/after to search
 
-    # Hybrid search
-    hybrid_search_enabled: bool = False
+    # Hybrid search — dense vector + BM25 keyword matching merged via RRF.
+    # On by default as of 2026-04-21: dense embeddings alone miss exact-keyword
+    # queries (e.g., "7B", "175 billion", version numbers, dates). BM25 catches
+    # these. Rank-fusion (Cormack et al. SIGIR 2009) damps noise from either
+    # retriever. Research paper (2026-04-21 survey) notes all production RAG
+    # systems (Perplexity, Glean) use hybrid retrieval.
+    hybrid_search_enabled: bool = True
     hybrid_bm25_weight: float = 0.5  # used by legacy EnsembleRetriever in chain.py; retrieval.py uses RRF instead
     rrf_k: int = 60
 
