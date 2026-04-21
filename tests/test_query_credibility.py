@@ -343,8 +343,21 @@ class TestQueryCredibility:
         client = persistent_env["client"]
         llm = persistent_env["llm"]
 
+        # Build filename → doc_id map for scope_source_files resolution
+        resp = client.get("/documents", headers={"X-User-Id": "admin"})
+        assert resp.status_code == 200
+        filename_to_doc_id: dict[str, str] = {}
+        for d in resp.json()["documents"]:
+            # Upload prefixes filenames with doc_id underscore (e.g. "abc123_foo.pdf")
+            # Strip it so scope_source_files matches the canonical filename.
+            fn = d["filename"]
+            stripped = fn.split("_", 1)[1] if "_" in fn and len(fn.split("_", 1)[0]) == 12 else fn
+            filename_to_doc_id[stripped] = d["doc_id"]
+            filename_to_doc_id[fn] = d["doc_id"]  # also allow full match
+
         results: list[dict] = []
         top_k_values = [4, 10]
+        import time as _time
 
         for i, query in enumerate(query_set, 1):
             for top_k in top_k_values:
@@ -355,10 +368,22 @@ class TestQueryCredibility:
                 if query.get("collection"):
                     req_body["collection"] = query["collection"]
 
+                # Multi-doc scope: resolve scope_source_files to doc_ids
+                scope_files = query.get("scope_source_files") or []
+                if scope_files:
+                    doc_ids = [filename_to_doc_id[f] for f in scope_files if f in filename_to_doc_id]
+                    missing_scope = [f for f in scope_files if f not in filename_to_doc_id]
+                    if missing_scope:
+                        print(f"  WARN scope files not found in corpus: {missing_scope}")
+                    if doc_ids:
+                        req_body["doc_ids"] = doc_ids
+
+                _t0 = _time.time()
                 resp = client.post(
                     "/query", json=req_body,
                     headers={"X-User-Id": "admin"},
                 )
+                latency_ms = int((_time.time() - _t0) * 1000)
                 if resp.status_code != 200:
                     results.append({
                         "id": query["id"], "top_k": top_k,
@@ -432,6 +457,26 @@ class TestQueryCredibility:
                 else:
                     failure_type = "none"
 
+                # Coverage metric (multi-doc queries only):
+                # fraction of scope_source_files that appear in returned sources.
+                # Target: 1.0 after B2-A fix — every selected doc should have a chunk.
+                coverage = None
+                if scope_files:
+                    returned_base = {Path(f).name for f in returned_filenames}
+                    scope_base = {Path(f).name for f in scope_files}
+                    # basename-match, strip any upload-prefix
+                    normalized_returned = {
+                        (s.split("_", 1)[1] if "_" in s and len(s.split("_", 1)[0]) == 12 else s)
+                        for s in returned_base
+                    }
+                    intersect = scope_base & normalized_returned
+                    coverage = round(len(intersect) / len(scope_base), 3) if scope_base else None
+
+                # Token telemetry from response (set by context budget step)
+                ctx_used = data.get("context_used_tokens")
+                ctx_budget = data.get("context_budget_tokens")
+                chunks_included = data.get("chunks_included")
+
                 result = {
                     "id": query["id"],
                     "type": query["type"],
@@ -442,6 +487,7 @@ class TestQueryCredibility:
                     "expected_sources": sorted(expected_filenames),
                     "recall": round(recall, 3),
                     "precision": round(precision, 3),
+                    "coverage": coverage,
                     "answer_correct": answer_correct,
                     "missing_keywords": missing,
                     "forbidden_hit": forbidden_found,
@@ -452,6 +498,10 @@ class TestQueryCredibility:
                     "expected_confidence": expected_conf,
                     "confidence_calibrated": conf_ok,
                     "failure_type": failure_type,
+                    "latency_ms": latency_ms,
+                    "context_used_tokens": ctx_used,
+                    "context_budget_tokens": ctx_budget,
+                    "chunks_included": chunks_included,
                 }
                 results.append(result)
 
@@ -502,21 +552,55 @@ def _write_report(results: list[dict], query_set: list[dict]):
             f"{grounded:.0%} | {calibrated:.0%} | {ret_fail:.0%} | {gen_fail:.0%} |"
         )
 
+    # Multi-doc coverage table (only queries with scope_source_files)
+    multidoc_rows = [r for r in results if "error" not in r and r.get("coverage") is not None]
+    if multidoc_rows:
+        lines.append("")
+        lines.append("## Multi-doc coverage (B2-A target)")
+        lines.append("")
+        lines.append("| ID | top_k | Scope | Coverage | Correct | Grounded | Latency (ms) |")
+        lines.append("|---|---|---|---|---|---|---|")
+        for r in sorted(multidoc_rows, key=lambda x: (x["id"], x["top_k"])):
+            scope_n = len(r.get("expected_sources", []))
+            lines.append(
+                f"| `{r['id']}` | {r['top_k']} | {scope_n} docs | {r['coverage']:.0%} | "
+                f"{'✅' if r['answer_correct'] else '❌'} | "
+                f"{'✅' if r['grounded'] else '❌'} | "
+                f"{r.get('latency_ms', '—')} |"
+            )
+
+    # Latency / cost aggregate
+    non_err = [r for r in results if "error" not in r and r.get("latency_ms") is not None]
+    if non_err:
+        latencies = sorted(r["latency_ms"] for r in non_err)
+        p50 = latencies[len(latencies) // 2]
+        p95 = latencies[min(len(latencies) - 1, int(len(latencies) * 0.95))]
+        tokens = [r["context_used_tokens"] for r in non_err if r.get("context_used_tokens")]
+        avg_tokens = sum(tokens) // len(tokens) if tokens else 0
+        lines.append("")
+        lines.append("## Latency & context budget")
+        lines.append("")
+        lines.append(f"- **Latency p50**: {p50} ms | **p95**: {p95} ms (N={len(non_err)})")
+        lines.append(f"- **Avg context tokens used**: {avg_tokens}")
+
     lines.append("")
     lines.append("## Per-query results")
     lines.append("")
-    lines.append("| ID | top_k | Type | Recall | Prec | Correct | Grounded | Calib | Failure | Missing keywords |")
-    lines.append("|---|---|---|---|---|---|---|---|---|---|")
+    lines.append("| ID | top_k | Type | Recall | Prec | Coverage | Correct | Grounded | Calib | Latency | Failure | Missing keywords |")
+    lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|")
     for r in sorted(results, key=lambda x: (x.get("id", ""), x.get("top_k", 0))):
         if "error" in r:
-            lines.append(f"| {r.get('id')} | {r.get('top_k')} | — | — | — | ERR | — | — | — | {r['error'][:80]} |")
+            lines.append(f"| {r.get('id')} | {r.get('top_k')} | — | — | — | — | ERR | — | — | — | — | {r['error'][:80]} |")
             continue
+        cov_cell = f"{r['coverage']:.0%}" if r.get("coverage") is not None else "—"
+        lat_cell = f"{r['latency_ms']}ms" if r.get("latency_ms") is not None else "—"
         lines.append(
             f"| `{r['id']}` | {r['top_k']} | {r['type']} | "
-            f"{r['recall']:.2f} | {r['precision']:.2f} | "
+            f"{r['recall']:.2f} | {r['precision']:.2f} | {cov_cell} | "
             f"{'✅' if r['answer_correct'] else '❌'} | "
             f"{'✅' if r['grounded'] else '❌'} | "
             f"{'✅' if r['confidence_calibrated'] else '❌'} | "
+            f"{lat_cell} | "
             f"{r['failure_type']} | "
             f"{', '.join(r['missing_keywords'])[:80] if r['missing_keywords'] else '—'} |"
         )
