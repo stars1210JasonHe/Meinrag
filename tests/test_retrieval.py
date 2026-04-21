@@ -20,6 +20,8 @@ from app.services.retrieval import (
     _analyze_query,
     _apply_composite_scoring,
     _rrf_merge_bm25,
+    _ensure_per_doc_coverage,
+    _apply_token_budget,
 )
 
 
@@ -727,3 +729,94 @@ class TestRRFMerge:
         assert scores == sorted(scores, reverse=True), (
             f"output must be sorted desc, got {scores}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Mandatory coverage — B2-A
+# ---------------------------------------------------------------------------
+
+class TestEnsurePerDocCoverageMandatory:
+    """_ensure_per_doc_coverage marks highest-scored chunk per scope doc as
+    _mandatory, and backfills absent docs with mandatory-flagged chunks."""
+
+    def test_highest_scored_per_doc_marked_mandatory(self):
+        """When scope doc has multiple chunks, only the highest-scored is mandatory."""
+        retrieved = [
+            (_doc(doc_id="d1", chunk_index=0, content="a"), 0.9),
+            (_doc(doc_id="d1", chunk_index=1, content="b"), 0.5),
+            (_doc(doc_id="d2", chunk_index=0, content="c"), 0.7),
+            (_doc(doc_id="d3", chunk_index=0, content="d"), 0.3),
+        ]
+        result = _ensure_per_doc_coverage(retrieved, [], ["d1", "d2", "d3"], question="", vector_store=None)
+        mandatory_keys = {
+            (d.metadata.get("doc_id"), d.metadata.get("chunk_index"))
+            for d, _ in result if d.metadata.get("_mandatory")
+        }
+        assert mandatory_keys == {("d1", 0), ("d2", 0), ("d3", 0)}
+
+    def test_missing_doc_backfilled_and_mandatory(self):
+        """Doc not in retrieved is backfilled from candidate pool with mandatory flag."""
+        retrieved = [(_doc(doc_id="d1", chunk_index=0), 0.8)]
+        all_candidates = [
+            (_doc(doc_id="d2", chunk_index=0, content="backfill"), 0.2),
+        ]
+        result = _ensure_per_doc_coverage(retrieved, all_candidates, ["d1", "d2"], question="", vector_store=None)
+        d2_chunks = [(d, s) for d, s in result if d.metadata.get("doc_id") == "d2"]
+        assert len(d2_chunks) == 1
+        assert d2_chunks[0][0].metadata.get("_mandatory") is True
+
+    def test_single_doc_scope_no_mandatory(self):
+        """Single-doc scope returns early without marking anything."""
+        retrieved = [(_doc(doc_id="d1", chunk_index=0), 0.5)]
+        result = _ensure_per_doc_coverage(retrieved, [], ["d1"], question="", vector_store=None)
+        assert not any(d.metadata.get("_mandatory") for d, _ in result)
+
+
+class TestApplyTokenBudgetMandatory:
+    """_apply_token_budget guarantees mandatory chunks survive even under
+    budget pressure."""
+
+    def test_mandatory_survives_tight_budget(self):
+        """8 mandatory chunks fit regardless of non-mandatory pressure."""
+        # Each chunk ~ 20 tokens (content "word " * 20 ≈ 20 tokens)
+        mandatory_docs = [
+            _doc(doc_id=f"m{i}", chunk_index=0, content="word " * 20) for i in range(8)
+        ]
+        for d in mandatory_docs:
+            d.metadata["_mandatory"] = True
+        ordinary_docs = [
+            _doc(doc_id=f"o{i}", chunk_index=0, content="word " * 20) for i in range(20)
+        ]
+
+        retrieved = [(d, 0.1) for d in mandatory_docs] + [(d, 0.9) for d in ordinary_docs]
+        # budget = 300 tokens — fits all 8 mandatory + ~7 ordinary
+        kept, used = _apply_token_budget(retrieved, chunk_budget=300)
+        kept_mandatory = [d for d, _ in kept if d.metadata.get("_mandatory")]
+        assert len(kept_mandatory) == 8, (
+            f"expected all 8 mandatory kept, got {len(kept_mandatory)}"
+        )
+
+    def test_mandatory_overflow_kept_anyway(self):
+        """When mandatory chunks alone exceed budget, all are kept with warning."""
+        # 10 mandatory × ~40 tokens = 400 tokens, budget 100 → overflow
+        mandatory = []
+        for i in range(10):
+            d = _doc(doc_id=f"m{i}", chunk_index=0, content="word " * 40)
+            d.metadata["_mandatory"] = True
+            mandatory.append((d, 0.5))
+        kept, used = _apply_token_budget(mandatory, chunk_budget=100)
+        kept_mandatory = [d for d, _ in kept if d.metadata.get("_mandatory")]
+        assert len(kept_mandatory) == 10, "all mandatory must survive overflow"
+        assert used > 100, "used tokens should exceed budget (mandatory overflow)"
+
+    def test_mandatory_and_non_mandatory_pass_2_fills(self):
+        """After mandatory, Pass 2 fills remaining budget with top-scored non-mandatory."""
+        m = _doc(doc_id="m1", chunk_index=0, content="word " * 20)
+        m.metadata["_mandatory"] = True
+        high = _doc(doc_id="o1", chunk_index=0, content="word " * 20)
+        low = _doc(doc_id="o2", chunk_index=0, content="word " * 20)
+        retrieved = [(m, 0.1), (high, 0.9), (low, 0.3)]
+        kept, used = _apply_token_budget(retrieved, chunk_budget=200)
+        kept_ids = {d.metadata.get("doc_id") for d, _ in kept}
+        assert "m1" in kept_ids, "mandatory must be kept"
+        assert "o1" in kept_ids, "high-scored non-mandatory must be kept"

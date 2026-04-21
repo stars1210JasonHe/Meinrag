@@ -362,8 +362,19 @@ async def query_documents(
                 request, llm, memory_manager, settings, current_user=current_user,
             )
 
+        # Fetch doc-level summaries for all scoped docs (for format_docs overview block).
+        # Covers multi-doc queries where per-doc coverage matters.
+        doc_summaries: dict[str, str] = {}
+        for did in (doc_ids or []):
+            d = await registry.get(did)
+            if d and isinstance(d, dict) and d.get("summary"):
+                doc_summaries[did] = d["summary"]
+
         # Format retrieved docs as context for LLM
-        context = format_docs([doc for doc, _ in result.retrieved])
+        context = format_docs(
+            [doc for doc, _ in result.retrieved],
+            doc_summaries=doc_summaries or None,
+        )
 
         # Build simple chain (no retriever — just prompt + LLM)
         if chat_history:
@@ -590,7 +601,18 @@ async def query_documents_stream(
         query_types = result.query_types
         query_label = result.query_label
         confidence_tier = result.confidence_tier
-        context = format_docs([doc for doc, _ in result.retrieved]) if not needs_web_search else ""
+
+        # Fetch doc-level summaries for multi-doc overview block
+        doc_summaries: dict[str, str] = {}
+        if not needs_web_search:
+            for did in (doc_ids or []):
+                d = await registry.get(did)
+                if d and isinstance(d, dict) and d.get("summary"):
+                    doc_summaries[did] = d["summary"]
+        context = format_docs(
+            [doc for doc, _ in result.retrieved],
+            doc_summaries=doc_summaries or None,
+        ) if not needs_web_search else ""
 
     # Pre-compute web search context if needed
     web_context = ""

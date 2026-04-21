@@ -61,8 +61,17 @@ def _build_header(doc: Document, idx: int, filename_counts: Counter) -> str:
     return f"[{idx}] {' | '.join(parts)}"
 
 
-def format_docs(docs: list[Document]) -> str:
-    """Format retrieved documents into a single context string."""
+def format_docs(
+    docs: list[Document],
+    doc_summaries: dict[str, str] | None = None,
+) -> str:
+    """Format retrieved documents into a single context string.
+
+    If doc_summaries is provided (doc_id -> documents.summary from DB), an
+    upfront "Document overviews" block is prepended so the LLM has doc-level
+    context for multi-doc queries. Chunk order is preserved; per-chunk
+    summaries (chunk.metadata["summary"]) continue to appear inline.
+    """
     # Count distinct doc_ids per filename — only disambiguate when
     # the same filename maps to different documents
     _file_docids: dict[str, set[str]] = {}
@@ -71,6 +80,25 @@ def format_docs(docs: list[Document]) -> str:
         did = doc.metadata.get("doc_id", "")
         _file_docids.setdefault(sf, set()).add(did)
     filename_counts = Counter({sf: len(ids) for sf, ids in _file_docids.items()})
+
+    # Upfront doc overviews (first appearance per doc_id, only if summary exists)
+    overview_block = ""
+    if doc_summaries:
+        seen: list[str] = []
+        overview_lines: list[str] = []
+        for doc in docs:
+            did = doc.metadata.get("doc_id", "")
+            if did and did not in seen and doc_summaries.get(did):
+                seen.append(did)
+                fname = doc.metadata.get("source_file", did)
+                overview_lines.append(f"[{_strip_ext(fname)}]: {doc_summaries[did]}")
+        if overview_lines:
+            overview_block = (
+                "=== Document overviews ===\n"
+                + "\n".join(overview_lines)
+                + "\n\n=== Retrieved chunks ===\n\n"
+            )
+
     formatted = []
     for i, doc in enumerate(docs, 1):
         header = _build_header(doc, i, filename_counts)
@@ -79,7 +107,7 @@ def format_docs(docs: list[Document]) -> str:
             formatted.append(f"{header}\nSummary: {summary}\n---\n{doc.page_content}")
         else:
             formatted.append(f"{header}\n{doc.page_content}")
-    return "\n\n---\n\n".join(formatted)
+    return overview_block + "\n\n---\n\n".join(formatted)
 
 
 _REF_LINE_RE = re.compile(r"^-?\s*\[\d+\]\s+[A-Z]")

@@ -822,19 +822,30 @@ def _ensure_per_doc_coverage(
 ) -> list[tuple]:
     """Guarantee at least 1 chunk from every doc the user explicitly selected.
 
-    Two-step backfill for missing docs:
-      1. Look in the pre-narrow candidate pool (fast, no extra I/O).
-      2. If still missing AND vector_store provided: run a small per-doc
-         similarity search. This handles the case where the initial vector
-         search was biased to top-scoring docs and missed weaker matches.
+    For each scope_doc_id, mark the highest-scored existing chunk as _mandatory
+    in metadata. If a scope doc is entirely missing from retrieved, backfill via
+    (a) the pre-narrow candidate pool then (b) per-doc vector search, and mark
+    the backfilled chunk _mandatory too.
 
-    Preserves order of existing chunks; new chunks go at the end (budget
-    step reorders via the doc-aware priority pass).
+    The _mandatory flag is honored by _rerank_results' reinsertion step and by
+    _apply_token_budget's Pass 1 so selected docs always surface at least one
+    chunk in the final LLM context, regardless of score or budget pressure.
     """
     if not scope_doc_ids or len(scope_doc_ids) <= 1:
         return retrieved
-    represented = {doc.metadata.get("doc_id") for doc, _ in retrieved}
-    missing = [did for did in scope_doc_ids if did not in represented]
+
+    # Find the highest-scored existing chunk per scope doc and mark it mandatory.
+    best_index_per_doc: dict[str, int] = {}
+    for i, (doc, score) in enumerate(retrieved):
+        did = doc.metadata.get("doc_id")
+        if did not in scope_doc_ids:
+            continue
+        if did not in best_index_per_doc or score > retrieved[best_index_per_doc[did]][1]:
+            best_index_per_doc[did] = i
+    for did, i in best_index_per_doc.items():
+        retrieved[i][0].metadata["_mandatory"] = True
+
+    missing = [did for did in scope_doc_ids if did not in best_index_per_doc]
     if not missing:
         return retrieved
 
@@ -850,25 +861,32 @@ def _ensure_per_doc_coverage(
                 if best is None or score > best[1]:
                     best = (doc, score)
         if best is not None:
+            best[0].metadata["_mandatory"] = True
             result.append(best)
             appended_from_pool += 1
         else:
             still_missing.append(did)
 
-    # Step 2: per-doc vector search for docs not found in pool
+    # Step 2: get_chunks_by_doc for docs not found in pool.
+    # NB: we bypass similarity_search_with_scores here because the FAISS
+    # implementation uses an over-fetch-then-filter pattern — with a narrow
+    # per-doc filter, the target doc's chunks often don't appear in the
+    # global top-K*5, so the filter produces zero hits. get_chunks_by_doc
+    # reads directly from the docstore and always returns what's there.
+    # First chunk is usually the doc's intro/abstract — good enough as a
+    # mandatory representative when retrieval missed the doc entirely.
     appended_from_search = 0
-    if still_missing and vector_store is not None and question:
+    if still_missing and vector_store is not None:
         for did in still_missing:
             try:
-                per_doc_results = vector_store.similarity_search_with_scores(
-                    question, k=2, doc_ids=[did],
-                )
-                if per_doc_results:
-                    # Take top result for this doc
-                    result.append(per_doc_results[0])
+                chunks = vector_store.get_chunks_by_doc(did)
+                if chunks:
+                    representative = chunks[0]
+                    representative.metadata["_mandatory"] = True
+                    result.append((representative, 0.0))
                     appended_from_search += 1
             except Exception as e:
-                logger.debug("Per-doc search for %s failed: %s", did, e)
+                logger.debug("Per-doc backfill for %s failed: %s", did, e)
 
     total_appended = appended_from_pool + appended_from_search
     if total_appended:
@@ -905,33 +923,56 @@ def _apply_per_doc_cap(
 def _apply_token_budget(
     retrieved: list[tuple], chunk_budget: int,
 ) -> tuple[list[tuple], int]:
-    """Two-pass greedy fill — doc-diversity aware.
+    """Three-pass greedy fill — mandatory-aware, doc-diversity aware.
 
-    Pass 1: Reserve budget for the highest-score chunk of each unique doc, so
-    multi-doc queries always have representation.
-    Pass 2: Fill remaining budget with the next-best chunks by rank, regardless
-    of doc.
+    Pass 0: Mandatory chunks (marked by _ensure_per_doc_coverage) — ALWAYS
+    included, even if they exceed budget. Selected docs must have a voice.
+    Pass 1: Reserve budget for the highest-score chunk of each remaining doc,
+    so multi-doc queries always have representation.
+    Pass 2: Fill remaining budget with the next-best chunks by rank.
 
     Returns (truncated_list, actual_tokens_used). Skips chunks that
-    individually exceed 25% of budget (outliers).
+    individually exceed 25% of budget (outliers) — but mandatory chunks are
+    kept regardless of size.
     """
     if chunk_budget <= 0:
         return [], 0
     max_single_chunk = chunk_budget // 4
 
-    # Identify the best (highest-scoring) chunk per doc_id — preserve retrieval order for ties
+    # Pass 0: mandatory chunks (bypass size cap, bypass budget cap)
+    mandatory_indices: list[int] = []
+    used = 0
+    for i, (doc, _score) in enumerate(retrieved):
+        if doc.metadata.get("_mandatory"):
+            tokens = _count_tokens(doc.page_content or "")
+            mandatory_indices.append(i)
+            used += tokens
+    if used > chunk_budget:
+        logger.warning(
+            "Mandatory chunks (%d tokens) exceed budget (%d); including anyway to preserve per-doc coverage",
+            used, chunk_budget,
+        )
+
+    # Identify the best (highest-scoring) chunk per doc_id among NON-mandatory
+    # (mandatory already covers those docs). Preserve retrieval order for ties.
+    covered_docs = {
+        retrieved[i][0].metadata.get("doc_id") for i in mandatory_indices
+    }
     first_seen_index: dict[str, int] = {}
     for i, (doc, _score) in enumerate(retrieved):
+        if i in mandatory_indices:
+            continue
         did = doc.metadata.get("doc_id")
+        if did in covered_docs:
+            continue
         if did not in first_seen_index:
             first_seen_index[did] = i
     priority_indices = set(first_seen_index.values())
 
-    kept_order_indices: list[int] = []
-    used = 0
+    kept_order_indices: list[int] = list(mandatory_indices)
     skipped_oversize = 0
 
-    # Pass 1: priority chunks (top chunk per doc)
+    # Pass 1: priority chunks (top chunk per doc, excluding already-covered)
     for i, (doc, _score) in enumerate(retrieved):
         if i not in priority_indices:
             continue
@@ -940,14 +981,15 @@ def _apply_token_budget(
             skipped_oversize += 1
             continue
         if used + tokens > chunk_budget:
-            # Budget exhausted even for priority pass — stop (don't lose coverage for random later doc)
+            # Budget exhausted even for priority pass — stop
             break
         kept_order_indices.append(i)
         used += tokens
 
-    # Pass 2: fill remaining budget with non-priority chunks by rank
+    # Pass 2: fill remaining budget with non-priority, non-mandatory chunks by rank
+    excluded = priority_indices | set(mandatory_indices)
     for i, (doc, _score) in enumerate(retrieved):
-        if i in priority_indices:
+        if i in excluded:
             continue
         tokens = _count_tokens(doc.page_content or "")
         if tokens > max_single_chunk and kept_order_indices:
@@ -966,8 +1008,8 @@ def _apply_token_budget(
         logger.info("Budget: skipped %d oversize chunks (>%d tokens)",
                     skipped_oversize, max_single_chunk)
     if len(kept) < len(retrieved):
-        logger.info("Budget truncation (doc-aware): %d -> %d chunks (%d tokens / %d budget)",
-                    len(retrieved), len(kept), used, chunk_budget)
+        logger.info("Budget truncation (mandatory-aware): %d -> %d chunks (%d tokens / %d budget, %d mandatory)",
+                    len(retrieved), len(kept), used, chunk_budget, len(mandatory_indices))
     return kept, used
 
 
@@ -1173,9 +1215,31 @@ async def retrieve_and_rank(
         # per-doc cap has material to work with.
         n_docs = len(doc_ids) if doc_ids else 0
         effective_top_n = max(top_k, n_docs * 3) if n_docs > 1 else top_k
+
+        # Snapshot mandatory chunks before rerank — the reranker may drop low-
+        # relevance backfills, but we must preserve per-doc coverage.
+        pre_rerank_mandatory = {
+            (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index")): (doc, score)
+            for doc, score in retrieved
+            if doc.metadata.get("_mandatory")
+        }
+
         retrieved = await _rerank_results(
             retrieved, question, settings, llm, top_n=effective_top_n,
         )
+
+        # Re-insert any mandatory chunks the reranker dropped.
+        post_keys = {
+            (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index"))
+            for doc, _ in retrieved
+        }
+        restored = 0
+        for key, pair in pre_rerank_mandatory.items():
+            if key not in post_keys:
+                retrieved.append(pair)
+                restored += 1
+        if restored:
+            logger.info("Restored %d mandatory chunks dropped by reranker", restored)
         logger.debug("[TRACE] after rerank (top_n=%d): %d chunks", effective_top_n, len(retrieved))
 
     # 7. Check web search
