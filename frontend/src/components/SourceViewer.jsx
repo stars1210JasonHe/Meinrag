@@ -149,6 +149,22 @@ export default function SourceViewer({ source, sourceIndex, sources, onBack, onS
         </div>
       </div>
 
+      {/* Summary banner — one-sentence gist of the chunk (if generated) */}
+      {source.summary && (
+        <div
+          className="px-3 py-2 border-b text-xs leading-relaxed shrink-0"
+          style={{
+            backgroundColor: 'var(--signature-soft)',
+            borderColor: 'var(--border)',
+            color: 'var(--fg-1)',
+          }}
+          title={t('sourceViewer.summaryTitle', { defaultValue: 'Chunk summary' })}
+        >
+          <span className="opacity-60 mr-1">{t('sourceViewer.summaryLabel', { defaultValue: 'Summary:' })}</span>
+          {source.summary}
+        </div>
+      )}
+
       {/* Content */}
       <div className="flex-1 overflow-auto" ref={containerRef} onWheel={handleWheel}>
         {isImage ? (

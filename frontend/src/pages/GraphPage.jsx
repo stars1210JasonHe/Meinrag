@@ -154,7 +154,7 @@ export default function GraphPage() {
       .filter(n => n.node_type === 'document' || nodeFilter[n.chunk_type] !== false)
       .map(n => ({
         id: n.node_type === 'document' ? `doc:${n.doc_id}` : `${n.doc_id}:${n.chunk_index}`,
-        label: n.label || n.content_preview?.slice(0, 25) || n.source_file?.slice(0, 25) || '?',
+        label: n.label || n.summary_preview?.slice(0, 40) || n.content_preview?.slice(0, 25) || n.source_file?.slice(0, 25) || '?',
         color: NODE_COLORS[n.chunk_type] || NODE_COLORS.document,
         _data: n,
       }))
@@ -561,6 +561,11 @@ export default function GraphPage() {
               <X size={14} />
             </button>
           </div>
+          {selectedNode.summary_preview && (
+            <p className="text-xs mb-2 leading-relaxed italic" style={{ color: 'var(--fg-1, #d4d0ca)' }}>
+              {selectedNode.summary_preview}
+            </p>
+          )}
           <p className="text-xs mb-3 leading-relaxed" style={{ color: 'var(--fg-dim, #9a9690)' }}>
             {selectedNode.content_preview}
           </p>

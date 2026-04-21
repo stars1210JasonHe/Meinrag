@@ -89,6 +89,7 @@ async def get_chunk_graph(
             label=m.get("label"),
             page=m.get("page"),
             content_preview=_smart_truncate(chunk.page_content),
+            summary_preview=m.get("summary"),
             source_file=m.get("source_file", ""),
             node_type="chunk",
         ))
@@ -179,6 +180,7 @@ async def get_neighbors(
                 label=m.get("label"),
                 page=m.get("page"),
                 content_preview=_smart_truncate(c.page_content),
+                summary_preview=m.get("summary"),
                 source_file=m.get("source_file", ""),
             ))
         else:
@@ -194,6 +196,7 @@ async def get_neighbors(
                         label=m.get("label"),
                         page=m.get("page"),
                         content_preview=_smart_truncate(c.page_content),
+                        summary_preview=m.get("summary"),
                         source_file=m.get("source_file", ""),
                     ))
                     break

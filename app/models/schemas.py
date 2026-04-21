@@ -162,6 +162,7 @@ class GraphNode(BaseModel):
     label: str | None = None
     page: int | None = None
     content_preview: str = ""
+    summary_preview: str | None = None  # 1-sentence LLM summary if available
     source_file: str = ""
     node_type: Literal["document", "chunk"] = "chunk"
 
