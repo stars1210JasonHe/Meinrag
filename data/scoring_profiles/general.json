@@ -32,7 +32,7 @@
       "expansion_score_decay": 0.8
     },
     "confidence_tiers": {
-      "high": 0.50,
+      "high": 0.65,
       "moderate": 0.30
     }
   },
