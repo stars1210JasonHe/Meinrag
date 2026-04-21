@@ -1193,14 +1193,17 @@ async def retrieve_and_rank(
         retrieved = _demote_reference_results(retrieved, top_k)
         logger.debug("[TRACE] after demote_references: %d chunks", len(retrieved))
 
-    # 6a. Multi-doc coverage guarantee — if user selected N docs, ensure each
-    # has at least 1 chunk in the narrowed results. Falls back to per-doc
-    # vector search if a selected doc is absent from the initial candidate pool.
-    retrieved = _ensure_per_doc_coverage(
-        retrieved, pre_narrow_candidates, doc_ids,
-        question=question, vector_store=vector_store,
-    )
-    logger.debug("[TRACE] after per_doc_coverage: %d chunks", len(retrieved))
+    # 6a. Multi-doc coverage guarantee — ONLY when the user EXPLICITLY scoped
+    # to specific docs (request.doc_ids or collection). When user_isolation
+    # auto-fills doc_ids from the user's entire corpus, we must not force
+    # coverage for every doc — that would flood the context with chunks from
+    # unrelated docs and break single-topic queries.
+    if user_scoped:
+        retrieved = _ensure_per_doc_coverage(
+            retrieved, pre_narrow_candidates, doc_ids,
+            question=question, vector_store=vector_store,
+        )
+        logger.debug("[TRACE] after per_doc_coverage: %d chunks", len(retrieved))
 
     # Scoring stage — constants from scoring profile, resolved for query type
     retrieved = _apply_reference_penalty(retrieved, scoring)
