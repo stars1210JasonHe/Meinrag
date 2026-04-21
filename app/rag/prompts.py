@@ -66,6 +66,21 @@ QUERY_EXPANSION_PROMPT = ChatPromptTemplate.from_messages([
     ("human", "{question}"),
 ])
 
+# For fact queries, the abstract query language often misses concrete answer
+# tokens. Example: "what parameter counts?" should find chunks with "7B",
+# "175 billion", etc. This prompt asks the LLM to predict ~5-8 likely tokens
+# that answer chunks contain, which we append to the query before re-retrieval.
+FACT_KEYWORD_EXPANSION_PROMPT = ChatPromptTemplate.from_messages([
+    ("system",
+     "The user asked a fact/quantitative question. Predict 5-8 concrete terms "
+     "the ANSWER likely contains (specific numbers with units, model/product "
+     "names, version identifiers, dates, proper nouns). "
+     "Example: 'what parameter counts?' -> '7B 13B 70B 175B billion parameters'. "
+     "Example: 'what loss function was used?' -> 'cross-entropy MSE loss function objective'. "
+     "Return ONLY the terms, space-separated, no punctuation, no explanation."),
+    ("human", "{question}"),
+])
+
 WEB_SEARCH_SYSTEM_PROMPT = """\
 You are a helpful assistant. The user's question could not be answered from their uploaded documents,
 so web search results are provided below.

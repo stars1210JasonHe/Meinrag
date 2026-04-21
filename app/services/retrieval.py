@@ -20,6 +20,7 @@ from app.rag.chain import is_reference_entry
 from app.rag.prompts import (
     QUERY_ANALYZE_PROMPT,
     QUERY_EXPANSION_PROMPT,
+    FACT_KEYWORD_EXPANSION_PROMPT,
 )
 from app.services.chunk_utils import is_garbage_table
 from app.services.scoring_profile import ResolvedScoring, load_scoring_profile
@@ -133,6 +134,64 @@ async def _maybe_expand_query(
         logger.warning("Query expansion failed: %s", e)
 
     return question, retrieved
+
+
+async def _fact_keyword_expand(
+    question: str,
+    retrieved: list[tuple],
+    llm: BaseChatModel,
+    vector_store: VectorStoreManager,
+    doc_ids: list[str] | None,
+    fetch_k: int,
+) -> list[tuple]:
+    """For fact queries, LLM predicts likely answer tokens; we re-retrieve
+    using the keyword-augmented query. Result is the UNION, deduplicated,
+    with augmented-retrieval chunks preferred (they contain the concrete
+    answer tokens the query was too abstract to express).
+
+    Bridges the abstract-query ↔ concrete-answer lexical gap that dense
+    embeddings + BM25 both struggle with. E.g., "parameter counts" should
+    find chunks with "7B", "175 billion" — this adds those tokens to the
+    query so the retriever can find them.
+
+    NB: we do NOT RRF-merge because RRF rewards consensus (both retrievers
+    found it) over novel signal (only augmented found it). For fact
+    expansion, the novel augmented hits ARE the goal — they're the chunks
+    with the concrete answer tokens. Consensus-based ranking demotes them.
+
+    No-op on errors — falls back to original retrieval.
+    """
+    try:
+        chain = FACT_KEYWORD_EXPANSION_PROMPT | llm | StrOutputParser()
+        keywords = (await chain.ainvoke({"question": question})).strip()
+        if not keywords or len(keywords) > 200:
+            return retrieved
+        augmented = f"{question} {keywords}"
+        logger.info("Fact query keyword-expanded: +%r", keywords[:80])
+
+        aug_results = vector_store.similarity_search_with_scores(
+            augmented, k=fetch_k, doc_ids=doc_ids,
+        )
+        if not aug_results:
+            return retrieved
+
+        # Union preserving augmented-first order, dedupe by (doc_id, chunk_index).
+        seen = set()
+        merged: list[tuple] = []
+        for doc, score in aug_results:
+            key = (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index"))
+            if key not in seen:
+                seen.add(key)
+                merged.append((doc, score))
+        for doc, score in retrieved:
+            key = (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index"))
+            if key not in seen:
+                seen.add(key)
+                merged.append((doc, score))
+        return merged
+    except Exception as e:
+        logger.warning("Fact keyword expansion failed: %s", e)
+        return retrieved
 
 
 # ---------------------------------------------------------------------------
@@ -1218,6 +1277,14 @@ async def retrieve_and_rank(
         fetch_k=fetch_k,
     )
     logger.debug("[TRACE] after query_expansion: %d chunks", len(retrieved))
+
+    # 5b. Fact-query keyword expansion — bridges abstract query ↔ concrete
+    # answer lexical gap (e.g., "parameter counts" → surface "7B"/"175B").
+    if primary_type == "fact":
+        retrieved = await _fact_keyword_expand(
+            question, retrieved, llm, vector_store, doc_ids, fetch_k,
+        )
+        logger.debug("[TRACE] after fact_keyword_expand: %d chunks", len(retrieved))
 
     # Save pre-narrowing candidates for per-doc coverage backfill
     pre_narrow_candidates = list(retrieved)
