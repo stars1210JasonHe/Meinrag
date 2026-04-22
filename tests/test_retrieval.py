@@ -820,3 +820,217 @@ class TestApplyTokenBudgetMandatory:
         kept_ids = {d.metadata.get("doc_id") for d, _ in kept}
         assert "m1" in kept_ids, "mandatory must be kept"
         assert "o1" in kept_ids, "high-scored non-mandatory must be kept"
+
+
+# ---------------------------------------------------------------------------
+# Router hook in retrieve_and_rank
+# ---------------------------------------------------------------------------
+
+from unittest.mock import AsyncMock, MagicMock
+from langchain_core.messages import AIMessage
+
+
+class _FakeRegistry2:
+    def __init__(self, docs):
+        self._docs = docs
+    async def get(self, doc_id):
+        return self._docs.get(doc_id)
+
+
+@pytest.mark.asyncio
+class TestRouterHookInRetrieval:
+    """When router_enabled=True and scope >= threshold, retrieve_and_rank
+    narrows doc_ids via router before vector search."""
+
+    async def test_router_narrows_scope_when_above_threshold(self, monkeypatch):
+        from app.services import retrieval as retrieval_mod
+
+        # Capture the doc_ids passed to similarity_search_with_scores
+        captured = {}
+        def fake_search(question, k, doc_ids=None):
+            captured["doc_ids"] = doc_ids
+            return []
+        vector_store = MagicMock()
+        vector_store.similarity_search_with_scores = fake_search
+        vector_store.get_all_documents = MagicMock(return_value=[])
+        vector_store.get_chunks_by_doc = MagicMock(return_value=[])
+
+        # Registry with 20 docs
+        docs = {f"d{i}": {"doc_id": f"d{i}", "source_file": f"f{i}.pdf",
+                          "summary": f"doc {i}"} for i in range(20)}
+        registry = _FakeRegistry2(docs)
+
+        # LLM: analyze returns "fact"; router returns a subset of 5
+        llm = AsyncMock()
+        async def fake_ainvoke(messages):
+            content = messages[0].content if messages else ""
+            if "document router" in content.lower():
+                return AIMessage(content='{"doc_ids": ["d0","d1","d2","d3","d4"]}')
+            # analyze_query response
+            return AIMessage(content='{"types": ["fact"], "label": null}')
+        llm.ainvoke = fake_ainvoke
+
+        settings = MagicMock()
+        settings.router_enabled = True
+        settings.router_min_scope = 15
+        settings.router_top_k = 8
+        settings.router_model = "gpt-4o-mini"
+        settings.hybrid_search_enabled = False
+        settings.rerank_enabled = False
+        settings.query_expansion_enabled = False
+        settings.visual_proximity_enabled = False
+        settings.web_search_enabled = False
+        settings.query_types_file = "data/query_types.json"
+        settings.scoring_profile = "general"
+        settings.context_budget_ratio = 0.6
+        settings.reserved_output_tokens = 2048
+        settings.reserved_prompt_overhead_tokens = 512
+        settings.max_context_tokens = None
+        settings.history_min_reserve_ratio = 0.2
+        settings.history_max_budget_ratio = 0.4
+        settings.openai_model = "gpt-4o-mini"
+        settings.llm_provider = MagicMock()
+        settings.llm_provider.value = "openai"
+
+        edge_repo = AsyncMock()
+        edge_repo.get_edge_type_counts_batch = AsyncMock(return_value={})
+        edge_repo.get_edges_from = AsyncMock(return_value=[])
+
+        scope = [f"d{i}" for i in range(20)]
+        await retrieval_mod.retrieve_and_rank(
+            question="What is the param count of d0?",
+            top_k=4,
+            doc_ids=scope,
+            user_scoped=True,
+            llm=llm,
+            vector_store=vector_store,
+            embeddings=MagicMock(),
+            edge_repo=edge_repo,
+            settings=settings,
+            registry=registry,
+        )
+        # After router, doc_ids passed to vector search is the 5-item subset
+        assert captured["doc_ids"] == ["d0", "d1", "d2", "d3", "d4"]
+
+    async def test_router_bypassed_when_below_threshold(self, monkeypatch):
+        """Scope below router_min_scope -> router not called, full scope used."""
+        from app.services import retrieval as retrieval_mod
+
+        captured = {}
+        def fake_search(question, k, doc_ids=None):
+            captured["doc_ids"] = doc_ids
+            return []
+        vector_store = MagicMock()
+        vector_store.similarity_search_with_scores = fake_search
+        vector_store.get_all_documents = MagicMock(return_value=[])
+        vector_store.get_chunks_by_doc = MagicMock(return_value=[])
+
+        registry = _FakeRegistry2({})  # shouldn't be touched
+
+        llm = AsyncMock()
+        # Only analyze_query is called — router is skipped
+        llm.ainvoke = AsyncMock(
+            return_value=AIMessage(content='{"types": ["fact"], "label": null}'),
+        )
+
+        settings = MagicMock()
+        settings.router_enabled = True
+        settings.router_min_scope = 15
+        settings.router_top_k = 8
+        settings.hybrid_search_enabled = False
+        settings.rerank_enabled = False
+        settings.query_expansion_enabled = False
+        settings.visual_proximity_enabled = False
+        settings.web_search_enabled = False
+        settings.query_types_file = "data/query_types.json"
+        settings.scoring_profile = "general"
+        settings.context_budget_ratio = 0.6
+        settings.reserved_output_tokens = 2048
+        settings.reserved_prompt_overhead_tokens = 512
+        settings.max_context_tokens = None
+        settings.history_min_reserve_ratio = 0.2
+        settings.history_max_budget_ratio = 0.4
+        settings.openai_model = "gpt-4o-mini"
+        settings.llm_provider = MagicMock()
+        settings.llm_provider.value = "openai"
+
+        edge_repo = AsyncMock()
+        edge_repo.get_edge_type_counts_batch = AsyncMock(return_value={})
+        edge_repo.get_edges_from = AsyncMock(return_value=[])
+
+        small_scope = ["d0", "d1", "d2"]
+        await retrieval_mod.retrieve_and_rank(
+            question="q",
+            top_k=4,
+            doc_ids=small_scope,
+            user_scoped=True,
+            llm=llm,
+            vector_store=vector_store,
+            embeddings=MagicMock(),
+            edge_repo=edge_repo,
+            settings=settings,
+            registry=registry,
+        )
+        assert captured["doc_ids"] == small_scope
+        # Only analyze_query was invoked, no router call
+        assert llm.ainvoke.await_count == 1
+
+    async def test_router_disabled_by_flag(self):
+        """Even with scope >= threshold, router_enabled=False skips it."""
+        from app.services import retrieval as retrieval_mod
+
+        captured = {}
+        def fake_search(question, k, doc_ids=None):
+            captured["doc_ids"] = doc_ids
+            return []
+        vector_store = MagicMock()
+        vector_store.similarity_search_with_scores = fake_search
+        vector_store.get_all_documents = MagicMock(return_value=[])
+        vector_store.get_chunks_by_doc = MagicMock(return_value=[])
+
+        registry = _FakeRegistry2({})
+        llm = AsyncMock()
+        llm.ainvoke = AsyncMock(
+            return_value=AIMessage(content='{"types": ["fact"], "label": null}'),
+        )
+
+        settings = MagicMock()
+        settings.router_enabled = False  # off
+        settings.router_min_scope = 15
+        settings.router_top_k = 8
+        settings.hybrid_search_enabled = False
+        settings.rerank_enabled = False
+        settings.query_expansion_enabled = False
+        settings.visual_proximity_enabled = False
+        settings.web_search_enabled = False
+        settings.query_types_file = "data/query_types.json"
+        settings.scoring_profile = "general"
+        settings.context_budget_ratio = 0.6
+        settings.reserved_output_tokens = 2048
+        settings.reserved_prompt_overhead_tokens = 512
+        settings.max_context_tokens = None
+        settings.history_min_reserve_ratio = 0.2
+        settings.history_max_budget_ratio = 0.4
+        settings.openai_model = "gpt-4o-mini"
+        settings.llm_provider = MagicMock()
+        settings.llm_provider.value = "openai"
+
+        edge_repo = AsyncMock()
+        edge_repo.get_edge_type_counts_batch = AsyncMock(return_value={})
+        edge_repo.get_edges_from = AsyncMock(return_value=[])
+
+        big_scope = [f"d{i}" for i in range(20)]
+        await retrieval_mod.retrieve_and_rank(
+            question="q",
+            top_k=4,
+            doc_ids=big_scope,
+            user_scoped=True,
+            llm=llm,
+            vector_store=vector_store,
+            embeddings=MagicMock(),
+            edge_repo=edge_repo,
+            settings=settings,
+            registry=registry,
+        )
+        assert captured["doc_ids"] == big_scope
+        assert llm.ainvoke.await_count == 1  # only analyze_query

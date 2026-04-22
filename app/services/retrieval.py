@@ -1183,6 +1183,7 @@ async def retrieve_and_rank(
     force_web_search: bool = False,
     summary_store=None,
     chat_history=None,
+    registry=None,
 ) -> RetrievalResult:
     """Full retrieval pipeline — single source of truth.
 
@@ -1207,6 +1208,25 @@ async def retrieve_and_rank(
     # Resolve scoring constants for this query type
     scoring = profile.for_query_type(primary_type)
     logger.info("Scoring profile: %s (query_type=%s)", profile.name, primary_type)
+
+    # 1b. Router prefix — narrow broad scope before retrieval when enabled.
+    # Fail-safe: router internally falls back to full scope on any error.
+    if (
+        settings.router_enabled
+        and registry is not None
+        and doc_ids
+        and len(doc_ids) >= settings.router_min_scope
+    ):
+        from app.services.router import route_docs
+        before = len(doc_ids)
+        doc_ids = await route_docs(
+            question=question,
+            doc_ids=doc_ids,
+            top_k=settings.router_top_k,
+            llm=llm,
+            registry=registry,
+        )
+        logger.info("Router prefix: %d -> %d docs", before, len(doc_ids))
 
     # 2. Label lookup
     label_chunks = []
