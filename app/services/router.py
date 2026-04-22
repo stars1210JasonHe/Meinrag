@@ -24,7 +24,7 @@ def _format_doc_menu(docs: list[dict]) -> str:
     lines = []
     for d in docs:
         did = d.get("doc_id", "?")
-        title = d.get("source_file") or d.get("title") or did
+        title = d.get("filename") or d.get("source_file") or d.get("title") or did
         summary = d.get("summary") or ""
         if summary:
             # Truncate long summaries so the menu stays under a few hundred

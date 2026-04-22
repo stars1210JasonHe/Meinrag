@@ -63,3 +63,17 @@ class TestRouteDocsHappyPath:
         assert result == ["d1", "d2"]
         # Only one LLM call
         assert llm.ainvoke.await_count == 1
+
+    async def test_filename_key_renders_in_menu(self):
+        """Real DocumentRepository.get() returns 'filename', not 'source_file'.
+        Verify the menu still shows the filename for either key.
+        """
+        from app.services.router import route_docs, _format_doc_menu
+
+        docs = [
+            {"doc_id": "d1", "filename": "llama.pdf", "summary": "Llama"},
+            {"doc_id": "d2", "source_file": "gpt3.pdf", "summary": "GPT-3"},
+        ]
+        menu = _format_doc_menu(docs)
+        assert "llama.pdf" in menu
+        assert "gpt3.pdf" in menu
