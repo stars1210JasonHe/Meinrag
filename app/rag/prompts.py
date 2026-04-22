@@ -177,6 +177,46 @@ ROUTER_PROMPT = ChatPromptTemplate.from_messages([
     ("human", "{question}"),
 ])
 
+# Mind map tree — LLM extracts concept hierarchy from chunk summaries.
+# Output MUST be a JSON object matching the schema. Caller parses +
+# validates chunk_indices (out-of-range ones are dropped).
+MINDMAP_TREE_SYSTEM_PROMPT = """\
+You are building a hierarchical mind map for a single document.
+
+Document filename: {filename}
+
+Below are the chunks from the document, each labeled by its index and
+summarized in one line. Your task: produce a concept hierarchy that
+captures what the document is about.
+
+Rules:
+1. Return ONLY a JSON object. No prose, no markdown fences.
+2. Schema:
+{{
+  "central": "<one-line theme capturing the document's essence>",
+  "branches": [
+    {{
+      "name": "<top-level theme, 1-5 words>",
+      "children": [
+        {{"name": "<sub-concept, 1-8 words>", "chunk_indices": [<int>, ...]}}
+      ]
+    }}
+  ]
+}}
+3. 3-6 top-level branches. Each branch has 2-5 sub-concept leaves.
+4. Each leaf's chunk_indices lists 1-5 chunks that support that concept.
+5. A chunk index may appear in multiple leaves (ideas cross-cut).
+6. Output language: match the document's predominant language.
+
+Chunks:
+{chunks}
+"""
+
+MINDMAP_TREE_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", MINDMAP_TREE_SYSTEM_PROMPT),
+    ("human", "Generate the mind map now."),
+])
+
 def make_query_analyze_prompt(system_text: str) -> ChatPromptTemplate:
     """Create query analysis prompt from dynamic system text."""
     return ChatPromptTemplate.from_messages([

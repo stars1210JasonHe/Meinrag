@@ -408,3 +408,193 @@ class TestMindmapTreeSchemas:
         assert resp.doc_id == "d1"
         assert resp.cached is False
         assert resp.tree.central == "test"
+
+
+from pathlib import Path
+import json as json_lib
+
+
+class TestBuildMindmapTree:
+    def _chunks(self):
+        """Fixture: 4 minimal chunks with summaries."""
+        return [
+            Document(page_content="x", metadata={
+                "doc_id": "d1", "chunk_index": 0,
+                "summary": "Introduction to attention",
+            }),
+            Document(page_content="x", metadata={
+                "doc_id": "d1", "chunk_index": 1,
+                "summary": "Query-Key-Value mechanism",
+            }),
+            Document(page_content="x", metadata={
+                "doc_id": "d1", "chunk_index": 2,
+                "summary": "Experimental results",
+            }),
+            Document(page_content="x", metadata={
+                "doc_id": "d1", "chunk_index": 3,
+                "summary": "Conclusion",
+            }),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_llm_happy_path(self, tmp_path, monkeypatch):
+        from app.services.mindmap import build_mindmap_tree
+        from langchain_core.messages import AIMessage
+
+        monkeypatch.setattr(
+            "app.services.mindmap.MINDMAPS_CACHE_DIR", tmp_path,
+        )
+
+        llm = AsyncMock()
+        llm.ainvoke = AsyncMock(return_value=AIMessage(content=json_lib.dumps({
+            "central": "Attention in transformers",
+            "branches": [
+                {
+                    "name": "Architecture",
+                    "children": [
+                        {"name": "QKV", "chunk_indices": [1]},
+                    ],
+                },
+                {
+                    "name": "Experiments",
+                    "children": [
+                        {"name": "Results", "chunk_indices": [2]},
+                    ],
+                },
+            ],
+        })))
+
+        vector_store = MagicMock()
+        vector_store.get_chunks_by_doc = MagicMock(return_value=self._chunks())
+
+        resp = await build_mindmap_tree(
+            doc_id="d1",
+            doc={"filename": "paper.pdf", "summary": "..."},
+            vector_store=vector_store,
+            llm=llm,
+        )
+
+        assert resp.doc_id == "d1"
+        assert resp.filename == "paper.pdf"
+        assert resp.cached is False
+        assert resp.tree.central == "Attention in transformers"
+        assert len(resp.tree.branches) == 2
+        assert (tmp_path / "d1.json").exists()
+
+    @pytest.mark.asyncio
+    async def test_cache_hit_skips_llm(self, tmp_path, monkeypatch):
+        from app.services.mindmap import build_mindmap_tree
+
+        monkeypatch.setattr(
+            "app.services.mindmap.MINDMAPS_CACHE_DIR", tmp_path,
+        )
+
+        cached_tree = {
+            "central": "Cached theme",
+            "branches": [{"name": "Cached", "children": []}],
+        }
+        (tmp_path / "d1.json").write_text(
+            json_lib.dumps(cached_tree), encoding="utf-8",
+        )
+
+        llm = AsyncMock()
+        llm.ainvoke = AsyncMock(side_effect=AssertionError("LLM must not be called on cache hit"))
+
+        vector_store = MagicMock()
+        vector_store.get_chunks_by_doc = MagicMock(side_effect=AssertionError("Chunks not needed on cache hit"))
+
+        resp = await build_mindmap_tree(
+            doc_id="d1",
+            doc={"filename": "paper.pdf"},
+            vector_store=vector_store,
+            llm=llm,
+        )
+
+        assert resp.cached is True
+        assert resp.tree.central == "Cached theme"
+
+    @pytest.mark.asyncio
+    async def test_empty_doc_returns_empty_tree(self, tmp_path, monkeypatch):
+        from app.services.mindmap import build_mindmap_tree
+
+        monkeypatch.setattr(
+            "app.services.mindmap.MINDMAPS_CACHE_DIR", tmp_path,
+        )
+
+        llm = AsyncMock()
+        llm.ainvoke = AsyncMock(side_effect=AssertionError("LLM must not be called for empty doc"))
+
+        vector_store = MagicMock()
+        vector_store.get_chunks_by_doc = MagicMock(return_value=[])
+
+        resp = await build_mindmap_tree(
+            doc_id="d1",
+            doc={"filename": "empty.pdf"},
+            vector_store=vector_store,
+            llm=llm,
+        )
+
+        assert resp.cached is False
+        assert resp.tree.central == ""
+        assert resp.tree.branches == []
+
+    @pytest.mark.asyncio
+    async def test_malformed_llm_response_falls_back(self, tmp_path, monkeypatch):
+        from app.services.mindmap import build_mindmap_tree
+        from langchain_core.messages import AIMessage
+
+        monkeypatch.setattr(
+            "app.services.mindmap.MINDMAPS_CACHE_DIR", tmp_path,
+        )
+
+        llm = AsyncMock()
+        llm.ainvoke = AsyncMock(return_value=AIMessage(content="not json"))
+
+        vector_store = MagicMock()
+        vector_store.get_chunks_by_doc = MagicMock(return_value=self._chunks())
+
+        resp = await build_mindmap_tree(
+            doc_id="d1",
+            doc={"filename": "paper.pdf"},
+            vector_store=vector_store,
+            llm=llm,
+        )
+
+        assert resp.cached is False
+        assert resp.tree.branches == []
+        assert not (tmp_path / "d1.json").exists()
+
+    @pytest.mark.asyncio
+    async def test_invalid_chunk_indices_filtered(self, tmp_path, monkeypatch):
+        from app.services.mindmap import build_mindmap_tree
+        from langchain_core.messages import AIMessage
+
+        monkeypatch.setattr(
+            "app.services.mindmap.MINDMAPS_CACHE_DIR", tmp_path,
+        )
+
+        llm = AsyncMock()
+        llm.ainvoke = AsyncMock(return_value=AIMessage(content=json_lib.dumps({
+            "central": "Paper",
+            "branches": [
+                {
+                    "name": "Branch",
+                    "children": [
+                        {"name": "Concept", "chunk_indices": [1, 99, 2]},
+                    ],
+                },
+            ],
+        })))
+
+        vector_store = MagicMock()
+        vector_store.get_chunks_by_doc = MagicMock(return_value=self._chunks())
+
+        resp = await build_mindmap_tree(
+            doc_id="d1",
+            doc={"filename": "paper.pdf"},
+            vector_store=vector_store,
+            llm=llm,
+        )
+
+        concept = resp.tree.branches[0].children[0]
+        assert concept.chunk_indices == [1, 2]

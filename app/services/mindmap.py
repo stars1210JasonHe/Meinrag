@@ -20,6 +20,21 @@ from app.models.schemas import (
     DocGraphNode, DocGraphEdge, DocGraphStats, DocGraphResponse,
 )
 
+import logging
+from pathlib import Path
+
+from langchain_core.language_models import BaseChatModel
+
+from app.models.schemas import (
+    MindmapLeaf, MindmapBranch, MindmapTree, MindmapTreeResponse,
+)
+from app.rag.prompts import MINDMAP_TREE_PROMPT
+
+logger = logging.getLogger(__name__)
+
+# Cache directory — override in tests via monkeypatch
+MINDMAPS_CACHE_DIR = Path("data/mindmaps")
+
 
 def _parse_bbox(raw) -> list[float] | None:
     """Parse bbox which may be a JSON string, a list, or None.
@@ -129,4 +144,151 @@ async def build_doc_graph(
         nodes=nodes,
         edges=edges,
         stats=stats,
+    )
+
+
+def _format_chunks_for_prompt(chunks: list[Document]) -> str:
+    """Render chunks as numbered summaries for the mind-map LLM prompt."""
+    lines = []
+    for chunk in chunks:
+        meta = chunk.metadata or {}
+        idx = meta.get("chunk_index", "?")
+        summary = (meta.get("summary") or chunk.page_content or "").strip()
+        if not summary:
+            summary = "(no summary)"
+        if len(summary) > 200:
+            summary = summary[:197] + "..."
+        lines.append(f"[{idx}] {summary}")
+    return "\n".join(lines)
+
+
+def _parse_tree_response(text: str, valid_indices: set[int]) -> MindmapTree:
+    """Parse LLM output into a MindmapTree. Strips markdown fences,
+    validates chunk_indices against the known set. Returns an empty
+    tree if parsing fails — caller decides whether to cache."""
+    import json as _json
+
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+
+    try:
+        parsed = _json.loads(text)
+    except (ValueError, _json.JSONDecodeError) as e:
+        logger.warning("Mindmap LLM returned invalid JSON: %s", e)
+        return MindmapTree(central="", branches=[])
+
+    central = parsed.get("central", "")
+    if not isinstance(central, str):
+        return MindmapTree(central="", branches=[])
+
+    branches = []
+    for b in parsed.get("branches", []):
+        if not isinstance(b, dict):
+            continue
+        children = []
+        for c in b.get("children", []):
+            if not isinstance(c, dict):
+                continue
+            raw_indices = c.get("chunk_indices", [])
+            validated = [
+                i for i in raw_indices
+                if isinstance(i, int) and i in valid_indices
+            ]
+            children.append(MindmapLeaf(
+                name=str(c.get("name", "")),
+                chunk_indices=validated,
+            ))
+        branches.append(MindmapBranch(
+            name=str(b.get("name", "")),
+            children=children,
+        ))
+
+    return MindmapTree(central=central, branches=branches)
+
+
+def _load_cached_tree(doc_id: str) -> MindmapTree | None:
+    """Return cached tree for this doc, or None if absent/unreadable."""
+    import json as _json
+    path = MINDMAPS_CACHE_DIR / f"{doc_id}.json"
+    if not path.exists():
+        return None
+    try:
+        data = _json.loads(path.read_text(encoding="utf-8"))
+        return MindmapTree.model_validate(data)
+    except Exception as e:
+        logger.warning("Failed to read mindmap cache for %s: %s", doc_id, e)
+        return None
+
+
+def _save_cached_tree(doc_id: str, tree: MindmapTree) -> None:
+    """Persist the tree to the cache file."""
+    MINDMAPS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    path = MINDMAPS_CACHE_DIR / f"{doc_id}.json"
+    path.write_text(tree.model_dump_json(), encoding="utf-8")
+
+
+async def build_mindmap_tree(
+    doc_id: str,
+    doc: dict,
+    vector_store,
+    llm: BaseChatModel,
+) -> MindmapTreeResponse:
+    """Return the hierarchical mind map for a doc.
+
+    Cache-first: reads `data/mindmaps/{doc_id}.json` if present; else calls
+    the LLM to derive a concept hierarchy from chunk summaries, writes the
+    cache, returns the fresh result.
+
+    Fail-safe: empty chunks -> empty tree (no LLM call). LLM failure -> empty
+    tree, no cache write (retry on next request).
+
+    Precondition: caller has verified the user owns this doc.
+    """
+    cached = _load_cached_tree(doc_id)
+    if cached is not None:
+        return MindmapTreeResponse(
+            doc_id=doc_id,
+            filename=doc.get("filename", "unknown"),
+            cached=True,
+            tree=cached,
+        )
+
+    chunks = vector_store.get_chunks_by_doc(doc_id)
+    if not chunks:
+        return MindmapTreeResponse(
+            doc_id=doc_id,
+            filename=doc.get("filename", "unknown"),
+            cached=False,
+            tree=MindmapTree(central="", branches=[]),
+        )
+
+    valid_indices = {
+        (c.metadata or {}).get("chunk_index") for c in chunks
+        if (c.metadata or {}).get("chunk_index") is not None
+    }
+
+    try:
+        messages = MINDMAP_TREE_PROMPT.format_messages(
+            filename=doc.get("filename", "unknown"),
+            chunks=_format_chunks_for_prompt(chunks),
+        )
+        response = await llm.ainvoke(messages)
+        text = response.content if hasattr(response, "content") else str(response)
+        tree = _parse_tree_response(text, valid_indices)
+    except Exception as e:
+        logger.warning("Mindmap LLM call failed: %s", e)
+        tree = MindmapTree(central="", branches=[])
+
+    if tree.branches:
+        try:
+            _save_cached_tree(doc_id, tree)
+        except Exception as e:
+            logger.warning("Failed to cache mindmap for %s: %s", doc_id, e)
+
+    return MindmapTreeResponse(
+        doc_id=doc_id,
+        filename=doc.get("filename", "unknown"),
+        cached=False,
+        tree=tree,
     )
