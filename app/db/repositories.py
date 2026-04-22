@@ -497,6 +497,27 @@ class EdgeRepository:
             for e in result.scalars().all()
         ]
 
+    async def get_edges_in_doc(self, doc_id: str) -> list[dict]:
+        """Return all intra-doc edges (source & target both in this doc).
+
+        Used by the per-doc mindmap endpoint. Null scores normalized to 1.0
+        so downstream consumers always get a numeric value.
+        """
+        stmt = select(ChunkEdgeModel).where(
+            ChunkEdgeModel.source_doc_id == doc_id,
+            ChunkEdgeModel.target_doc_id == doc_id,
+        )
+        result = await self._db.execute(stmt)
+        return [
+            {
+                "source_chunk_index": e.source_chunk_index,
+                "target_chunk_index": e.target_chunk_index,
+                "relation": e.relation,
+                "score": float(e.score) if e.score is not None else 1.0,
+            }
+            for e in result.scalars().all()
+        ]
+
     async def get_edges_to(
         self, doc_id: str, chunk_index: int, relations: list[str] | None = None,
     ) -> list[dict]:
