@@ -1,7 +1,12 @@
-"""Mindmap data assembly — builds node + edge + stats payload from
-existing FAISS chunks and chunk_edges table rows. Zero LLM cost.
+"""Document force-graph assembly — builds node + edge + stats payload
+from existing FAISS chunks and chunk_edges table rows. Zero LLM cost.
 
-Consumed by the per-doc mindmap endpoint in app/routers/documents.py.
+Each chunk becomes a graph node and each row in the chunk_edges table
+becomes an edge. This is the data backing the per-doc force-graph
+visualization (not a hierarchical mind map — see the tree-based mindmap
+service for that).
+
+Consumed by the per-doc graph endpoint in app/routers/documents.py.
 Design: see docs/plans/2026-04-22-mindmap-v0.md
 """
 from __future__ import annotations
@@ -12,7 +17,7 @@ from collections import Counter
 from langchain_core.documents import Document
 
 from app.models.schemas import (
-    MindmapNode, MindmapEdge, MindmapStats, MindmapResponse,
+    DocGraphNode, DocGraphEdge, DocGraphStats, DocGraphResponse,
 )
 
 
@@ -33,8 +38,8 @@ def _parse_bbox(raw) -> list[float] | None:
     return None
 
 
-def _chunk_to_node(chunk: Document) -> MindmapNode:
-    """Convert a FAISS chunk Document to a MindmapNode.
+def _chunk_to_node(chunk: Document) -> DocGraphNode:
+    """Convert a FAISS chunk Document to a DocGraphNode.
 
     Label preference: truncated summary -> truncated content -> `Chunk N`.
     """
@@ -51,7 +56,7 @@ def _chunk_to_node(chunk: Document) -> MindmapNode:
     else:
         label = f"Chunk {chunk_index}"
 
-    return MindmapNode(
+    return DocGraphNode(
         id=f"{doc_id}:{chunk_index}",
         chunk_index=chunk_index,
         chunk_type=meta.get("chunk_type") or "text",
@@ -69,10 +74,10 @@ def _build_edges_and_stats(
     doc_id: str,
     chunks: list[Document],
     edge_rows: list[dict],
-) -> tuple[list[MindmapEdge], MindmapStats]:
+) -> tuple[list[DocGraphEdge], DocGraphStats]:
     """Assemble edge list + stats block from raw edges and chunks."""
     edges = [
-        MindmapEdge(
+        DocGraphEdge(
             source=f"{doc_id}:{row['source_chunk_index']}",
             target=f"{doc_id}:{row['target_chunk_index']}",
             relation=row["relation"],
@@ -86,7 +91,7 @@ def _build_edges_and_stats(
         (c.metadata or {}).get("chunk_type") or "text" for c in chunks
     )
 
-    stats = MindmapStats(
+    stats = DocGraphStats(
         node_count=len(chunks),
         edge_count=len(edges),
         edges_by_type=dict(edges_by_type),
@@ -95,13 +100,13 @@ def _build_edges_and_stats(
     return edges, stats
 
 
-async def build_mindmap(
+async def build_doc_graph(
     doc_id: str,
     doc: dict,
     vector_store,
     edge_repo,
-) -> MindmapResponse:
-    """Assemble the full mindmap payload for one document.
+) -> DocGraphResponse:
+    """Assemble the full doc-graph payload for one document.
 
     Precondition: caller has verified the user owns this doc.
 
@@ -117,7 +122,7 @@ async def build_mindmap(
     nodes = [_chunk_to_node(c) for c in chunks]
     edges, stats = _build_edges_and_stats(doc_id, chunks, edge_rows)
 
-    return MindmapResponse(
+    return DocGraphResponse(
         doc_id=doc_id,
         filename=doc.get("filename", "unknown"),
         doc_summary=doc.get("summary"),

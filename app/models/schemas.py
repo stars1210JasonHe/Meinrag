@@ -197,8 +197,8 @@ class ChunkListResponse(BaseModel):
     total: int
 
 
-class MindmapNode(BaseModel):
-    """One chunk rendered as a graph node in the per-doc mind map."""
+class DocGraphNode(BaseModel):
+    """One chunk rendered as a node in the per-doc force-graph."""
     id: str                           # "{doc_id}:{chunk_index}"
     chunk_index: int
     chunk_type: str                   # "text" | "table" | "image" | "formula"
@@ -211,7 +211,7 @@ class MindmapNode(BaseModel):
     bbox: list[float] | None = None   # [x1, y1, x2, y2] for PDF highlight
 
 
-class MindmapEdge(BaseModel):
+class DocGraphEdge(BaseModel):
     """One edge from chunk_edges connecting two chunks in the same doc."""
     source: str          # "{doc_id}:{chunk_index}"
     target: str
@@ -219,7 +219,7 @@ class MindmapEdge(BaseModel):
     score: float
 
 
-class MindmapStats(BaseModel):
+class DocGraphStats(BaseModel):
     """Counts for legend + filter UI without requiring another round-trip."""
     node_count: int
     edge_count: int
@@ -227,11 +227,11 @@ class MindmapStats(BaseModel):
     chunks_by_type: dict[str, int]
 
 
-class MindmapResponse(BaseModel):
-    """Full response for GET /documents/{doc_id}/mindmap."""
+class DocGraphResponse(BaseModel):
+    """Full response for GET /documents/{doc_id}/graph."""
     doc_id: str
     filename: str
     doc_summary: str | None = None
-    nodes: list[MindmapNode]
-    edges: list[MindmapEdge]
-    stats: MindmapStats
+    nodes: list[DocGraphNode]
+    edges: list[DocGraphEdge]
+    stats: DocGraphStats

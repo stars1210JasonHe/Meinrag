@@ -57,11 +57,11 @@ class TestEdgeRepositoryGetEdgesInDoc:
         assert rows[0]["score"] == 1.0
 
 
-class TestMindmapSchemas:
+class TestDocGraphSchemas:
     def test_mindmap_node_basic(self):
-        from app.models.schemas import MindmapNode
+        from app.models.schemas import DocGraphNode
 
-        node = MindmapNode(
+        node = DocGraphNode(
             id="d1:5",
             chunk_index=5,
             chunk_type="text",
@@ -77,9 +77,9 @@ class TestMindmapSchemas:
         assert node.bbox == [10, 20, 30, 40]
 
     def test_mindmap_node_optional_fields(self):
-        from app.models.schemas import MindmapNode
+        from app.models.schemas import DocGraphNode
 
-        node = MindmapNode(
+        node = DocGraphNode(
             id="d1:0",
             chunk_index=0,
             chunk_type="image",
@@ -93,18 +93,18 @@ class TestMindmapSchemas:
         assert node.bbox is None
 
     def test_mindmap_edge(self):
-        from app.models.schemas import MindmapEdge
+        from app.models.schemas import DocGraphEdge
 
-        edge = MindmapEdge(
+        edge = DocGraphEdge(
             source="d1:0", target="d1:1",
             relation="follows", score=1.0,
         )
         assert edge.relation == "follows"
 
     def test_mindmap_stats(self):
-        from app.models.schemas import MindmapStats
+        from app.models.schemas import DocGraphStats
 
-        stats = MindmapStats(
+        stats = DocGraphStats(
             node_count=42,
             edge_count=89,
             edges_by_type={"follows": 41, "describes": 8},
@@ -114,9 +114,9 @@ class TestMindmapSchemas:
         assert stats.edges_by_type["follows"] == 41
 
     def test_mindmap_response(self):
-        from app.models.schemas import MindmapResponse
+        from app.models.schemas import DocGraphResponse
 
-        resp = MindmapResponse(
+        resp = DocGraphResponse(
             doc_id="d1",
             filename="paper.pdf",
             doc_summary="A paper about X",
@@ -136,7 +136,7 @@ class TestMindmapSchemas:
 from langchain_core.documents import Document
 
 
-class TestBuildMindmap:
+class TestBuildDocGraph:
     def _chunk(self, doc_id="d1", chunk_index=0, chunk_type="text",
                content="hello world", summary="summary text",
                section_type="body", page=1, **extra_meta):
@@ -267,7 +267,7 @@ def _build_test_app():
     return app, stubs
 
 
-class TestMindmapRoute:
+class TestDocGraphRoute:
     def test_happy_path(self):
         app, stubs = _build_test_app()
         stubs["registry"].get.return_value = {
@@ -291,7 +291,7 @@ class TestMindmapRoute:
 
         with TestClient(app) as client:
             resp = client.get(
-                "/documents/d1/mindmap",
+                "/documents/d1/graph",
                 headers={"X-User-Id": "admin"},
             )
 
@@ -312,7 +312,7 @@ class TestMindmapRoute:
 
         with TestClient(app) as client:
             resp = client.get(
-                "/documents/nonexistent/mindmap",
+                "/documents/nonexistent/graph",
                 headers={"X-User-Id": "admin"},
             )
         assert resp.status_code == 404
@@ -330,7 +330,7 @@ class TestMindmapRoute:
 
         with TestClient(app) as client:
             resp = client.get(
-                "/documents/d1/mindmap",
+                "/documents/d1/graph",
                 headers={"X-User-Id": "bob"},
             )
         assert resp.status_code == 403
@@ -346,7 +346,7 @@ class TestMindmapRoute:
 
         with TestClient(app) as client:
             resp = client.get(
-                "/documents/d1/mindmap",
+                "/documents/d1/graph",
                 headers={"X-User-Id": "admin"},
             )
         assert resp.status_code == 200

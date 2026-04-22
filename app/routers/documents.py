@@ -31,10 +31,10 @@ from app.models.schemas import (
     SaveCollectionResponse,
     ChunkDetail,
     ChunkListResponse,
-    MindmapResponse,
+    DocGraphResponse,
 )
 from app.services.document_processor import DocumentProcessor, SUPPORTED_EXTENSIONS
-from app.services.mindmap import build_mindmap
+from app.services.mindmap import build_doc_graph
 from app.vectorstore.base import VectorStoreManager
 
 logger = logging.getLogger(__name__)
@@ -585,16 +585,22 @@ async def download_document(
     raise HTTPException(status_code=404, detail="File not found on disk")
 
 
-@router.get("/{doc_id}/mindmap", response_model=MindmapResponse)
-async def get_document_mindmap(
+@router.get(
+    "/{doc_id}/graph",
+    response_model=DocGraphResponse,
+)
+async def get_document_graph(
     doc_id: str,
     settings: Settings = Depends(get_settings),
     registry: DocumentRepository = Depends(get_registry),
     vector_store: VectorStoreManager = Depends(get_vector_store),
-    edge_repo=Depends(get_edge_repository),
+    edge_repo = Depends(get_edge_repository),
     current_user: str = Depends(get_current_user),
-) -> MindmapResponse:
-    """Return the mindmap graph data (nodes + edges + stats) for one doc."""
+) -> DocGraphResponse:
+    """Return the doc-graph data (nodes + edges + stats) for one doc.
+    Chunks become graph nodes; chunk_edges rows become graph edges.
+    For a hierarchical mind map, see the /mindmap endpoint.
+    """
     doc = await registry.get(doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -607,7 +613,7 @@ async def get_document_mindmap(
             status_code=403, detail="Not authorized for this document",
         )
 
-    return await build_mindmap(doc_id, doc, vector_store, edge_repo)
+    return await build_doc_graph(doc_id, doc, vector_store, edge_repo)
 
 
 @router.patch("/{doc_id}", response_model=DocumentUpdateResponse)
