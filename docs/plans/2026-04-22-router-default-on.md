@@ -549,3 +549,35 @@ Separate commit from the diagnostic script. Pick the message that matches what w
 **Known risks:**
 - The `engine.dispose()` cleanup in Task 3's diagnostic script assumes `create_engine_and_session` returns an engine that supports `.dispose()`. If it doesn't (e.g., returns something wrapping the engine), the `try/finally` harmless no-ops. Actual cleanup happens via `async with session_factory()`.
 - Task 1's analysis relies on the operator reading `query_report.md` carefully. The assumed numbers in Step 2 come from me reading the 2026-04-22 report during planning; if they drifted (e.g., test was re-run), the operator reads fresh and may land on PATH B. That's fine — Task 3 is the safety net.
+
+---
+
+## Landing note
+
+Shipped: 2026-04-22
+Commit: `2ec141b`
+
+Final defaults (verified via `test_router_settings_default_on`):
+- `retrieval_top_k = 10` (was 4)
+- `router_enabled = True` (was False)
+- `router_min_scope = 15` (unchanged)
+- `router_top_k = 8` (unchanged)
+- `router_model = "gpt-4o-mini"` (unchanged)
+
+Ship gates at time of landing (from analysis of 2026-04-22 router-on run, top_k=10 column):
+
+| Metric | Baseline | Shipped @k=10 | Gate |
+|---|---|---|---|
+| Fact correct | 91% | 100% | ≥ 88% ✓ |
+| Synthesis correct | 92% | 100% | ≥ 88% ✓ |
+| Overview correct | 75% | 92% | ≥ 72% ✓ |
+| Multi-doc coverage | 100% | 100% | ≥ 95% ✓ |
+| Impossible | 100% | 100% | = 100% ✓ |
+| Latency p95 | 30005 ms | 11482 ms | < 25000 ms ✓ |
+
+Known residual concerns (documented in predecessor plan, not blockers):
+- Confidence calibration needs retuning against the router-narrowed chunk distribution.
+- `fact_05` still has a retrieval failure at k=4 (would matter if users override top_k back to 4) — see Task 3 for the diagnostic script to investigate if this becomes a production issue.
+- No route-level FastAPI integration test for the wire-through; added here only if future flakiness warrants it.
+
+Task 3 (contingency) was not needed — Task 1's analysis of existing data cleared all gates, so the re-run and diagnostic script were skipped.
