@@ -225,3 +225,132 @@ class TestBuildMindmap:
         assert stats.edge_count == 3
         assert stats.edges_by_type == {"follows": 2, "similar_to": 1}
         assert stats.chunks_by_type == {"text": 2, "table": 1}
+
+
+from unittest.mock import AsyncMock, MagicMock
+from fastapi.testclient import TestClient
+
+
+def _build_test_app():
+    """Build a FastAPI app with stubbed dependencies for integration tests.
+
+    Returns (app, stubs_dict) where stubs_dict lets the test configure
+    what the mocked dependencies return.
+    """
+    from fastapi import FastAPI
+    from app.routers.documents import router
+    from app.dependencies import (
+        get_settings, get_vector_store, get_registry,
+        get_edge_repository, get_current_user,
+    )
+
+    app = FastAPI()
+    # Match production mount: app.include_router(documents.router, prefix="/documents")
+    app.include_router(router, prefix="/documents")
+
+    stubs = {
+        "settings": MagicMock(user_isolation="all"),
+        "vector_store": MagicMock(),
+        "registry": MagicMock(),
+        "edge_repo": MagicMock(),
+        "current_user": {"user_id": "admin"},
+    }
+    stubs["registry"].get = AsyncMock()
+    stubs["edge_repo"].get_edges_in_doc = AsyncMock()
+
+    app.dependency_overrides[get_settings] = lambda: stubs["settings"]
+    app.dependency_overrides[get_vector_store] = lambda: stubs["vector_store"]
+    app.dependency_overrides[get_registry] = lambda: stubs["registry"]
+    app.dependency_overrides[get_edge_repository] = lambda: stubs["edge_repo"]
+    app.dependency_overrides[get_current_user] = lambda: stubs["current_user"]
+
+    return app, stubs
+
+
+class TestMindmapRoute:
+    def test_happy_path(self):
+        app, stubs = _build_test_app()
+        stubs["registry"].get.return_value = {
+            "doc_id": "d1", "filename": "paper.pdf",
+            "summary": "A paper about X", "user_id": "admin",
+        }
+        stubs["vector_store"].get_chunks_by_doc = MagicMock(return_value=[
+            Document(page_content="content 0", metadata={
+                "doc_id": "d1", "chunk_index": 0, "chunk_type": "text",
+                "summary": "chunk 0 summary",
+            }),
+            Document(page_content="content 1", metadata={
+                "doc_id": "d1", "chunk_index": 1, "chunk_type": "table",
+                "summary": "chunk 1 summary",
+            }),
+        ])
+        stubs["edge_repo"].get_edges_in_doc.return_value = [
+            {"source_chunk_index": 0, "target_chunk_index": 1,
+             "relation": "follows", "score": 1.0},
+        ]
+
+        with TestClient(app) as client:
+            resp = client.get(
+                "/documents/d1/mindmap",
+                headers={"X-User-Id": "admin"},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["doc_id"] == "d1"
+        assert data["filename"] == "paper.pdf"
+        assert len(data["nodes"]) == 2
+        assert len(data["edges"]) == 1
+        assert data["edges"][0]["source"] == "d1:0"
+        assert data["edges"][0]["target"] == "d1:1"
+        assert data["stats"]["node_count"] == 2
+        assert data["stats"]["chunks_by_type"] == {"text": 1, "table": 1}
+
+    def test_404_for_missing_doc(self):
+        app, stubs = _build_test_app()
+        stubs["registry"].get.return_value = None
+
+        with TestClient(app) as client:
+            resp = client.get(
+                "/documents/nonexistent/mindmap",
+                headers={"X-User-Id": "admin"},
+            )
+        assert resp.status_code == 404
+
+    def test_403_for_wrong_user(self):
+        app, stubs = _build_test_app()
+        stubs["settings"].user_isolation = "all"
+        stubs["registry"].get.return_value = {
+            "doc_id": "d1", "filename": "paper.pdf",
+            "summary": "...", "user_id": "alice",
+        }
+        # Re-override current_user to bob
+        from app.dependencies import get_current_user
+        app.dependency_overrides[get_current_user] = lambda: {"user_id": "bob"}
+
+        with TestClient(app) as client:
+            resp = client.get(
+                "/documents/d1/mindmap",
+                headers={"X-User-Id": "bob"},
+            )
+        assert resp.status_code == 403
+
+    def test_empty_doc_returns_empty_arrays(self):
+        app, stubs = _build_test_app()
+        stubs["registry"].get.return_value = {
+            "doc_id": "d1", "filename": "empty.pdf",
+            "summary": None, "user_id": "admin",
+        }
+        stubs["vector_store"].get_chunks_by_doc = MagicMock(return_value=[])
+        stubs["edge_repo"].get_edges_in_doc.return_value = []
+
+        with TestClient(app) as client:
+            resp = client.get(
+                "/documents/d1/mindmap",
+                headers={"X-User-Id": "admin"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["nodes"] == []
+        assert data["edges"] == []
+        assert data["stats"]["node_count"] == 0

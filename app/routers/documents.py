@@ -14,7 +14,7 @@ from app.config import Settings
 from app.classification import PRIMARY_CATEGORIES
 from app.dependencies import (
     get_settings, get_vector_store, get_registry, get_llm, get_embeddings, get_current_user, get_db,
-    get_summary_store,
+    get_summary_store, get_edge_repository,
 )
 from app.db.repositories import DocumentRepository
 from langchain_core.embeddings import Embeddings
@@ -31,8 +31,10 @@ from app.models.schemas import (
     SaveCollectionResponse,
     ChunkDetail,
     ChunkListResponse,
+    MindmapResponse,
 )
 from app.services.document_processor import DocumentProcessor, SUPPORTED_EXTENSIONS
+from app.services.mindmap import build_mindmap
 from app.vectorstore.base import VectorStoreManager
 
 logger = logging.getLogger(__name__)
@@ -581,6 +583,31 @@ async def download_document(
             )
 
     raise HTTPException(status_code=404, detail="File not found on disk")
+
+
+@router.get("/{doc_id}/mindmap", response_model=MindmapResponse)
+async def get_document_mindmap(
+    doc_id: str,
+    settings: Settings = Depends(get_settings),
+    registry: DocumentRepository = Depends(get_registry),
+    vector_store: VectorStoreManager = Depends(get_vector_store),
+    edge_repo=Depends(get_edge_repository),
+    current_user: dict = Depends(get_current_user),
+) -> MindmapResponse:
+    """Return the mindmap graph data (nodes + edges + stats) for one doc."""
+    doc = await registry.get(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    if (
+        settings.user_isolation != "none"
+        and doc.get("user_id") != current_user["user_id"]
+    ):
+        raise HTTPException(
+            status_code=403, detail="Not authorized for this document",
+        )
+
+    return await build_mindmap(doc_id, doc, vector_store, edge_repo)
 
 
 @router.patch("/{doc_id}", response_model=DocumentUpdateResponse)
