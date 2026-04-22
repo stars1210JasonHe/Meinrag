@@ -235,3 +235,29 @@ class DocGraphResponse(BaseModel):
     nodes: list[DocGraphNode]
     edges: list[DocGraphEdge]
     stats: DocGraphStats
+
+
+class MindmapLeaf(BaseModel):
+    """Leaf node in the hierarchical mind map — a concept backed by chunks."""
+    name: str
+    chunk_indices: list[int]  # indices of chunks that support this concept
+
+
+class MindmapBranch(BaseModel):
+    """Main branch in the mind map: a top-level theme with sub-concept leaves."""
+    name: str
+    children: list[MindmapLeaf]
+
+
+class MindmapTree(BaseModel):
+    """The LLM-derived hierarchical structure for one document."""
+    central: str              # central theme (1-line)
+    branches: list[MindmapBranch]
+
+
+class MindmapTreeResponse(BaseModel):
+    """Full response for GET /documents/{doc_id}/mindmap (tree mode)."""
+    doc_id: str
+    filename: str
+    cached: bool              # True if served from data/mindmaps/ cache
+    tree: MindmapTree

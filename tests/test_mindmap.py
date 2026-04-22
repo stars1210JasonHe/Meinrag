@@ -354,3 +354,57 @@ class TestDocGraphRoute:
         assert data["nodes"] == []
         assert data["edges"] == []
         assert data["stats"]["node_count"] == 0
+
+
+class TestMindmapTreeSchemas:
+    def test_mindmap_leaf(self):
+        from app.models.schemas import MindmapLeaf
+
+        leaf = MindmapLeaf(name="Attention mechanism", chunk_indices=[3, 5, 7])
+        assert leaf.name == "Attention mechanism"
+        assert leaf.chunk_indices == [3, 5, 7]
+
+    def test_mindmap_branch(self):
+        from app.models.schemas import MindmapBranch, MindmapLeaf
+
+        branch = MindmapBranch(
+            name="Architecture",
+            children=[
+                MindmapLeaf(name="Attention", chunk_indices=[3]),
+                MindmapLeaf(name="Feed-forward", chunk_indices=[4, 6]),
+            ],
+        )
+        assert branch.name == "Architecture"
+        assert len(branch.children) == 2
+        assert branch.children[0].name == "Attention"
+
+    def test_mindmap_tree(self):
+        from app.models.schemas import MindmapTree, MindmapBranch, MindmapLeaf
+
+        tree = MindmapTree(
+            central="A paper on attention in transformers",
+            branches=[
+                MindmapBranch(
+                    name="Architecture",
+                    children=[MindmapLeaf(name="QKV", chunk_indices=[3])],
+                ),
+            ],
+        )
+        assert tree.central == "A paper on attention in transformers"
+        assert len(tree.branches) == 1
+
+    def test_mindmap_tree_response(self):
+        from app.models.schemas import MindmapTreeResponse
+
+        resp = MindmapTreeResponse(
+            doc_id="d1",
+            filename="paper.pdf",
+            cached=False,
+            tree={
+                "central": "test",
+                "branches": [],
+            },
+        )
+        assert resp.doc_id == "d1"
+        assert resp.cached is False
+        assert resp.tree.central == "test"
