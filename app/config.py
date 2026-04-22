@@ -82,7 +82,7 @@ class Settings(BaseSettings):
     vision_page_dpi: int = 150
 
     # Retrieval
-    retrieval_top_k: int = 4
+    retrieval_top_k: int = 10
 
     # Re-ranking
     rerank_enabled: bool = False
@@ -134,8 +134,9 @@ class Settings(BaseSettings):
     # Runs one gpt-4o-mini call before vector search to pick the top-K docs
     # most likely to contain the answer. Cuts downstream rerank/budget cost.
     # Fail-safe: malformed output or LLM error falls back to the full scope.
-    # Off by default; eval-gated. See docs/plans/2026-04-22-router-prefix.md.
-    router_enabled: bool = False
+    # On by default as of 2026-04-22 (eval cleared ship gates with
+    # retrieval_top_k=10). See docs/plans/2026-04-22-router-default-on.md.
+    router_enabled: bool = True
     router_min_scope: int = 15      # below this many docs, router is bypassed
     router_top_k: int = 8           # how many docs router picks
     router_model: str = "gpt-4o-mini"
