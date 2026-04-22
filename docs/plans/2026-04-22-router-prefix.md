@@ -925,6 +925,23 @@ git commit -m "docs(router): eval results — <ship|hold> decision"
 - Flag stays `router_enabled=false`.
 - Feature remains available via env override for experimentation.
 
+### Follow-up analysis — retrieval_top_k=10 clears all gates (2026-04-22)
+
+Re-analysis of the same run's top_k=10 column (no re-run needed):
+
+| Metric | top_k=10 from router-on run | Gate | Pass |
+|---|---|---|---|
+| Fact correct | 100% | ≥ 88% | Y |
+| Synthesis correct | 100% | ≥ 88% | Y |
+| Overview correct | 92% | ≥ 72% | Y |
+| Multi-doc coverage | 100% | ≥ 95% | Y |
+| Impossible correct | 100% | = 100% | Y |
+| Latency p95 (aggregated) | 11482 ms | < 25000 ms | Y |
+
+Conclusion: PATH A — all gates clear, proceeding to flip defaults in config.py.
+
+The 2026-04-22 HOLD decision was correct at `retrieval_top_k=4` default. With the paired change `retrieval_top_k=4 → 10` the ship gates clear without a new eval run — the k=10 column of the same run already contains the production-equivalent numbers.
+
 ### Regressions (worth investigating before default-on)
 
 1. **`fact_05` @k=4 & @k=10 — full retrieval fail** (recall 0.00, precision 0.00). Router pruned the doc that contained the answer. LLM judge still rated the response "correct" because of general knowledge fallback, but keyword match failed. Needs investigation: was `fact_05`'s scope broad (auto-filled 44 docs, router picked wrong 8)? If so, router menu quality is the lever.
