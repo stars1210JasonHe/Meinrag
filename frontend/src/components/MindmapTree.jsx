@@ -48,23 +48,51 @@ export default function MindmapTree({ tree, onLeafClick }) {
       kind === 'central' ? '#3b82f6' :
       kind === 'branch' ? '#6366f1' :
       '#10b981'
-    const radius =
-      kind === 'central' ? 12 :
-      kind === 'branch' ? 8 :
-      5
+    // Rectangle sizing per kind — central largest, leaf smallest
+    const width =
+      kind === 'central' ? 200 :
+      kind === 'branch' ? 160 :
+      140
+    const height =
+      kind === 'central' ? 44 :
+      kind === 'branch' ? 34 :
+      28
+    const fontSize =
+      kind === 'central' ? 14 :
+      kind === 'branch' ? 12 :
+      11
+    const fontWeight = kind === 'leaf' ? 400 : 600
+    // Truncate label to fit — char counts tuned to average px widths
+    const maxChars =
+      kind === 'central' ? 26 :
+      kind === 'branch' ? 22 :
+      20
+    const label = nodeDatum.name && nodeDatum.name.length > maxChars
+      ? nodeDatum.name.slice(0, maxChars - 1) + '…'
+      : (nodeDatum.name || '')
     return (
-      <g onClick={toggleNode}>
-        <circle r={radius} fill={fill} stroke="#fff" strokeWidth={1.5} />
+      <g onClick={toggleNode} style={{ cursor: 'pointer' }}>
+        <rect
+          x={-width / 2}
+          y={-height / 2}
+          width={width}
+          height={height}
+          rx={6}
+          ry={6}
+          fill={fill}
+          stroke="rgba(255,255,255,0.25)"
+          strokeWidth={1}
+        />
         <text
-          fill="currentColor"
+          fill="#ffffff"
           strokeWidth="0"
-          x={radius + 6}
-          y={4}
-          fontSize={kind === 'central' ? 14 : 12}
-          fontWeight={kind === 'central' ? 600 : 400}
-          style={{ fontFamily: 'inherit' }}
+          textAnchor="middle"
+          dominantBaseline="central"
+          fontSize={fontSize}
+          fontWeight={fontWeight}
+          style={{ fontFamily: 'inherit', pointerEvents: 'none' }}
         >
-          {nodeDatum.name}
+          {label}
         </text>
       </g>
     )
@@ -76,12 +104,13 @@ export default function MindmapTree({ tree, onLeafClick }) {
       orientation="horizontal"
       translate={{ x: 200, y: 400 }}
       pathFunc="diagonal"
-      separation={{ siblings: 1, nonSiblings: 1.3 }}
+      separation={{ siblings: 0.9, nonSiblings: 1.4 }}
       renderCustomNodeElement={renderNode}
       onNodeClick={handleNodeClick}
       collapsible={false}
       zoom={0.9}
       scaleExtent={{ min: 0.3, max: 2 }}
+      nodeSize={{ x: 260, y: 60 }}
     />
   )
 }
