@@ -4,8 +4,8 @@ import { fetchMindmap } from '@/lib/api'
 const USER_ID = 'admin'
 
 /**
- * Fetches the mindmap graph for a single document.
- * Caches for 5 minutes — mind maps rarely change for a given doc.
+ * Fetches the hierarchical mind map tree for one doc.
+ * LLM-derived, cached on the backend per-doc.
  */
 export function useMindmap(docId) {
   return useQuery({
