@@ -193,6 +193,13 @@
     "openInPdf": "在 PDF 查看器中打开",
     "chunk": "片段",
     "page": "第",
-    "empty": "该文档暂无片段。"
+    "empty": "该文档暂无片段。",
+    "modeTree": "思维导图",
+    "modeGraph": "图谱",
+    "cached": "缓存",
+    "concept": "概念",
+    "supportingChunks": "相关片段",
+    "openChunk": "打开片段",
+    "emptyTree": "还没有思维导图。首次访问时会自动生成。"
   }
 }

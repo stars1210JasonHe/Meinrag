@@ -195,6 +195,13 @@
     "openInPdf": "Open in PDF viewer",
     "chunk": "Chunk",
     "page": "p.",
-    "empty": "This document has no chunks yet."
+    "empty": "This document has no chunks yet.",
+    "modeTree": "Mind Map",
+    "modeGraph": "Graph",
+    "cached": "cached",
+    "concept": "Concept",
+    "supportingChunks": "Supporting chunks",
+    "openChunk": "Open chunk",
+    "emptyTree": "No mind map yet. It will generate on first view."
   }
 }

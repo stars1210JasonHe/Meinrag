@@ -1,94 +1,100 @@
 import { useTranslation } from 'react-i18next'
-import { X, ExternalLink, FileText, Table2, Image, Calculator } from 'lucide-react'
+import { X, ExternalLink } from 'lucide-react'
 
-// Must match MindmapGraph.jsx / GraphPage.jsx constants exactly.
-const TYPE_COLORS = {
-  text: '#3b82f6',
-  table: '#f59e0b',
-  formula: '#a855f7',
-  image: '#10b981',
-}
-
-const TYPE_ICONS = { text: FileText, table: Table2, image: Image, formula: Calculator }
-
-export default function MindmapNodePanel({ node, onOpenInPdf, onClose }) {
+/**
+ * Dual-purpose panel.
+ * - Graph mode: pass `node` (a MindmapGraph node) + `onOpenInPdf`
+ * - Tree mode: pass `leaf` (a tree leaf with name + chunk_indices + branch_name)
+ *              + `onOpenChunk(chunkIndex)`
+ */
+export default function MindmapNodePanel({
+  node,
+  leaf,
+  onOpenInPdf,
+  onOpenChunk,
+  onClose,
+}) {
   const { t } = useTranslation()
+
+  if (leaf) {
+    return (
+      <div className="p-4 border-t border-[var(--border-strong)]">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="font-medium">{t('mindmap.concept')}</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="p-1 rounded hover:bg-[var(--border-strong)]"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <p className="text-sm font-medium mb-2">{leaf.name}</p>
+        {leaf.branch_name && (
+          <p className="text-xs opacity-70 mb-3">↳ {leaf.branch_name}</p>
+        )}
+        <h4 className="text-xs font-medium mb-2 opacity-70 uppercase tracking-wide">
+          {t('mindmap.supportingChunks')}
+        </h4>
+        <div className="space-y-1">
+          {(leaf.chunk_indices || []).map(idx => (
+            <button
+              key={idx}
+              type="button"
+              onClick={() => onOpenChunk(idx)}
+              className="w-full flex items-center justify-between px-2 py-1.5 text-sm rounded hover:bg-[var(--border-strong)] transition"
+            >
+              <span>{t('mindmap.chunk')} {idx}</span>
+              <ExternalLink className="h-3 w-3 opacity-60" />
+            </button>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
   if (!node) return null
 
-  const Icon = TYPE_ICONS[node.chunk_type] || FileText
-
   return (
-    <div
-      className="p-4 border-t"
-      style={{ borderColor: 'var(--border-strong, rgba(255,255,255,0.14))' }}
-    >
+    <div className="p-4 border-t border-[var(--border-strong)]">
       <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <Icon size={16} style={{ color: TYPE_COLORS[node.chunk_type] || TYPE_COLORS.text }} />
-          <h3 className="text-sm font-medium truncate" style={{ color: 'var(--fg, #f4f2ee)' }}>
-            {t('mindmap.chunk')} {node.chunk_index}
-          </h3>
-        </div>
+        <h3 className="font-medium">
+          {t('mindmap.chunk')} {node.chunk_index}
+        </h3>
         <button
+          type="button"
           onClick={onClose}
           aria-label="Close"
-          className="opacity-40 hover:opacity-100 shrink-0"
-          style={{ color: 'var(--fg, #f4f2ee)' }}
+          className="p-1 rounded hover:bg-[var(--border-strong)]"
         >
-          <X size={14} />
+          <X className="h-4 w-4" />
         </button>
       </div>
-
-      <div className="flex gap-1.5 mb-3 flex-wrap">
-        <span
-          className="text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wide"
-          style={{
-            backgroundColor: 'var(--border-strong, rgba(255,255,255,0.14))',
-            color: 'var(--fg, #f4f2ee)',
-          }}
-        >
+      <div className="flex gap-2 mb-3 flex-wrap">
+        <span className="text-xs px-2 py-0.5 rounded bg-[var(--border-strong)]">
           {node.chunk_type}
         </span>
         {node.section_type && (
-          <span
-            className="text-[10px] px-1.5 py-0.5 rounded border"
-            style={{
-              borderColor: 'var(--border-strong, rgba(255,255,255,0.14))',
-              color: 'var(--fg-dim, #9a9690)',
-            }}
-          >
+          <span className="text-xs px-2 py-0.5 rounded border border-[var(--border-strong)]">
             {node.section_type}
           </span>
         )}
         {node.page != null && (
-          <span
-            className="text-[10px] px-1.5 py-0.5 rounded border"
-            style={{
-              borderColor: 'var(--border-strong, rgba(255,255,255,0.14))',
-              color: 'var(--fg-dim, #9a9690)',
-            }}
-          >
+          <span className="text-xs px-2 py-0.5 rounded border border-[var(--border-strong)]">
             {t('mindmap.page')}{node.page}
           </span>
         )}
       </div>
-
-      <p
-        className="text-xs mb-4 whitespace-pre-wrap leading-relaxed"
-        style={{ color: 'var(--fg-1, #d4d0ca)' }}
-      >
+      <p className="text-sm mb-4 whitespace-pre-wrap opacity-90">
         {node.full_summary || node.label}
       </p>
-
       <button
+        type="button"
         onClick={onOpenInPdf}
-        className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded text-xs"
-        style={{
-          backgroundColor: 'var(--border-strong, rgba(255,255,255,0.14))',
-          color: 'var(--fg, #f4f2ee)',
-        }}
+        className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded bg-[var(--border-strong)] hover:opacity-80 transition"
       >
-        <ExternalLink size={12} />
+        <ExternalLink className="h-4 w-4" />
         {t('mindmap.openInPdf')}
       </button>
     </div>
