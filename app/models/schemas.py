@@ -195,3 +195,43 @@ class ChunkDetail(BaseModel):
 class ChunkListResponse(BaseModel):
     chunks: list[ChunkDetail]
     total: int
+
+
+class MindmapNode(BaseModel):
+    """One chunk rendered as a graph node in the per-doc mind map."""
+    id: str                           # "{doc_id}:{chunk_index}"
+    chunk_index: int
+    chunk_type: str                   # "text" | "table" | "image" | "formula"
+    section_type: str | None = None   # e.g. "body" | "references" | "abstract"
+    page: int | None = None
+    label: str                        # display-truncated (<=63 chars)
+    full_summary: str | None = None   # full summary for hover/detail
+    content_length: int
+    has_image: bool = False
+    bbox: list[float] | None = None   # [x1, y1, x2, y2] for PDF highlight
+
+
+class MindmapEdge(BaseModel):
+    """One edge from chunk_edges connecting two chunks in the same doc."""
+    source: str          # "{doc_id}:{chunk_index}"
+    target: str
+    relation: str        # "follows" | "co_located" | "describes" | "references" | "similar_to"
+    score: float
+
+
+class MindmapStats(BaseModel):
+    """Counts for legend + filter UI without requiring another round-trip."""
+    node_count: int
+    edge_count: int
+    edges_by_type: dict[str, int]
+    chunks_by_type: dict[str, int]
+
+
+class MindmapResponse(BaseModel):
+    """Full response for GET /documents/{doc_id}/mindmap."""
+    doc_id: str
+    filename: str
+    doc_summary: str | None = None
+    nodes: list[MindmapNode]
+    edges: list[MindmapEdge]
+    stats: MindmapStats

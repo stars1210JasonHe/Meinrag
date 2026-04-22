@@ -55,3 +55,79 @@ class TestEdgeRepositoryGetEdgesInDoc:
         rows = await repo.get_edges_in_doc("d1")
         assert len(rows) == 1
         assert rows[0]["score"] == 1.0
+
+
+class TestMindmapSchemas:
+    def test_mindmap_node_basic(self):
+        from app.models.schemas import MindmapNode
+
+        node = MindmapNode(
+            id="d1:5",
+            chunk_index=5,
+            chunk_type="text",
+            section_type="body",
+            page=3,
+            label="Summary preview",
+            full_summary="Full summary text here",
+            content_length=1240,
+            has_image=False,
+            bbox=[10, 20, 30, 40],
+        )
+        assert node.id == "d1:5"
+        assert node.bbox == [10, 20, 30, 40]
+
+    def test_mindmap_node_optional_fields(self):
+        from app.models.schemas import MindmapNode
+
+        node = MindmapNode(
+            id="d1:0",
+            chunk_index=0,
+            chunk_type="image",
+            label="Image chunk",
+            content_length=0,
+            has_image=True,
+        )
+        assert node.section_type is None
+        assert node.page is None
+        assert node.full_summary is None
+        assert node.bbox is None
+
+    def test_mindmap_edge(self):
+        from app.models.schemas import MindmapEdge
+
+        edge = MindmapEdge(
+            source="d1:0", target="d1:1",
+            relation="follows", score=1.0,
+        )
+        assert edge.relation == "follows"
+
+    def test_mindmap_stats(self):
+        from app.models.schemas import MindmapStats
+
+        stats = MindmapStats(
+            node_count=42,
+            edge_count=89,
+            edges_by_type={"follows": 41, "describes": 8},
+            chunks_by_type={"text": 35, "table": 5},
+        )
+        assert stats.node_count == 42
+        assert stats.edges_by_type["follows"] == 41
+
+    def test_mindmap_response(self):
+        from app.models.schemas import MindmapResponse
+
+        resp = MindmapResponse(
+            doc_id="d1",
+            filename="paper.pdf",
+            doc_summary="A paper about X",
+            nodes=[],
+            edges=[],
+            stats={
+                "node_count": 0,
+                "edge_count": 0,
+                "edges_by_type": {},
+                "chunks_by_type": {},
+            },
+        )
+        assert resp.doc_id == "d1"
+        assert resp.nodes == []
