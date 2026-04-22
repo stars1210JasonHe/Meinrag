@@ -4,6 +4,7 @@ import DashboardPage from './pages/DashboardPage'
 import ChatPage from './pages/ChatPage'
 import GraphPage from './pages/GraphPage'
 import PdfViewerPage from './pages/PdfViewerPage'
+import MindmapPage from './pages/MindmapPage'
 
 export const router = createBrowserRouter([
   {
@@ -15,6 +16,7 @@ export const router = createBrowserRouter([
       { path: '/graph', element: <GraphPage /> },
       { path: '/graph/:docId', element: <GraphPage /> },
       { path: '/pdf/:docId', element: <PdfViewerPage /> },
+      { path: '/mindmap/:docId', element: <MindmapPage /> },
     ],
   },
 ])
