@@ -87,14 +87,6 @@ export const fetchGraphNodes = (docId, edgeTypes, userId) => {
 export const fetchGraphNeighbors = (docId, chunkIndex, hops, userId) =>
   apiFetch(`/graph/neighbors?doc_id=${docId}&chunk_index=${chunkIndex}&hops=${hops || 1}`, { headers: headers(userId) })
 
-// Doc graph (chunks + edges, force-directed)
-export const fetchDocGraph = (docId, userId) =>
-  apiFetch(`/documents/${docId}/graph`, { headers: headers(userId) })
-
-// Mindmap (hierarchical tree)
-export const fetchMindmap = (docId, userId) =>
-  apiFetch(`/documents/${docId}/mindmap`, { headers: headers(userId) })
-
 // Query
 export const sendQuery = (question, options, userId) =>
   apiFetch('/query', {

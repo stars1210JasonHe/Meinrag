@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import ForceGraph2D from 'react-force-graph-2d'
 import {
   Search, Upload, MoreVertical, Trash2, Download, RefreshCw,
-  FileText, X, MessageSquare, Filter, ChevronUp, ChevronDown, Network, Brain,
+  FileText, X, MessageSquare, Filter, ChevronUp, ChevronDown, Network,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { fetchDocuments, fetchCollections, fetchGraphDocuments, deleteDocument } from '@/lib/api'
@@ -570,8 +570,6 @@ export default function DashboardPage() {
         { label: t('dashboard.chatAboutThis'), icon: MessageSquare, action: () => navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.filename || '')}`) },
         { label: t('dashboard.openInPdf'), icon: FileText, action: () => navigate(`/pdf/${node._data.doc_id}`) },
         { label: t('dashboard.viewInGraph'), icon: Network, action: () => navigate(`/graph/${node._data.doc_id}`) },
-        { label: t('mindmap.modeTree'), icon: Brain, action: () => navigate(`/mindmap/${node._data.doc_id}?mode=tree`) },
-        { label: t('mindmap.modeGraph'), icon: Network, action: () => navigate(`/mindmap/${node._data.doc_id}?mode=graph`) },
         { separator: true },
         { label: t('common.download'), icon: Download, action: () => handleDownload(node._data.doc_id) },
         { label: t('common.delete'), icon: Trash2, action: () => handleDelete(node._data.doc_id), danger: true },
@@ -951,8 +949,6 @@ export default function DashboardPage() {
                     doc={doc}
                     onClick={() => navigate(`/chat?doc=${doc.doc_id}&name=${encodeURIComponent(doc.filename || '')}`)}
                     onViewPdf={(e) => { e.stopPropagation(); navigate(`/pdf/${doc.doc_id}`) }}
-                    onViewMindmapTree={(e) => { e.stopPropagation(); navigate(`/mindmap/${doc.doc_id}?mode=tree`) }}
-                    onViewMindmapGraph={(e) => { e.stopPropagation(); navigate(`/mindmap/${doc.doc_id}?mode=graph`) }}
                     onMoreClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === doc.doc_id ? null : doc.doc_id) }}
                     menuOpen={menuOpen === doc.doc_id}
                     onDownload={() => handleDownload(doc.doc_id)}
@@ -960,8 +956,6 @@ export default function DashboardPage() {
                     tDownload={t('common.download')}
                     tDelete={t('common.delete')}
                     tViewPdf={t('dashboard.viewPdf')}
-                    tViewMindmapTree={t('mindmap.modeTree')}
-                    tViewMindmapGraph={t('mindmap.modeGraph')}
                   />
                 ))
               )}
@@ -1108,7 +1102,7 @@ function SearchInput({ value, onChange, matching, total, showCount }) {
   )
 }
 
-function DocRow({ doc, onClick, onViewPdf, onViewMindmapTree, onViewMindmapGraph, onMoreClick, menuOpen, onDownload, onDelete, tDownload, tDelete, tViewPdf, tViewMindmapTree, tViewMindmapGraph }) {
+function DocRow({ doc, onClick, onViewPdf, onMoreClick, menuOpen, onDownload, onDelete, tDownload, tDelete, tViewPdf }) {
   return (
     <div
       onClick={onClick}
@@ -1142,26 +1136,6 @@ function DocRow({ doc, onClick, onViewPdf, onViewMindmapTree, onViewMindmapGraph
         title={tViewPdf}
       >
         <FileText size={13} />
-      </button>
-      <button
-        type="button"
-        onClick={onViewMindmapTree}
-        className="p-1 rounded transition-opacity opacity-0 group-hover:opacity-70 hover:opacity-100"
-        style={{ color: 'var(--fg-dim)' }}
-        title={tViewMindmapTree}
-        aria-label={tViewMindmapTree}
-      >
-        <Brain size={13} />
-      </button>
-      <button
-        type="button"
-        onClick={onViewMindmapGraph}
-        className="p-1 rounded transition-opacity opacity-0 group-hover:opacity-70 hover:opacity-100"
-        style={{ color: 'var(--fg-dim)' }}
-        title={tViewMindmapGraph}
-        aria-label={tViewMindmapGraph}
-      >
-        <Network size={13} />
       </button>
       <div className="relative">
         <button

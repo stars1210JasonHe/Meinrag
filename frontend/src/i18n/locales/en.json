@@ -184,24 +184,5 @@
     "fromWeb": "From web search",
     "fetchingAi": "Fetching AI knowledge…",
     "fetchingWeb": "Searching the web…"
-  },
-  "mindmap": {
-    "title": "Mind map",
-    "loading": "Loading mind map...",
-    "error": "Failed to load mind map",
-    "back": "Back",
-    "nodeTypes": "Node types",
-    "edgeTypes": "Edge types",
-    "openInPdf": "Open in PDF viewer",
-    "chunk": "Chunk",
-    "page": "p.",
-    "empty": "This document has no chunks yet.",
-    "modeTree": "Mind Map",
-    "modeGraph": "Graph",
-    "cached": "cached",
-    "concept": "Concept",
-    "supportingChunks": "Supporting chunks",
-    "openChunk": "Open chunk",
-    "emptyTree": "No mind map yet. It will generate on first view."
   }
 }
