@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import ForceGraph2D from 'react-force-graph-2d'
 import {
   Search, Upload, MoreVertical, Trash2, Download, RefreshCw,
-  FileText, X, MessageSquare, Filter, ChevronUp, ChevronDown, Network,
+  FileText, X, MessageSquare, Filter, ChevronUp, ChevronDown, Network, Waypoints,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { fetchDocuments, fetchCollections, fetchGraphDocuments, deleteDocument } from '@/lib/api'
@@ -570,6 +570,7 @@ export default function DashboardPage() {
         { label: t('dashboard.chatAboutThis'), icon: MessageSquare, action: () => navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.filename || '')}`) },
         { label: t('dashboard.openInPdf'), icon: FileText, action: () => navigate(`/pdf/${node._data.doc_id}`) },
         { label: t('dashboard.viewInGraph'), icon: Network, action: () => navigate(`/graph/${node._data.doc_id}`) },
+        { label: t('mindmap.title'), icon: Waypoints, action: () => navigate(`/mindmap/${node._data.doc_id}`) },
         { separator: true },
         { label: t('common.download'), icon: Download, action: () => handleDownload(node._data.doc_id) },
         { label: t('common.delete'), icon: Trash2, action: () => handleDelete(node._data.doc_id), danger: true },
@@ -949,6 +950,7 @@ export default function DashboardPage() {
                     doc={doc}
                     onClick={() => navigate(`/chat?doc=${doc.doc_id}&name=${encodeURIComponent(doc.filename || '')}`)}
                     onViewPdf={(e) => { e.stopPropagation(); navigate(`/pdf/${doc.doc_id}`) }}
+                    onViewMindmap={(e) => { e.stopPropagation(); navigate(`/mindmap/${doc.doc_id}`) }}
                     onMoreClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === doc.doc_id ? null : doc.doc_id) }}
                     menuOpen={menuOpen === doc.doc_id}
                     onDownload={() => handleDownload(doc.doc_id)}
@@ -956,6 +958,7 @@ export default function DashboardPage() {
                     tDownload={t('common.download')}
                     tDelete={t('common.delete')}
                     tViewPdf={t('dashboard.viewPdf')}
+                    tViewMindmap={t('mindmap.title')}
                   />
                 ))
               )}
@@ -1102,7 +1105,7 @@ function SearchInput({ value, onChange, matching, total, showCount }) {
   )
 }
 
-function DocRow({ doc, onClick, onViewPdf, onMoreClick, menuOpen, onDownload, onDelete, tDownload, tDelete, tViewPdf }) {
+function DocRow({ doc, onClick, onViewPdf, onViewMindmap, onMoreClick, menuOpen, onDownload, onDelete, tDownload, tDelete, tViewPdf, tViewMindmap }) {
   return (
     <div
       onClick={onClick}
@@ -1136,6 +1139,15 @@ function DocRow({ doc, onClick, onViewPdf, onMoreClick, menuOpen, onDownload, on
         title={tViewPdf}
       >
         <FileText size={13} />
+      </button>
+      <button
+        onClick={onViewMindmap}
+        className="p-1 rounded transition-opacity opacity-0 group-hover:opacity-70 hover:opacity-100"
+        style={{ color: 'var(--fg-dim)' }}
+        title={tViewMindmap}
+        aria-label={tViewMindmap}
+      >
+        <Waypoints size={13} />
       </button>
       <div className="relative">
         <button
