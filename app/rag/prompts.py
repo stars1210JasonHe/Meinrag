@@ -153,6 +153,30 @@ LABEL_EXTRACT_PROMPT = ChatPromptTemplate.from_messages([
     ("human", "{content}"),
 ])
 
+# Router prefix — LLM picks the top-K most relevant documents for a query.
+# Output MUST be a JSON object with a single "doc_ids" key. The caller
+# parses and validates; malformed output → fall back to full scope.
+ROUTER_SYSTEM_PROMPT = """\
+You are a document router. Given a user's question and a menu of available \
+documents (each with an id, title, and one-line summary), pick the {top_k} \
+documents most likely to contain the answer.
+
+Rules:
+1. Return ONLY a JSON object. No prose, no markdown fences.
+2. Schema: {{"doc_ids": ["<id1>", "<id2>", ...]}}
+3. Pick at most {top_k} ids. Fewer is fine if truly nothing else is relevant.
+4. Only use ids that appear in the menu. Never invent an id.
+5. Favor coverage over certainty — if several docs plausibly apply, include them.
+
+Document menu:
+{doc_menu}
+"""
+
+ROUTER_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", ROUTER_SYSTEM_PROMPT),
+    ("human", "{question}"),
+])
+
 def make_query_analyze_prompt(system_text: str) -> ChatPromptTemplate:
     """Create query analysis prompt from dynamic system text."""
     return ChatPromptTemplate.from_messages([
