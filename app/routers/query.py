@@ -355,6 +355,7 @@ async def query_documents(
             force_web_search=False,
             summary_store=summary_store,
             chat_history=chat_history,
+            registry=registry,
         )
 
         if result.web_search_needed:
@@ -596,6 +597,7 @@ async def query_documents_stream(
             force_web_search=False,
             summary_store=summary_store,
             chat_history=chat_history,
+            registry=registry,
         )
         needs_web_search = result.web_search_needed
         query_types = result.query_types
