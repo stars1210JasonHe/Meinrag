@@ -192,3 +192,17 @@ class TestRouteDocsFailureModes:
         )
         assert result == ["d1", "d2"]
         assert llm.ainvoke.await_count == 0
+
+    async def test_top_k_caps_result(self):
+        """Router slices to top_k even when LLM returns more valid ids."""
+        from app.services.router import route_docs
+
+        llm = AsyncMock()
+        llm.ainvoke = AsyncMock(
+            return_value=AIMessage(content='{"doc_ids": ["d1", "d2"]}'),
+        )
+        result = await route_docs(
+            question="q", doc_ids=["d1", "d2"], top_k=1,
+            llm=llm, registry=await self._registry(),
+        )
+        assert result == ["d1"]
