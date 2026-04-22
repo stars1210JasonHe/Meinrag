@@ -19,7 +19,9 @@ def _format_doc_menu(docs: list[dict]) -> str:
     """Render docs as a compact menu the LLM can scan.
 
     Format: `[<doc_id>] <title> — <summary>`
-    One doc per line. Missing summary falls back to source_file only.
+    One doc per line. Title uses `filename` (real DocumentRepository key),
+    falling back to `source_file` / `title` / `doc_id`. Missing summary
+    renders as `[<doc_id>] <title>` only.
     """
     lines = []
     for d in docs:
@@ -51,11 +53,13 @@ async def route_docs(
       doc_ids: full scope — router picks a subset
       top_k: max number to return
       llm: chat model (e.g., gpt-4o-mini)
-      registry: object with `async get(doc_id) -> dict | None` exposing
-                "source_file" and "summary" fields
+      registry: object with `async get(doc_id) -> dict | None`. Expected
+                fields: "filename" (primary title source, from real
+                DocumentRepository) or "source_file", and "summary".
 
-    Returns: list of doc_ids, subset of the input, preserving no particular
-    order. Always falls back to the full input list on:
+    Returns: list of doc_ids, subset of the input, preserving the LLM's
+    output order (which may encode relevance). Always falls back to the
+    full input list on:
       - registry lookup empty
       - LLM exception
       - malformed/empty JSON
