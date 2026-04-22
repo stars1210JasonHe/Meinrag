@@ -77,3 +77,114 @@ class TestRouteDocsHappyPath:
         menu = _format_doc_menu(docs)
         assert "llama.pdf" in menu
         assert "gpt3.pdf" in menu
+
+    def test_long_summary_is_truncated(self):
+        """Summaries >180 chars truncate with an ellipsis."""
+        from app.services.router import _format_doc_menu
+
+        docs = [
+            {"doc_id": "d1", "filename": "big.pdf",
+             "summary": "x" * 300},
+        ]
+        menu = _format_doc_menu(docs)
+        assert "..." in menu
+        # Line should be: [d1] big.pdf — <truncated summary>...
+        # Truncated summary = 177 chars + "..."
+        # Total line length is bounded ~205 chars
+        assert len(menu) < 220
+
+
+@pytest.mark.asyncio
+class TestRouteDocsFailureModes:
+    async def _registry(self):
+        return _FakeRegistry({
+            "d1": {"doc_id": "d1", "source_file": "a.pdf", "summary": "A"},
+            "d2": {"doc_id": "d2", "source_file": "b.pdf", "summary": "B"},
+        })
+
+    async def test_malformed_json_falls_back(self):
+        from app.services.router import route_docs
+
+        llm = AsyncMock()
+        llm.ainvoke = AsyncMock(
+            return_value=AIMessage(content="not json at all"),
+        )
+        result = await route_docs(
+            question="q", doc_ids=["d1", "d2"], top_k=1,
+            llm=llm, registry=await self._registry(),
+        )
+        assert result == ["d1", "d2"]
+
+    async def test_empty_doc_ids_list_falls_back(self):
+        from app.services.router import route_docs
+
+        llm = AsyncMock()
+        llm.ainvoke = AsyncMock(
+            return_value=AIMessage(content='{"doc_ids": []}'),
+        )
+        result = await route_docs(
+            question="q", doc_ids=["d1", "d2"], top_k=1,
+            llm=llm, registry=await self._registry(),
+        )
+        assert result == ["d1", "d2"]
+
+    async def test_ids_not_in_scope_falls_back(self):
+        from app.services.router import route_docs
+
+        llm = AsyncMock()
+        llm.ainvoke = AsyncMock(
+            return_value=AIMessage(content='{"doc_ids": ["fake1", "fake2"]}'),
+        )
+        result = await route_docs(
+            question="q", doc_ids=["d1", "d2"], top_k=1,
+            llm=llm, registry=await self._registry(),
+        )
+        assert result == ["d1", "d2"]
+
+    async def test_mixed_valid_invalid_keeps_valid(self):
+        from app.services.router import route_docs
+
+        llm = AsyncMock()
+        llm.ainvoke = AsyncMock(
+            return_value=AIMessage(content='{"doc_ids": ["d1", "fake"]}'),
+        )
+        result = await route_docs(
+            question="q", doc_ids=["d1", "d2"], top_k=2,
+            llm=llm, registry=await self._registry(),
+        )
+        assert result == ["d1"]
+
+    async def test_llm_exception_falls_back(self):
+        from app.services.router import route_docs
+
+        llm = AsyncMock()
+        llm.ainvoke = AsyncMock(side_effect=RuntimeError("network down"))
+        result = await route_docs(
+            question="q", doc_ids=["d1", "d2"], top_k=1,
+            llm=llm, registry=await self._registry(),
+        )
+        assert result == ["d1", "d2"]
+
+    async def test_markdown_fenced_json_is_parsed(self):
+        from app.services.router import route_docs
+
+        llm = AsyncMock()
+        fenced = '```json\n{"doc_ids": ["d1"]}\n```'
+        llm.ainvoke = AsyncMock(return_value=AIMessage(content=fenced))
+        result = await route_docs(
+            question="q", doc_ids=["d1", "d2"], top_k=1,
+            llm=llm, registry=await self._registry(),
+        )
+        assert result == ["d1"]
+
+    async def test_empty_registry_falls_back(self):
+        from app.services.router import route_docs
+
+        empty_registry = _FakeRegistry({})
+        llm = AsyncMock()  # should never be called
+        result = await route_docs(
+            question="q", doc_ids=["d1", "d2"], top_k=1,
+            llm=llm, registry=empty_registry,
+        )
+        assert result == ["d1", "d2"]
+        assert llm.ainvoke.await_count == 0
