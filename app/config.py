@@ -130,6 +130,16 @@ class Settings(BaseSettings):
     hybrid_bm25_weight: float = 0.5  # used by legacy EnsembleRetriever in chain.py; retrieval.py uses RRF instead
     rrf_k: int = 60
 
+    # Router prefix — LLM-based doc pre-filter for large scopes.
+    # Runs one gpt-4o-mini call before vector search to pick the top-K docs
+    # most likely to contain the answer. Cuts downstream rerank/budget cost.
+    # Fail-safe: malformed output or LLM error falls back to the full scope.
+    # Off by default; eval-gated. See docs/plans/2026-04-22-router-prefix.md.
+    router_enabled: bool = False
+    router_min_scope: int = 15      # below this many docs, router is bypassed
+    router_top_k: int = 8           # how many docs router picks
+    router_model: str = "gpt-4o-mini"
+
     # Graph edge building — minimum cosine similarity to keep a cross-doc similar_to edge.
     # Chunk-to-chunk similarity distribution (observed on live corpus): p10=0.61, p50=0.76,
     # p90=1.0. Threshold 0.6 cuts the bottom ~10% (barely-related matches) without losing
