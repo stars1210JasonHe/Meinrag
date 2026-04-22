@@ -78,6 +78,10 @@ class TestRouteDocsHappyPath:
         assert "llama.pdf" in menu
         assert "gpt3.pdf" in menu
 
+
+class TestFormatDocMenu:
+    """Pure-function tests for _format_doc_menu."""
+
     def test_long_summary_is_truncated(self):
         """Summaries >180 chars truncate with an ellipsis."""
         from app.services.router import _format_doc_menu
