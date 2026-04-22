@@ -253,7 +253,7 @@ def _build_test_app():
         "vector_store": MagicMock(),
         "registry": MagicMock(),
         "edge_repo": MagicMock(),
-        "current_user": {"user_id": "admin"},
+        "current_user": "admin",
     }
     stubs["registry"].get = AsyncMock()
     stubs["edge_repo"].get_edges_in_doc = AsyncMock()
@@ -326,7 +326,7 @@ class TestMindmapRoute:
         }
         # Re-override current_user to bob
         from app.dependencies import get_current_user
-        app.dependency_overrides[get_current_user] = lambda: {"user_id": "bob"}
+        app.dependency_overrides[get_current_user] = lambda: "bob"
 
         with TestClient(app) as client:
             resp = client.get(

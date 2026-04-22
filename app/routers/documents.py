@@ -592,7 +592,7 @@ async def get_document_mindmap(
     registry: DocumentRepository = Depends(get_registry),
     vector_store: VectorStoreManager = Depends(get_vector_store),
     edge_repo=Depends(get_edge_repository),
-    current_user: dict = Depends(get_current_user),
+    current_user: str = Depends(get_current_user),
 ) -> MindmapResponse:
     """Return the mindmap graph data (nodes + edges + stats) for one doc."""
     doc = await registry.get(doc_id)
@@ -601,7 +601,7 @@ async def get_document_mindmap(
 
     if (
         settings.user_isolation != "none"
-        and doc.get("user_id") != current_user["user_id"]
+        and doc.get("user_id") != current_user
     ):
         raise HTTPException(
             status_code=403, detail="Not authorized for this document",
