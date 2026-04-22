@@ -891,6 +891,64 @@ git commit -m "docs(router): eval results — <ship|hold> decision"
 
 ---
 
+## Eval results (2026-04-22)
+
+**Settings:** `ROUTER_ENABLED=true ROUTER_MIN_SCOPE=15 ROUTER_TOP_K=8`
+
+**Baseline:** `data/test_queries/query_results_baseline_2026-04-21.json` (preserved)
+**Router ON:** `data/test_queries/query_results.json` (same corpus, 41 queries × 2 top_k = 82 runs)
+
+**Commits:** Tasks 1-6 shipped across 10 commits (`540a43e`..`616fdde`).
+
+### Comparison — aggregate metrics
+
+| Metric | Baseline | Router ON | Ship gate | Δ |
+|---|---|---|---|---|
+| Latency p50 | 19763 ms | **7632 ms** | — | **−61%** ✅ |
+| Latency p95 | 30005 ms | **11482 ms** | < 25000 ms | **−62%** ✅ |
+| Avg context tokens | 8120 | 1425 | — | −82% |
+| fact @k=4 correct | 91% | **82%** | ≥ 88% | **−9pt ❌** |
+| fact @k=10 correct | 91% | 100% | ≥ 88% | +9pt ✅ |
+| overview @k=4 correct | 75% | 92% | ≥ 72% | +17pt ✅ |
+| overview @k=10 correct | 75% | 92% | ≥ 72% | +17pt ✅ |
+| synthesis @k=4 correct | 92% | 92% | ≥ 88% | 0 ✅ |
+| synthesis @k=10 correct | 92% | 100% | ≥ 88% | +8pt ✅ |
+| impossible correct | 100% | 100% | = 100% | 0 ✅ |
+| multi-doc coverage | 100% | 100% | ≥ 95% | 0 ✅ |
+| fact precision | 0.11 | 0.91 | — | +0.80 |
+| fact recall | 1.00 | 0.91 | — | −0.09 |
+| Confidence calibration (all types) | 67-92% | **0-33%** | — | **dropped sharply** |
+
+### Ship decision: HOLD
+
+- fact @k=4 dropped below the 88% gate by 6pt. Per plan rule: "any correctness metric drops more than its tolerance → do not flip the default."
+- Flag stays `router_enabled=false`.
+- Feature remains available via env override for experimentation.
+
+### Regressions (worth investigating before default-on)
+
+1. **`fact_05` @k=4 & @k=10 — full retrieval fail** (recall 0.00, precision 0.00). Router pruned the doc that contained the answer. LLM judge still rated the response "correct" because of general knowledge fallback, but keyword match failed. Needs investigation: was `fact_05`'s scope broad (auto-filled 44 docs, router picked wrong 8)? If so, router menu quality is the lever.
+2. **`fact_01` @k=4 — generation fail** (missing `['skip', 'shortcut']`). At k=10 it passes. Narrow top-4 window + router narrowing = brittle.
+3. **Confidence calibration tanked** (fact 91% → 27%, overview 92% → 17%, impossible 50% → 0%). Router changes the chunk distribution, which changes raw similarity scores, which invalidates the `confidence_high=0.65` threshold set on 2026-04-21. If router ever ships default-on, the confidence thresholds need retuning against the new distribution.
+
+### Improvements (real, not artifacts)
+
+- **Latency 3× faster across the board.** p95 from 30s → 11.5s unblocks the "query feels sluggish" complaint.
+- **Context tokens 82% smaller.** Fewer chunks to pass to the LLM → cheaper final-generation calls.
+- **Precision rose dramatically** (fact 0.11 → 0.91; similar for overview/synthesis). Router removes noise; retrieval gets cleaner chunks even when correctness is similar.
+- **Overview +17pt correctness.** This is the biggest surprise — narrower scope helps overview queries, not just fact. Hypothesis: fewer off-topic chunks compete for the top-K slots.
+- **Synthesis +8pt at k=10.** Router pruning preserves cross-doc coverage while removing noise.
+
+### Follow-ups (before default-on)
+
+- **`fact_05` debug:** check which doc was dropped and why. If its summary in the router menu was uninformative, extending summaries may fix it.
+- **Default retrieval_top_k=10 experiment:** if router-on + k=10 is strictly better than baseline + k=4 on every metric, that pairing may be the right ship config.
+- **Router menu enrichment:** include chunk-count or doc-date in the menu so router has more signal when titles are uninformative.
+- **Confidence recalibration:** if default-on, re-run `scripts/measure_score_b.py` equivalent against router-narrowed distribution to retune thresholds.
+- **Route-level FastAPI test** flagged by code quality reviewer in Task 6 — would have caught a wire-through regression; worth adding if router becomes load-bearing.
+
+---
+
 ## Self-Review
 
 - **Spec coverage:**
