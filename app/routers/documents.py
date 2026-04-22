@@ -32,9 +32,10 @@ from app.models.schemas import (
     ChunkDetail,
     ChunkListResponse,
     DocGraphResponse,
+    MindmapTreeResponse,
 )
 from app.services.document_processor import DocumentProcessor, SUPPORTED_EXTENSIONS
-from app.services.mindmap import build_doc_graph
+from app.services.mindmap import build_doc_graph, build_mindmap_tree
 from app.vectorstore.base import VectorStoreManager
 
 logger = logging.getLogger(__name__)
@@ -614,6 +615,38 @@ async def get_document_graph(
         )
 
     return await build_doc_graph(doc_id, doc, vector_store, edge_repo)
+
+
+@router.get(
+    "/{doc_id}/mindmap",
+    response_model=MindmapTreeResponse,
+)
+async def get_document_mindmap_tree(
+    doc_id: str,
+    settings: Settings = Depends(get_settings),
+    registry: DocumentRepository = Depends(get_registry),
+    vector_store: VectorStoreManager = Depends(get_vector_store),
+    llm: BaseChatModel = Depends(get_llm),
+    current_user: str = Depends(get_current_user),
+) -> MindmapTreeResponse:
+    """Return the hierarchical mind map (tree) for one doc.
+
+    LLM-derived concept hierarchy, cached per-doc to disk. For the
+    force-graph view of the same doc, see /documents/{id}/graph.
+    """
+    doc = await registry.get(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    if (
+        settings.user_isolation != "none"
+        and doc.get("user_id") != current_user
+    ):
+        raise HTTPException(
+            status_code=403, detail="Not authorized for this document",
+        )
+
+    return await build_mindmap_tree(doc_id, doc, vector_store, llm)
 
 
 @router.patch("/{doc_id}", response_model=DocumentUpdateResponse)

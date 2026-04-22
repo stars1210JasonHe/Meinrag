@@ -241,7 +241,7 @@ def _build_test_app():
     from app.routers.documents import router
     from app.dependencies import (
         get_settings, get_vector_store, get_registry,
-        get_edge_repository, get_current_user,
+        get_edge_repository, get_current_user, get_llm,
     )
 
     app = FastAPI()
@@ -253,6 +253,7 @@ def _build_test_app():
         "vector_store": MagicMock(),
         "registry": MagicMock(),
         "edge_repo": MagicMock(),
+        "llm": MagicMock(),
         "current_user": "admin",
     }
     stubs["registry"].get = AsyncMock()
@@ -262,6 +263,7 @@ def _build_test_app():
     app.dependency_overrides[get_vector_store] = lambda: stubs["vector_store"]
     app.dependency_overrides[get_registry] = lambda: stubs["registry"]
     app.dependency_overrides[get_edge_repository] = lambda: stubs["edge_repo"]
+    app.dependency_overrides[get_llm] = lambda: stubs["llm"]
     app.dependency_overrides[get_current_user] = lambda: stubs["current_user"]
 
     return app, stubs
@@ -598,3 +600,79 @@ class TestBuildMindmapTree:
 
         concept = resp.tree.branches[0].children[0]
         assert concept.chunk_indices == [1, 2]
+
+
+class TestMindmapTreeRoute:
+    def test_happy_path(self, tmp_path, monkeypatch):
+        from langchain_core.messages import AIMessage
+
+        monkeypatch.setattr(
+            "app.services.mindmap.MINDMAPS_CACHE_DIR", tmp_path,
+        )
+
+        app, stubs = _build_test_app()
+        stubs["registry"].get.return_value = {
+            "doc_id": "d1", "filename": "paper.pdf",
+            "summary": "A paper about X", "user_id": "admin",
+        }
+        stubs["vector_store"].get_chunks_by_doc = MagicMock(return_value=[
+            Document(page_content="x", metadata={
+                "doc_id": "d1", "chunk_index": 0, "summary": "intro",
+            }),
+        ])
+
+        from app.dependencies import get_llm
+        llm = AsyncMock()
+        llm.ainvoke = AsyncMock(return_value=AIMessage(content=json_lib.dumps({
+            "central": "Test paper",
+            "branches": [{"name": "Topic", "children": [
+                {"name": "Sub", "chunk_indices": [0]},
+            ]}],
+        })))
+        app.dependency_overrides[get_llm] = lambda: llm
+
+        with TestClient(app) as client:
+            resp = client.get(
+                "/documents/d1/mindmap",
+                headers={"X-User-Id": "admin"},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["doc_id"] == "d1"
+        assert data["cached"] is False
+        assert data["tree"]["central"] == "Test paper"
+        assert len(data["tree"]["branches"]) == 1
+
+    def test_404_for_missing_doc(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "app.services.mindmap.MINDMAPS_CACHE_DIR", tmp_path,
+        )
+        app, stubs = _build_test_app()
+        stubs["registry"].get.return_value = None
+
+        with TestClient(app) as client:
+            resp = client.get(
+                "/documents/nonexistent/mindmap",
+                headers={"X-User-Id": "admin"},
+            )
+        assert resp.status_code == 404
+
+    def test_403_for_wrong_user(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "app.services.mindmap.MINDMAPS_CACHE_DIR", tmp_path,
+        )
+        app, stubs = _build_test_app()
+        stubs["registry"].get.return_value = {
+            "doc_id": "d1", "filename": "paper.pdf",
+            "summary": "...", "user_id": "alice",
+        }
+        from app.dependencies import get_current_user
+        app.dependency_overrides[get_current_user] = lambda: "bob"
+
+        with TestClient(app) as client:
+            resp = client.get(
+                "/documents/d1/mindmap",
+                headers={"X-User-Id": "bob"},
+            )
+        assert resp.status_code == 403
