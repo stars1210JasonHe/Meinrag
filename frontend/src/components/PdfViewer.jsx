@@ -59,10 +59,13 @@ export default function PdfViewer({
     return () => observer.disconnect()
   }, [])
 
-  // Reset page when docId changes
+  // Reset page when docId OR source page changes.
+  // The `page` prop reflects the currently-selected source's target page;
+  // when the user clicks a different citation (even in the same doc),
+  // we need to jump to the new source's page.
   useEffect(() => {
     setCurrentPage((page || 0) + 1)
-  }, [docId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [docId, page])
 
   // Extract text from all pages on PDF load for search
   const cancelledRef = useRef(false)
