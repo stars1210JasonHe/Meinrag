@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { ChevronLeft, ChevronRight, Search, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Search, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { Document, Page, pdfjs } from 'react-pdf'
 import 'react-pdf/dist/Page/TextLayer.css'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
@@ -30,7 +30,7 @@ const SEARCH_MATCH_BG = 'rgba(34, 197, 94, 0.35)'
  * Text selection, page navigation, bbox + text highlighting.
  */
 export default function PdfViewer({
-  docId, page, highlights, zoom, onClick, onError
+  docId, page, highlights, onClick, onError
 }) {
   const [numPages, setNumPages] = useState(null)
   const [currentPage, setCurrentPage] = useState((page || 0) + 1) // react-pdf is 1-indexed
@@ -41,6 +41,7 @@ export default function PdfViewer({
   const [searchMatches, setSearchMatches] = useState([]) // [{pageNum, charIndex}] all matches
   const [activeMatchIdx, setActiveMatchIdx] = useState(0)
   const [containerWidth, setContainerWidth] = useState(DEFAULT_WIDTH)
+  const [zoom, setZoom] = useState(1.0)
   const pageInputTimer = useRef(null)
   const containerRef = useRef(null)
 
@@ -66,6 +67,13 @@ export default function PdfViewer({
   useEffect(() => {
     setCurrentPage((page || 0) + 1)
   }, [docId, page])
+
+  // Defensive: clear stale pageSize when page changes, so bbox overlay
+  // doesn't render with the previous page's dimensions before the new
+  // page's onLoadSuccess fires.
+  useEffect(() => {
+    setPageSize(null)
+  }, [currentPage])
 
   // Extract text from all pages on PDF load for search
   const cancelledRef = useRef(false)
@@ -309,6 +317,23 @@ export default function PdfViewer({
           </span>
           <button onClick={goToNext} disabled={currentPage >= numPages} title="Next page (PageDown)">
             <ChevronRight size={16} />
+          </button>
+          <button
+            onClick={() => setZoom(z => Math.max(0.4, +(z - 0.1).toFixed(2)))}
+            disabled={zoom <= 0.4}
+            title="Zoom out (−)"
+          >
+            <ZoomOut size={14} />
+          </button>
+          <span style={{ minWidth: 40, textAlign: 'center', fontSize: 11, opacity: 0.7 }}>
+            {Math.round(zoom * 100)}%
+          </span>
+          <button
+            onClick={() => setZoom(z => Math.min(3, +(z + 0.1).toFixed(2)))}
+            disabled={zoom >= 3}
+            title="Zoom in (+)"
+          >
+            <ZoomIn size={14} />
           </button>
           <button onClick={() => setSearchOpen(o => !o)} title="Search (Ctrl+F)" className="pdf-viewer-search-btn">
             <Search size={14} />
