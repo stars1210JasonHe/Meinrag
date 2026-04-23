@@ -152,12 +152,8 @@ export default function ChatPage() {
   )
 
   const { data: sessions = [] } = useQuery({
-    queryKey: ['sessions', USER_ID, scopeDocId, scopeCollection],
-    queryFn: () => {
-      if (scopeDocId) return fetchSessions(USER_ID, 'doc', scopeDocId)
-      if (scopeCollection) return fetchSessions(USER_ID, 'collection', scopeCollection)
-      return fetchSessions(USER_ID)
-    },
+    queryKey: ['sessions', USER_ID],
+    queryFn: () => fetchSessions(USER_ID),
     enabled: showHistory,
   })
 
