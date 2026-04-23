@@ -106,7 +106,6 @@ export default function ChatPage() {
   const [fastPath, setFastPath] = useState(false)
   const [contextInfo, setContextInfo] = useState(null)
   const [selectedSource, setSelectedSource] = useState(null)
-  const [showSources, setShowSources] = useState(false)
   const abortControllerRef = useRef(null)
 
   const {
@@ -176,7 +175,6 @@ export default function ChatPage() {
     setFastPath(false)
     setContextInfo(null)
     setSelectedSource(null)
-    setShowSources(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopeDocId, scopeCollection, scopeDocIdsParam])
 
@@ -194,7 +192,6 @@ export default function ChatPage() {
     setFastPath(false)
     setContextInfo(null)
     setSelectedSource(null)
-    setShowSources(false)
   }
 
   const loadSession = async (sid) => {
@@ -228,14 +225,12 @@ export default function ChatPage() {
       setMessages(restored)
       if (lastSources) {
         setSources(lastSources)
-        setShowSources(true)
         const firstDocId = openTabsForSources(lastSources)
         if (firstDocId && !activeDocId) {
           activateTab(firstDocId)
         }
       } else {
         setSources([])
-        setShowSources(false)
       }
       setQueryTypes([])
       setConfidenceTier(null)
@@ -267,7 +262,6 @@ export default function ChatPage() {
     setFastPath(false)
     setContextInfo(null)
     setSelectedSource(null)
-    setShowSources(false)
 
     // Add user message, then placeholder AI message
     setMessages(prev => [
@@ -342,7 +336,6 @@ export default function ChatPage() {
 
           if (data.sources) {
             setSources(data.sources)
-            setShowSources(true)
             // Open tabs for any new docs cited; activate first one if no tab was active
             const firstDocId = openTabsForSources(data.sources)
             if (firstDocId && !activeDocId) {
@@ -428,7 +421,6 @@ export default function ChatPage() {
     setFastPath(false)
     setContextInfo(null)
     setSelectedSource(null)
-    setShowSources(false)
 
     // Mark original refusal message as acted-upon (hides buttons)
     setMessages(prev => prev.map((m, i) =>
@@ -564,8 +556,6 @@ export default function ChatPage() {
       if (e.key === 'Escape') {
         if (selectedSource != null) {
           setSelectedSource(null)
-        } else {
-          setShowSources(false)
         }
       }
     }

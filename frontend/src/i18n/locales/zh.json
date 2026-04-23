@@ -60,7 +60,8 @@
     "inlineError": "错误：{{message}}",
     "requestFailed": "请求失败：{{message}}",
     "responseFailed": "获取响应失败：{{message}}",
-    "nDocs": "{{count}} selected documents"
+    "nDocs": "{{count}} selected documents",
+    "emptyMain": "提问后,相关的文档会出现在这里。"
   },
   "inputBar": {
     "askCollection": "在 {{collection}} 文档中提问...",
@@ -83,6 +84,10 @@
     "searchPlaceholder": "在 PDF 中搜索...",
     "pageChunks": "页面块（{{count}}）",
     "noChunks": "此页面没有块"
+  },
+  "textDocViewer": {
+    "empty": "该文档暂无片段。",
+    "error": "文档加载失败"
   },
   "graph": {
     "allDocuments": "所有文档",

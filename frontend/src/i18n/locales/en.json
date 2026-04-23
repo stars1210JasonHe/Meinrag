@@ -60,7 +60,8 @@
     "inlineError": "Error: {{message}}",
     "requestFailed": "Request failed: {{message}}",
     "responseFailed": "Failed to get response: {{message}}",
-    "nDocs": "{{count}} selected documents"
+    "nDocs": "{{count}} selected documents",
+    "emptyMain": "Your source documents will appear here when you ask a question."
   },
   "inputBar": {
     "askCollection": "Ask about {{collection}} documents...",
@@ -83,6 +84,10 @@
     "searchPlaceholder": "Search in PDF...",
     "pageChunks": "Page Chunks ({{count}})",
     "noChunks": "No chunks on this page"
+  },
+  "textDocViewer": {
+    "empty": "This document has no chunks.",
+    "error": "Failed to load document"
   },
   "graph": {
     "allDocuments": "All Documents",
