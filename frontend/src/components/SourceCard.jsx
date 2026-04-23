@@ -51,6 +51,14 @@ export default function SourceCard({ source, index, isActive, onClick }) {
         </span>
         <Icon size={11} className="opacity-50 shrink-0" />
         <span className="text-xs truncate flex-1 opacity-80">{filename}</span>
+        {typeof source.score === 'number' && (
+          <span
+            className="text-[10px] opacity-50 shrink-0 tabular-nums"
+            title={`Score: ${source.score.toFixed(1)}`}
+          >
+            {Math.round(source.score)}
+          </span>
+        )}
         {pageLabel && (
           <span className="text-[10px] opacity-40 shrink-0">{pageLabel}</span>
         )}
