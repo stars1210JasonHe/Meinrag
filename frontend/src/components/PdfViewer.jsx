@@ -245,8 +245,27 @@ export default function PdfViewer({
     pageInputTimer.current = setTimeout(() => goToPage(v), 300)
   }, [goToPage])
 
+  // Arrow keys scroll the wrapper when focused (browser default for focusable
+  // scroll containers). Home/End jump to top/bottom of the current page.
+  const handleWrapperKey = useCallback((e) => {
+    const el = containerRef.current
+    if (!el) return
+    if (document.activeElement?.tagName === 'INPUT') return
+    const step = 80
+    if (e.key === 'ArrowDown') { el.scrollTop += step; e.preventDefault() }
+    else if (e.key === 'ArrowUp') { el.scrollTop -= step; e.preventDefault() }
+    else if (e.key === 'Home') { el.scrollTop = 0; e.preventDefault() }
+    else if (e.key === 'End') { el.scrollTop = el.scrollHeight; e.preventDefault() }
+  }, [])
+
   return (
-    <div className="pdf-viewer-wrapper" onClick={onClick} ref={containerRef}>
+    <div
+      className="pdf-viewer-wrapper"
+      onClick={onClick}
+      ref={containerRef}
+      tabIndex={0}
+      onKeyDown={handleWrapperKey}
+    >
       <div className="pdf-viewer-canvas-container">
         <Document
           file={pdfUrl}
