@@ -9,13 +9,16 @@ import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { fetchSessions, fetchSessionMessages } from '@/lib/api'
 import CitationBadge from '@/components/CitationBadge'
-import SourceItem from '@/components/SourceItem'
-import SourceViewer from '@/components/SourceViewer'
 import QueryTypeBadges from '@/components/QueryTypeBadges'
 import ConfidenceBadge from '@/components/ConfidenceBadge'
 import ContextTag from '@/components/ContextTag'
 import SupplementActions from '@/components/SupplementActions'
 import FastPathBadge from '@/components/FastPathBadge'
+import { useDocTabs } from '@/hooks/useDocTabs'
+import SourceTabs from '@/components/SourceTabs'
+import TextDocViewer from '@/components/TextDocViewer'
+import SourceCard from '@/components/SourceCard'
+import PdfViewer from '@/components/PdfViewer'
 
 // Substring that identifies a corpus-refusal answer. Anchored to the exact
 // phrase the RAG_SYSTEM_PROMPT instructs the LLM to emit.
@@ -106,15 +109,16 @@ export default function ChatPage() {
   const [showSources, setShowSources] = useState(false)
   const abortControllerRef = useRef(null)
 
-  const citationComponents = useMemo(
-    () => makeMarkdownComponents((sourceIndex) => {
-      if (sourceIndex >= 0 && sourceIndex < sources.length) {
-        setSelectedSource(sourceIndex)
-        setShowSources(true)
-      }
-    }),
-    [sources.length]
-  )
+  const {
+    tabs,
+    activeDocId,
+    activeTab,
+    openTab,
+    closeTab,
+    activateTab,
+    resetTabs,
+    openTabsForSources,
+  } = useDocTabs()
 
   // Sources are sent in "lost in the middle" U-shape order for the LLM
   // (best first, 2nd-best last). Display them sorted by score instead, while
@@ -125,6 +129,27 @@ export default function ChatPage() {
       .map((s, i) => ({ source: s, originalIndex: i }))
       .sort((a, b) => (b.source.score ?? 0) - (a.source.score ?? 0)),
     [sources]
+  )
+
+  // Citation [N] click: ensure tab is open, activate it, and select the source
+  // (drives PdfViewer page+bbox highlight or TextDocViewer chunk scroll).
+  // CitationBadge converts 1-based [N] to 0-based ORIGINAL array index before
+  // invoking this callback.
+  const onCitationClick = useCallback((originalIndex) => {
+    if (originalIndex < 0 || originalIndex >= sources.length) return
+    const source = sources[originalIndex]
+    openTab({
+      doc_id: source.doc_id,
+      filename: source.source_file,
+      file_type: null, // useDocTabs infers from filename extension
+    })
+    activateTab(source.doc_id)
+    setSelectedSource(originalIndex)
+  }, [sources, openTab, activateTab])
+
+  const citationComponents = useMemo(
+    () => makeMarkdownComponents(onCitationClick),
+    [onCitationClick],
   )
 
   const { data: sessions = [] } = useQuery({
@@ -142,6 +167,7 @@ export default function ChatPage() {
 
   // Reset session when document/collection scope changes
   useEffect(() => {
+    resetTabs()
     setSessionId(null)
     setMessages([])
     setSources([])
@@ -151,6 +177,7 @@ export default function ChatPage() {
     setContextInfo(null)
     setSelectedSource(null)
     setShowSources(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopeDocId, scopeCollection, scopeDocIdsParam])
 
   const clearScope = () => {
@@ -158,6 +185,7 @@ export default function ChatPage() {
   }
 
   const startNewChat = () => {
+    resetTabs()
     setSessionId(null)
     setMessages([])
     setSources([])
@@ -170,6 +198,7 @@ export default function ChatPage() {
   }
 
   const loadSession = async (sid) => {
+    resetTabs()
     setSessionId(sid)
     try {
       const msgs = await fetchSessionMessages(sid, USER_ID)
@@ -200,6 +229,10 @@ export default function ChatPage() {
       if (lastSources) {
         setSources(lastSources)
         setShowSources(true)
+        const firstDocId = openTabsForSources(lastSources)
+        if (firstDocId && !activeDocId) {
+          activateTab(firstDocId)
+        }
       } else {
         setSources([])
         setShowSources(false)
@@ -310,6 +343,11 @@ export default function ChatPage() {
           if (data.sources) {
             setSources(data.sources)
             setShowSources(true)
+            // Open tabs for any new docs cited; activate first one if no tab was active
+            const firstDocId = openTabsForSources(data.sources)
+            if (firstDocId && !activeDocId) {
+              activateTab(firstDocId)
+            }
           } else if (data.token) {
             fullAnswer += data.token
             updateAi(msg => ({ ...msg, content: fullAnswer, loading: false }))
@@ -578,17 +616,79 @@ export default function ChatPage() {
         </div>
       )}
 
-      {/* ── Chat area ───────────────────────────────────────── */}
+      {/* ── Main area: tabs + viewer ─────────────────────────── */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Message list */}
-        <div className="flex-1 overflow-y-auto px-4 py-6">
+        {tabs.length === 0 ? (
+          <div
+            className="flex-1 flex items-center justify-center text-sm opacity-40 px-8 text-center"
+            style={{ color: 'var(--fg, #f4f2ee)' }}
+          >
+            {t('chat.emptyMain', { defaultValue: 'Your source documents will appear here when you ask a question.' })}
+          </div>
+        ) : (
+          <>
+            <SourceTabs
+              tabs={tabs}
+              activeDocId={activeDocId}
+              onActivate={activateTab}
+              onClose={closeTab}
+            />
+            <div className="flex-1 overflow-hidden">
+              {activeTab && (
+                activeTab.file_type === 'pdf' ? (
+                  <PdfViewer
+                    key={activeTab.doc_id}
+                    docId={activeTab.doc_id}
+                    page={
+                      selectedSource != null && sources[selectedSource]?.doc_id === activeTab.doc_id
+                        ? sources[selectedSource].page
+                        : null
+                    }
+                    highlights={
+                      selectedSource != null && sources[selectedSource]?.doc_id === activeTab.doc_id
+                        ? [{
+                            bbox: sources[selectedSource].bbox,
+                            isActive: true,
+                            colorIndex: selectedSource,
+                          }]
+                        : []
+                    }
+                  />
+                ) : (
+                  <TextDocViewer
+                    key={activeTab.doc_id}
+                    docId={activeTab.doc_id}
+                    activeChunkIndex={
+                      selectedSource != null && sources[selectedSource]?.doc_id === activeTab.doc_id
+                        ? sources[selectedSource].chunk_index
+                        : null
+                    }
+                    activeSourceColorIndex={selectedSource ?? 0}
+                  />
+                )
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* ── Chat sidebar (right) ─────────────────────────────── */}
+      <div
+        className="w-[360px] border-l flex flex-col shrink-0"
+        style={{
+          borderColor: 'var(--border-strong, rgba(255,255,255,0.14))',
+          backgroundColor: 'var(--bg-1, #0c0c0f)',
+        }}
+      >
+        {/* Chat messages */}
+        <div className="flex-1 overflow-y-auto px-3 py-3">
           {messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full opacity-40">
-              <FileText size={48} className="mb-4" />
-              <p className="text-lg">{t('chat.askEmpty')}</p>
+              <FileText size={40} className="mb-3" />
+              <p className="text-sm text-center px-4">{t('chat.askEmpty')}</p>
             </div>
           ) : (
-            <div className="max-w-3xl mx-auto space-y-4">
+            <div className="space-y-3">
               {messages.map((msg, i) => {
                 const isLastAi = msg.role === 'ai' && i === messages.length - 1
                 return (
@@ -598,7 +698,7 @@ export default function ChatPage() {
                   >
                     <div
                       className={cn(
-                        'max-w-[85%] rounded-lg px-4 py-3 text-sm',
+                        'max-w-[92%] rounded-lg px-3 py-2 text-sm',
                         msg.role === 'user' ? 'rounded-br-sm' : 'rounded-bl-sm'
                       )}
                       style={{
@@ -651,10 +751,7 @@ export default function ChatPage() {
                             <div className="flex items-center gap-1 mt-2 pt-2 border-t border-white/10 flex-wrap">
                               <span className="text-[11px] opacity-40 mr-1">{t('chat.sourcesLabel')}</span>
                               {sources.map((_, idx) => (
-                                <CitationBadge key={idx} num={idx + 1} onClick={(i) => {
-                                  setSelectedSource(i)
-                                  setShowSources(true)
-                                }} />
+                                <CitationBadge key={idx} num={idx + 1} onClick={onCitationClick} />
                               ))}
                             </div>
                           )}
@@ -685,26 +782,61 @@ export default function ChatPage() {
           )}
         </div>
 
+        {/* Sources compact list — between messages and input */}
+        {sources.length > 0 && (
+          <div
+            className="border-t shrink-0 max-h-[40%] overflow-y-auto"
+            style={{ borderColor: 'var(--border-strong, rgba(255,255,255,0.14))' }}
+          >
+            <div
+              className="px-3 py-2 text-[10px] uppercase tracking-wider opacity-40 sticky top-0"
+              style={{ backgroundColor: 'var(--bg-1, #0c0c0f)' }}
+            >
+              {t('chat.sourcesWithCount', { count: sources.length })}
+            </div>
+            {displaySources.map(({ source: s, originalIndex }) => (
+              <SourceCard
+                key={originalIndex}
+                source={s}
+                index={originalIndex}
+                isActive={originalIndex === selectedSource}
+                onClick={() => {
+                  setSelectedSource(originalIndex)
+                  openTab({
+                    doc_id: s.doc_id,
+                    filename: s.source_file,
+                    file_type: null,
+                  })
+                  activateTab(s.doc_id)
+                }}
+              />
+            ))}
+          </div>
+        )}
+
         {/* Scope indicator + Input bar */}
-        <div className="px-4 py-3 border-t shrink-0" style={{ borderColor: 'var(--border-strong, rgba(255,255,255,0.14))' }}>
+        <div
+          className="px-3 py-3 border-t shrink-0"
+          style={{ borderColor: 'var(--border-strong, rgba(255,255,255,0.14))' }}
+        >
           {(scopeDocId || scopeCollection || scopeDocIds) && (
-            <div className="max-w-3xl mx-auto mb-2 flex items-center gap-2 text-xs"
+            <div className="mb-2 flex items-center gap-2 text-xs"
                  style={{ color: 'var(--fg-dim, #9a9690)' }}>
               <FileText size={12} />
-              <span>{t('chat.searchingIn')} <strong style={{ color: 'var(--fg, #f4f2ee)' }}>
+              <span className="truncate">{t('chat.searchingIn')} <strong style={{ color: 'var(--fg, #f4f2ee)' }}>
                 {scopeDocIds
                   ? t('chat.nDocs', { count: scopeDocIds.length, defaultValue: `${scopeDocIds.length} selected documents` })
                   : scopeDocId ? scopeDocName
                   : scopeCollection}
               </strong></span>
-              <button onClick={clearScope} className="opacity-40 hover:opacity-100"><X size={12} /></button>
+              <button onClick={clearScope} className="opacity-40 hover:opacity-100 shrink-0"><X size={12} /></button>
             </div>
           )}
-          <div className="max-w-3xl mx-auto flex items-center gap-2">
+          <div className="flex items-center gap-2">
             <button
               onClick={() => setShowHistory(h => !h)}
               className={cn(
-                'p-2.5 rounded-lg transition-opacity',
+                'p-2 rounded-lg transition-opacity shrink-0',
                 showHistory ? 'opacity-100' : 'opacity-40 hover:opacity-100'
               )}
               title={t('chat.chatHistory')}
@@ -712,19 +844,6 @@ export default function ChatPage() {
             >
               <History size={16} />
             </button>
-            {sources.length > 0 && (
-              <button
-                onClick={() => setShowSources(s => !s)}
-                className={cn(
-                  'p-2.5 rounded-lg transition-opacity',
-                  showSources ? 'opacity-100' : 'opacity-40 hover:opacity-100'
-                )}
-                title={showSources ? t('chat.hideSources') : t('chat.showSources')}
-                style={{ color: 'var(--fg, #f4f2ee)' }}
-              >
-                <FileText size={16} />
-              </button>
-            )}
             <input
               ref={inputRef}
               type="text"
@@ -733,7 +852,7 @@ export default function ChatPage() {
               onKeyDown={handleKeyDown}
               placeholder={t('chat.askPlaceholder')}
               disabled={loading}
-              className="flex-1 px-4 py-2.5 rounded-lg text-sm outline-none disabled:opacity-50"
+              className="flex-1 min-w-0 px-3 py-2 rounded-lg text-sm outline-none disabled:opacity-50"
               style={{
                 backgroundColor: 'var(--border-strong, rgba(255,255,255,0.14))',
                 color: 'var(--fg, #f4f2ee)',
@@ -743,7 +862,7 @@ export default function ChatPage() {
             {loading ? (
               <button
                 onClick={handleStop}
-                className="p-2.5 rounded-lg transition-opacity hover:opacity-90"
+                className="p-2 rounded-lg transition-opacity hover:opacity-90 shrink-0"
                 style={{
                   backgroundColor: 'var(--bad)',
                   color: 'var(--fg, #f4f2ee)',
@@ -756,7 +875,7 @@ export default function ChatPage() {
               <button
                 onClick={handleSend}
                 disabled={!input.trim()}
-                className="p-2.5 rounded-lg transition-opacity disabled:opacity-40"
+                className="p-2 rounded-lg transition-opacity disabled:opacity-40 shrink-0"
                 style={{
                   backgroundColor: 'var(--signature, #5b7ec9)',
                   color: 'var(--fg, #f4f2ee)',
@@ -769,43 +888,6 @@ export default function ChatPage() {
         </div>
       </div>
 
-      {/* ── Source panel ─────────────────────────────────────── */}
-      {showSources && sources.length > 0 && (
-        <div
-          className={cn(selectedSource != null ? 'w-[60%]' : 'w-80', 'border-l flex flex-col shrink-0')}
-          style={{ borderColor: 'var(--border-strong, rgba(255,255,255,0.14))', backgroundColor: 'var(--bg-1, #0c0c0f)', transition: 'width 0.2s ease' }}
-        >
-          {selectedSource != null ? (
-            <SourceViewer
-              source={sources[selectedSource]}
-              sourceIndex={selectedSource}
-              sources={sources}
-              onBack={() => setSelectedSource(null)}
-              onSelectSource={setSelectedSource}
-            />
-          ) : (
-            <>
-              <div
-                className="px-3 py-2.5 border-b text-xs font-medium uppercase tracking-wider opacity-40 shrink-0"
-                style={{ borderColor: 'var(--border-strong, rgba(255,255,255,0.14))' }}
-              >
-                {t('chat.sourcesWithCount', { count: sources.length })}
-              </div>
-              <div className="flex-1 overflow-y-auto py-1">
-                {displaySources.map(({ source: s, originalIndex }) => (
-                  <SourceItem
-                    key={originalIndex}
-                    source={s}
-                    index={originalIndex}
-                    isActive={originalIndex === selectedSource}
-                    onClick={setSelectedSource}
-                  />
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-      )}
     </div>
   )
 }
