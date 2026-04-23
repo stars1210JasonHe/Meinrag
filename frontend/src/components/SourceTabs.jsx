@@ -1,6 +1,9 @@
 import { useRef, useEffect } from 'react'
-import { X, FileText, FileType2 } from 'lucide-react'
+import { X, FileText, FileType2, Download } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { downloadDocument } from '@/lib/api'
+
+const USER_ID = 'admin'
 
 /**
  * Tab bar for the Chat page main area.
@@ -56,6 +59,19 @@ export default function SourceTabs({ tabs, activeDocId, onActivate, onClose }) {
           >
             <Icon size={12} className="shrink-0 opacity-70" />
             <span className="truncate">{tab.filename}</span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                downloadDocument(tab.doc_id, tab.filename, USER_ID)
+                  .catch(err => console.error('Download failed:', err))
+              }}
+              className="shrink-0 p-0.5 rounded hover:bg-white/10 opacity-50 hover:opacity-100"
+              aria-label="Download original file"
+              title="Download original file"
+            >
+              <Download size={11} />
+            </button>
             <button
               type="button"
               onClick={(e) => {
