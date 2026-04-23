@@ -53,10 +53,15 @@ export default function SourceCard({ source, index, isActive, onClick }) {
         <span className="text-xs truncate flex-1 opacity-80">{filename}</span>
         {typeof source.score === 'number' && (
           <span
-            className="text-[10px] opacity-50 shrink-0 tabular-nums"
-            title={`Score: ${source.score.toFixed(1)}`}
+            className="text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 tabular-nums"
+            style={{
+              backgroundColor: 'rgba(255,255,255,0.08)',
+              color: 'var(--fg)',
+              opacity: 0.75,
+            }}
+            title={`Retrieval score: ${source.score.toFixed(1)} / 100`}
           >
-            {Math.round(source.score)}
+            {Math.round(source.score)}%
           </span>
         )}
         {pageLabel && (
