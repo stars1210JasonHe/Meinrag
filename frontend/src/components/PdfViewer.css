@@ -1,0 +1,224 @@
+/* ─────────────────────────────────────────────────────────────────────────
+ * PdfViewer component styles.
+ *
+ * Extracted from App.css which stopped being imported after the 58438bc
+ * router refactor (2026-03-30). Without these rules loaded, bbox highlight
+ * and page-nav styling silently broke — App.css is still in-tree but dead,
+ * left alone here since other files haven't been audited yet.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+.pdf-viewer-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-height: 72vh;
+  user-select: text;
+  overflow: auto;
+}
+
+.pdf-viewer-wrapper::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.pdf-viewer-wrapper::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+.pdf-viewer-wrapper::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+}
+.pdf-viewer-wrapper::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.pdf-viewer-canvas-container {
+  position: relative;
+  display: inline-block;
+  transform-origin: center center;
+}
+
+.pdf-viewer-canvas-container .react-pdf__Page {
+  border-radius: 4px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+}
+
+.pdf-viewer-canvas-container .textLayer ::selection {
+  background: rgba(59, 130, 246, 0.4);
+}
+
+.pdf-viewer-canvas-container .textLayer mark {
+  color: transparent;
+  border-radius: 2px;
+}
+
+.pdf-highlight-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.pdf-highlight-bbox {
+  position: absolute;
+  border-width: 3px;
+  border-style: solid;
+  border-radius: 2px;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.pdf-viewer-loading,
+.pdf-viewer-error {
+  color: #ccc;
+  font-size: 1rem;
+  padding: 2rem;
+  text-align: center;
+}
+
+.pdf-viewer-error {
+  color: #f87171;
+}
+
+.pdf-viewer-page-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 4px 12px;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 20px;
+  user-select: none;
+}
+
+.pdf-viewer-page-nav button {
+  background: none;
+  border: none;
+  color: #ccc;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  transition: color 0.15s, background 0.15s;
+}
+
+.pdf-viewer-page-nav button:hover:not(:disabled) {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.pdf-viewer-page-nav button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.pdf-viewer-page-info {
+  color: #ccc;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pdf-viewer-page-input {
+  width: 36px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 0.85rem;
+  padding: 2px 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pdf-viewer-page-input:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.pdf-viewer-page-input::-webkit-inner-spin-button,
+.pdf-viewer-page-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.pdf-viewer-page-input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+.pdf-viewer-goto-source {
+  font-size: 0.75rem !important;
+  padding: 3px 8px !important;
+  background: rgba(59, 130, 246, 0.3) !important;
+  border: 1px solid rgba(59, 130, 246, 0.5) !important;
+  border-radius: 10px !important;
+  white-space: nowrap;
+}
+
+.pdf-viewer-goto-source:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.5) !important;
+}
+
+.pdf-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.75);
+  border-radius: 6px;
+  margin: 4px 0;
+}
+.pdf-search-input {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  color: #fff;
+  padding: 4px 8px;
+  font-size: 13px;
+  width: 180px;
+  outline: none;
+}
+.pdf-search-input:focus {
+  border-color: rgba(255, 255, 255, 0.4);
+}
+.pdf-search-input::placeholder {
+  color: rgba(255, 255, 255, 0.4);
+}
+.pdf-search-count {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+  min-width: 60px;
+  text-align: center;
+}
+.pdf-search-bar button {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 3px;
+}
+.pdf-search-bar button:hover:not(:disabled) {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+.pdf-search-bar button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.pdf-viewer-search-btn {
+  margin-left: 8px;
+}
+
+@media (max-width: 768px) {
+  .pdf-viewer-page-nav {
+    padding: 3px 8px;
+    gap: 4px;
+  }
+}

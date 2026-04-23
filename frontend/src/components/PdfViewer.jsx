@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Search, X, ZoomIn, ZoomOut } from 'lucide-re
 import { Document, Page, pdfjs } from 'react-pdf'
 import 'react-pdf/dist/Page/TextLayer.css'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
+import './PdfViewer.css'
 import { API_BASE } from '../api/client'
 
 // Worker — must match react-pdf's bundled pdfjs-dist version (not top-level)
