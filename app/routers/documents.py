@@ -755,4 +755,14 @@ async def delete_document(
             except Exception as e:
                 logger.warning(f"Failed to remove {f}: {e}")
 
+    # Invalidate cached mindmap tree so a future upload with the same
+    # doc_id won't serve stale concept structure from a deleted doc.
+    from app.services.mindmap import MINDMAPS_CACHE_DIR
+    mindmap_cache = MINDMAPS_CACHE_DIR / f"{doc_id}.json"
+    if mindmap_cache.exists():
+        try:
+            mindmap_cache.unlink()
+        except Exception as e:
+            logger.warning(f"Failed to remove mindmap cache for {doc_id}: {e}")
+
     return DeleteResponse(doc_id=doc_id, message="Document deleted successfully")

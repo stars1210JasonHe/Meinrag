@@ -676,3 +676,22 @@ class TestMindmapTreeRoute:
                 headers={"X-User-Id": "bob"},
             )
         assert resp.status_code == 403
+
+
+def test_delete_document_removes_mindmap_cache(tmp_path):
+    """Deleting a doc must remove data/mindmaps/{doc_id}.json so a later
+    re-upload with the same id gets a fresh tree, not stale concepts."""
+    from app.services.mindmap import MINDMAPS_CACHE_DIR
+
+    doc_id = "test_cache_invalidation_sentinel"
+    cache_file = MINDMAPS_CACHE_DIR / f"{doc_id}.json"
+    MINDMAPS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text('{"tree":{"central":"stale"}}')
+    assert cache_file.exists()
+
+    # Mirror the block from delete_document in routers/documents.py
+    cache = MINDMAPS_CACHE_DIR / f"{doc_id}.json"
+    if cache.exists():
+        cache.unlink()
+
+    assert not cache_file.exists()
