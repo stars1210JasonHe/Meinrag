@@ -3,10 +3,12 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import ForceGraph2D from 'react-force-graph-2d'
-import { FileText, Table2, Image, Calculator, ExternalLink, MessageSquare, X, Network } from 'lucide-react'
-import { fetchGraphDocuments, fetchGraphNodes, fetchDocuments, fetchCollections } from '@/lib/api'
+import { FileText, Table2, Image, Calculator, ExternalLink, MessageSquare, X, Network, GitBranch } from 'lucide-react'
+import { fetchGraphDocuments, fetchGraphNodes, fetchDocuments, fetchCollections, fetchDocumentChunks } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import ContextMenu from '@/components/ContextMenu'
+import MindmapTree from '@/components/MindmapTree'
+import { useDocMindmap } from '@/hooks/useDocMindmap'
 
 const USER_ID = 'admin'
 
@@ -40,12 +42,25 @@ function cssVar(name, fallback = '#08080a') {
 
 export default function GraphPage() {
   const { docId } = useParams()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const multiDocsParam = searchParams.get('docs')
   const multiDocIds = useMemo(
     () => (multiDocsParam ? multiDocsParam.split(',').filter(Boolean) : null),
     [multiDocsParam]
   )
+  const mode = searchParams.get('mode') === 'mindmap' ? 'mindmap' : 'graph'
+  const urlChunk = searchParams.get('chunk')
+  const urlChunkId = urlChunk != null ? Number(urlChunk) : null
+
+  const setMode = useCallback((next) => {
+    setSearchParams(prev => {
+      const params = new URLSearchParams(prev)
+      if (next === 'graph') params.delete('mode')
+      else params.set('mode', next)
+      return params
+    })
+  }, [setSearchParams])
+
   const navigate = useNavigate()
   const { t } = useTranslation()
   const graphRef = useRef(null)
@@ -99,6 +114,30 @@ export default function GraphPage() {
         ? fetchGraphNodes(scope, activeEdgeTypes || 'follows', USER_ID)
         : fetchGraphDocuments(USER_ID),
   })
+
+  // Mindmap tree — only fetched when mode is 'mindmap'
+  const {
+    data: mindmapData,
+    isLoading: mindmapLoading,
+    error: mindmapError,
+  } = useDocMindmap(docId, { enabled: mode === 'mindmap' && Boolean(docId) })
+
+  // All chunks for this doc — needed so a leaf-click can resolve chunk_index
+  // to the full chunk shape the existing NodePanel expects.
+  const { data: allChunksData } = useQuery({
+    queryKey: ['doc-chunks-all', docId],
+    queryFn: () => fetchDocumentChunks(docId, null, USER_ID),
+    enabled: mode === 'mindmap' && Boolean(docId),
+    staleTime: 5 * 60_000,
+  })
+
+  const chunkByIndex = useMemo(() => {
+    const map = new Map()
+    for (const c of (allChunksData?.chunks || [])) {
+      if (c.chunk_index != null) map.set(c.chunk_index, c)
+    }
+    return map
+  }, [allChunksData])
 
   // Measure container size
   useEffect(() => {
@@ -419,6 +458,45 @@ export default function GraphPage() {
       {/* Toolbar */}
       <div className="flex items-center gap-3 px-4 py-2 border-b flex-wrap"
            style={{ borderColor: 'var(--border-strong, rgba(255,255,255,0.14))', backgroundColor: 'var(--bg-1, #0c0c0f)' }}>
+        {/* Mode toggle */}
+        <div
+          role="tablist"
+          aria-label={t('graph.modeToggleAria')}
+          className="flex items-center border rounded-md overflow-hidden text-xs"
+          style={{ borderColor: 'var(--border-strong, rgba(255,255,255,0.14))' }}
+        >
+          <button
+            role="tab"
+            aria-selected={mode === 'graph'}
+            onClick={() => setMode('graph')}
+            className={cn(
+              'flex items-center gap-1 px-2.5 py-1 transition-colors',
+              mode === 'graph' ? 'bg-white/10' : 'opacity-60 hover:opacity-100',
+            )}
+            style={{ color: 'var(--fg, #f4f2ee)' }}
+          >
+            <Network size={12} />
+            {t('graph.modeGraph')}
+          </button>
+          <button
+            role="tab"
+            aria-selected={mode === 'mindmap'}
+            onClick={() => setMode('mindmap')}
+            className={cn(
+              'flex items-center gap-1 px-2.5 py-1 transition-colors',
+              mode === 'mindmap' ? 'bg-white/10' : 'opacity-60 hover:opacity-100',
+            )}
+            style={{ color: 'var(--fg, #f4f2ee)' }}
+            disabled={!docId}
+            title={!docId ? t('graph.modeMindmapNeedsDoc') : ''}
+          >
+            <GitBranch size={12} />
+            {t('graph.modeMindmap')}
+          </button>
+        </div>
+
+        <span className="opacity-30 text-xs">|</span>
+
         {Object.entries(NODE_COLORS).filter(([k]) => k !== 'document').map(([type, color]) => (
           <button
             key={type}
@@ -491,7 +569,7 @@ export default function GraphPage() {
             {t('graph.loadingGraph')}
           </div>
         )}
-        {graphFormatted.nodes.length > 0 && (
+        {mode === 'graph' && graphFormatted.nodes.length > 0 && (
           <ForceGraph2D
             ref={graphRef}
             graphData={graphFormatted}
@@ -526,10 +604,47 @@ export default function GraphPage() {
             enableNodeDrag={true}
           />
         )}
-        {!isLoading && graphFormatted.nodes.length === 0 && (
+        {mode === 'mindmap' && docId && (
+          <MindmapModeBody
+            tree={mindmapData?.tree}
+            loading={mindmapLoading}
+            error={mindmapError}
+            urlChunkId={urlChunkId}
+            onLeafClick={(leafNode) => {
+              const firstChunk = leafNode.__chunk_indices?.[0]
+              if (firstChunk == null) return
+              const chunk = chunkByIndex.get(firstChunk)
+              if (!chunk) return
+              setSelectedNode({
+                id: `${docId}:${firstChunk}`,
+                chunk_index: firstChunk,
+                chunk_type: chunk.chunk_type,
+                doc_id: docId,
+                label: chunk.label || leafNode.name,
+                source_file: chunk.source_file,
+                content_preview: chunk.content_preview ?? chunk.content?.slice(0, 400),
+                summary_preview: chunk.summary_preview,
+                page: chunk.page,
+              })
+              setSearchParams(prev => {
+                const p = new URLSearchParams(prev)
+                p.set('chunk', String(firstChunk))
+                return p
+              })
+            }}
+            onFallbackToGraph={() => setMode('graph')}
+          />
+        )}
+        {mode === 'graph' && !isLoading && graphFormatted.nodes.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center opacity-40"
                style={{ color: 'var(--fg, #f4f2ee)' }}>
             {t('graph.noGraphData')}
+          </div>
+        )}
+        {mode === 'mindmap' && !docId && (
+          <div className="absolute inset-0 flex items-center justify-center opacity-40"
+               style={{ color: 'var(--fg, #f4f2ee)' }}>
+            {t('graph.modeMindmapNeedsDoc')}
           </div>
         )}
       </div>
@@ -601,5 +716,52 @@ export default function GraphPage() {
         </div>
       )}
     </div>
+  )
+}
+
+function MindmapModeBody({ tree, loading, error, urlChunkId, onLeafClick, onFallbackToGraph }) {
+  const { t } = useTranslation()
+
+  if (loading) {
+    return (
+      <div className="mm-skeleton">
+        <div className="text-sm">{t('graph.mindmapLoading')}</div>
+        <div className="mm-skeleton-lines" />
+        <div className="mm-skeleton-lines" />
+        <div className="mm-skeleton-lines" />
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="mm-skeleton" role="alert">
+        <div className="text-sm">{t('graph.mindmapErrorTitle')}</div>
+        <div className="text-xs opacity-70">{t('graph.mindmapErrorBody')}</div>
+        <button
+          onClick={onFallbackToGraph}
+          className="text-xs underline hover:opacity-80"
+          style={{ color: 'var(--signature, #5b7ec9)' }}
+        >
+          {t('graph.mindmapErrorFallback')}
+        </button>
+      </div>
+    )
+  }
+
+  if (!tree || !Array.isArray(tree.branches) || tree.branches.length === 0) {
+    return (
+      <div className="mm-skeleton">
+        <div className="text-sm">{t('graph.mindmapEmpty')}</div>
+      </div>
+    )
+  }
+
+  return (
+    <MindmapTree
+      tree={tree}
+      selectedChunkIds={urlChunkId != null ? [urlChunkId] : []}
+      onLeafClick={onLeafClick}
+    />
   )
 }
