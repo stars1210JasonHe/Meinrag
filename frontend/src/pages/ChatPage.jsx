@@ -620,39 +620,45 @@ export default function ChatPage() {
               onClose={closeTab}
             />
             <div className="flex-1 overflow-hidden">
-              {activeTab && (
-                activeTab.file_type === 'pdf' ? (
-                  <PdfViewer
-                    key={activeTab.doc_id}
-                    docId={activeTab.doc_id}
-                    page={
-                      selectedSource != null && sources[selectedSource]?.doc_id === activeTab.doc_id
-                        ? sources[selectedSource].page
-                        : null
-                    }
-                    highlights={
-                      selectedSource != null && sources[selectedSource]?.doc_id === activeTab.doc_id
-                        ? [{
-                            bbox: sources[selectedSource].bbox,
-                            isActive: true,
-                            colorIndex: selectedSource,
-                          }]
-                        : []
-                    }
-                  />
-                ) : (
-                  <TextDocViewer
-                    key={activeTab.doc_id}
-                    docId={activeTab.doc_id}
-                    activeChunkIndex={
-                      selectedSource != null && sources[selectedSource]?.doc_id === activeTab.doc_id
-                        ? sources[selectedSource].chunk_index
-                        : null
-                    }
-                    activeSourceColorIndex={selectedSource ?? 0}
-                  />
+              {/* Mount EVERY open tab; hide inactive ones with display:none.
+                  Keeps each viewer's internal state (currentPage, zoom,
+                  scroll, pageSize cache) alive across tab switches so the
+                  user returns to where they left off. */}
+              {tabs.map(tab => {
+                const isActive = tab.doc_id === activeDocId
+                const srcForTab =
+                  selectedSource != null && sources[selectedSource]?.doc_id === tab.doc_id
+                    ? sources[selectedSource]
+                    : null
+                return (
+                  <div
+                    key={tab.doc_id}
+                    style={{ display: isActive ? 'block' : 'none', height: '100%' }}
+                  >
+                    {tab.file_type === 'pdf' ? (
+                      <PdfViewer
+                        docId={tab.doc_id}
+                        page={srcForTab?.page ?? null}
+                        highlights={
+                          srcForTab
+                            ? [{
+                                bbox: srcForTab.bbox,
+                                isActive: true,
+                                colorIndex: selectedSource,
+                              }]
+                            : []
+                        }
+                      />
+                    ) : (
+                      <TextDocViewer
+                        docId={tab.doc_id}
+                        activeChunkIndex={srcForTab?.chunk_index ?? null}
+                        activeSourceColorIndex={selectedSource ?? 0}
+                      />
+                    )}
+                  </div>
                 )
-              )}
+              })}
             </div>
           </>
         )}
