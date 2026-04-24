@@ -1,11 +1,6 @@
-/* ─────────────────────────────────────────────────────────────────────────
- * PdfViewer component styles.
- *
- * Extracted from App.css which stopped being imported after the 58438bc
- * router refactor (2026-03-30). Without these rules loaded, bbox highlight
- * and page-nav styling silently broke — App.css is still in-tree but dead,
- * left alone here since other files haven't been audited yet.
- * ───────────────────────────────────────────────────────────────────────── */
+/* PdfViewer component styles. Originally in App.css; that file went
+ * unimported after the 58438bc router refactor and was deleted in full
+ * once bbox / nav rules were confirmed to have no other consumer. */
 
 .pdf-viewer-wrapper {
   display: flex;
