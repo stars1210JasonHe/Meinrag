@@ -61,12 +61,13 @@ export default function PdfViewer({
     return () => observer.disconnect()
   }, [])
 
-  // Reset page when docId OR source page changes.
-  // The `page` prop reflects the currently-selected source's target page;
-  // when the user clicks a different citation (even in the same doc),
-  // we need to jump to the new source's page.
+  // Jump to a new source page when one is provided. A null `page` means
+  // "no source from this doc is currently selected" (e.g., user clicked a
+  // source on a different doc) — in that case stay on whatever page the
+  // user last navigated to, instead of silently resetting to page 1.
   useEffect(() => {
-    setCurrentPage((page || 0) + 1)
+    if (page == null) return
+    setCurrentPage(page + 1)
   }, [docId, page])
 
   // Defensive: clear stale pageSize when page changes, so bbox overlay
