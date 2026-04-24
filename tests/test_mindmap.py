@@ -678,20 +678,47 @@ class TestMindmapTreeRoute:
         assert resp.status_code == 403
 
 
-def test_delete_document_removes_mindmap_cache(tmp_path):
+@pytest.mark.asyncio
+async def test_delete_document_removes_mindmap_cache(tmp_path, monkeypatch):
     """Deleting a doc must remove data/mindmaps/{doc_id}.json so a later
-    re-upload with the same id gets a fresh tree, not stale concepts."""
+    re-upload with the same id gets a fresh tree, not stale concepts.
+
+    Exercises the actual `delete_document` handler (not a copy of its
+    logic) with mocked deps, so the cache-removal block is genuinely
+    under test.
+    """
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from app.routers import documents as documents_module
     from app.services.mindmap import MINDMAPS_CACHE_DIR
 
     doc_id = "test_cache_invalidation_sentinel"
     cache_file = MINDMAPS_CACHE_DIR / f"{doc_id}.json"
     MINDMAPS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     cache_file.write_text('{"tree":{"central":"stale"}}')
-    assert cache_file.exists()
+    assert cache_file.exists(), "precondition: cache file should exist before delete"
 
-    # Mirror the block from delete_document in routers/documents.py
-    cache = MINDMAPS_CACHE_DIR / f"{doc_id}.json"
-    if cache.exists():
-        cache.unlink()
+    # Mock all deps of delete_document so we can call it directly.
+    settings = MagicMock(upload_dir=tmp_path)  # empty tmp dir -> iterdir() yields nothing
+    vector_store = MagicMock()
+    vector_store.delete_document = MagicMock()
+    registry = MagicMock()
+    registry.get = AsyncMock(return_value={"doc_id": doc_id})
+    registry.remove = AsyncMock()
+    db = MagicMock()
+    summary_store = None
 
-    assert not cache_file.exists()
+    # EdgeRepository is imported inside the function body; patch the source.
+    mock_edge_repo = MagicMock()
+    mock_edge_repo.delete_by_doc = AsyncMock()
+    with patch("app.db.repositories.EdgeRepository", return_value=mock_edge_repo):
+        result = await documents_module.delete_document(
+            doc_id=doc_id,
+            settings=settings,
+            vector_store=vector_store,
+            registry=registry,
+            db=db,
+            summary_store=summary_store,
+        )
+
+    assert not cache_file.exists(), "delete_document must remove the mindmap cache"
+    assert result.doc_id == doc_id
