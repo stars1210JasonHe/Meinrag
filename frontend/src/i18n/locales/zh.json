@@ -98,7 +98,16 @@
     "exploreChunks": "探索块",
     "viewNeighbors": "查看邻居",
     "askAboutThis": "就此提问",
-    "page": "第 {{num}} 页"
+    "page": "第 {{num}} 页",
+    "modeGraph": "图谱",
+    "modeMindmap": "思维导图",
+    "modeToggleAria": "图谱视图模式",
+    "modeMindmapNeedsDoc": "请选择一个文档以查看其思维导图",
+    "mindmapLoading": "正在根据文档生成思维导图…（首次约 15–25 秒）",
+    "mindmapErrorTitle": "无法为该文档生成思维导图。",
+    "mindmapErrorBody": "图谱视图仍然可用。",
+    "mindmapErrorFallback": "切换到图谱视图",
+    "mindmapEmpty": "文档太短，无法生成有意义的思维导图。"
   },
   "nodeType": {
     "text": "文本",

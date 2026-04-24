@@ -98,7 +98,16 @@
     "exploreChunks": "Explore chunks",
     "viewNeighbors": "View neighbors",
     "askAboutThis": "Ask about this",
-    "page": "Page {{num}}"
+    "page": "Page {{num}}",
+    "modeGraph": "Graph",
+    "modeMindmap": "Mind Map",
+    "modeToggleAria": "Graph view mode",
+    "modeMindmapNeedsDoc": "Select a document to view its mind map",
+    "mindmapLoading": "Building mind map from your document… (first view, usually 15–25 s)",
+    "mindmapErrorTitle": "Couldn't build the mind map for this document.",
+    "mindmapErrorBody": "The force-graph view is still available.",
+    "mindmapErrorFallback": "Switch to Graph view",
+    "mindmapEmpty": "This document is too short to build a useful mind map."
   },
   "nodeType": {
     "text": "text",
