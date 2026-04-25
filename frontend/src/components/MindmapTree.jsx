@@ -42,6 +42,9 @@ export default function MindmapTree({ tree, selectedChunkIds = [], onLeafClick }
       const width = isCentral ? 220 : isBranch ? 200 : 220
       const height = isCentral ? 44 : isBranch ? 36 : 40
 
+      const fontSize = isCentral ? 17 : isBranch ? 15 : 13
+      const fontWeight = isCentral ? 700 : isBranch ? 600 : 400
+
       return (
         <g
           role="treeitem"
@@ -49,23 +52,51 @@ export default function MindmapTree({ tree, selectedChunkIds = [], onLeafClick }
           tabIndex={0}
           onClick={handle}
           onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handle() } }}
+          style={{ cursor: 'pointer' }}
         >
           <rect
             x={-width / 2} y={-height / 2} width={width} height={height}
-            className={`mm-leaf-rect${isSelected ? ' selected' : ''}`}
+            rx={6} ry={6}
+            style={{
+              fill: 'var(--bg-1, #0c0c0f)',
+              stroke: isSelected
+                ? 'var(--signature, #5b7ec9)'
+                : 'var(--border-strong, rgba(255,255,255,0.14))',
+              strokeWidth: isSelected ? 2 : 1,
+              transition: 'stroke 0.12s, fill 0.12s',
+            }}
           />
           <text
             x={0} y={0}
             textAnchor="middle" dominantBaseline="central"
-            className={`mm-leaf-label${isCentral ? ' central' : isBranch ? ' branch' : ''}`}
+            style={{
+              fill: 'var(--fg, #f4f2ee)',
+              fontSize: `${fontSize}px`,
+              fontWeight,
+              pointerEvents: 'none',
+              userSelect: 'none',
+            }}
           >
             {clampLabel(nodeDatum.name, isCentral ? 36 : isBranch ? 30 : 28)}
           </text>
           <title>{nodeDatum.name}</title>
           {isLeaf && chunkCount > 0 && (
             <g transform={`translate(${width / 2 - 10}, ${-height / 2 + 10})`}>
-              <circle r={10} className="mm-badge" />
-              <text className="mm-badge-text">{chunkCount}</text>
+              <circle r={10} style={{ fill: 'var(--signature, #5b7ec9)', opacity: 0.9 }} />
+              <text
+                style={{
+                  fill: '#fff',
+                  fontSize: '10px',
+                  fontWeight: 600,
+                  textAnchor: 'middle',
+                  dominantBaseline: 'central',
+                  pointerEvents: 'none',
+                }}
+                textAnchor="middle"
+                dominantBaseline="central"
+              >
+                {chunkCount}
+              </text>
             </g>
           )}
         </g>
