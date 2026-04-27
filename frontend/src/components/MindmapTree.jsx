@@ -38,6 +38,20 @@ function styleFor(depth) {
 }
 
 /**
+ * Branch palette — 5 hues from index.css. Theme-aware: light/dark each
+ * has its own tuning. Each tuple is [solid var, soft var]. depth-1
+ * (branch) nodes pick by ownIndex % HUE_VARS.length; deeper levels
+ * inherit. Central (depth 0) has __hue = null and stays signature.
+ */
+const HUE_VARS = [
+  ['--mm-hue-1', '--mm-hue-1-soft'],
+  ['--mm-hue-2', '--mm-hue-2-soft'],
+  ['--mm-hue-3', '--mm-hue-3-soft'],
+  ['--mm-hue-4', '--mm-hue-4-soft'],
+  ['--mm-hue-5', '--mm-hue-5-soft'],
+]
+
+/**
  * MindmapTree — horizontal dendrogram for the LLM-derived concept tree.
  *
  * Props:
@@ -76,7 +90,7 @@ export default function MindmapTree({ tree, selectedChunkIds = [], onLeafClick }
           onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handle() } }}
           style={{ cursor: 'pointer' }}
         >
-          {renderShape(style, isSelected)}
+          {renderShape(style, isSelected, nodeDatum.__hue)}
           <text
             x={0} y={0}
             textAnchor="middle" dominantBaseline="central"
@@ -140,12 +154,23 @@ export default function MindmapTree({ tree, selectedChunkIds = [], onLeafClick }
 
 /* ─── shape renderers ──────────────────────────────────────── */
 
-function renderShape(style, isSelected) {
-  const stroke = isSelected ? 'var(--signature)' : style.stroke
+function renderShape(style, isSelected, hue) {
+  // When the node has a branch hue (depth >= 1), override the stroke and
+  // the soft fill from the per-theme palette in index.css. Selected leaves
+  // still take the signature stroke so they pop above their hue.
+  const hueVars = hue != null ? HUE_VARS[hue] : null
+  const stroke = isSelected
+    ? 'var(--signature)'
+    : hueVars
+      ? `var(${hueVars[0]})`
+      : style.stroke
+  const fill = hueVars && style.shape !== 'underline'
+    ? `var(${hueVars[1]})`
+    : style.fill
   const strokeWidth = isSelected ? 2 : 1
   const common = {
     style: {
-      fill: style.fill,
+      fill,
       stroke, strokeWidth,
       transition: 'stroke 0.12s, fill 0.12s',
     },
@@ -202,7 +227,7 @@ function renderShape(style, isSelected) {
  * b.children[].children[]. The flags carry the meaning forward.
  */
 function adaptBackend(tree) {
-  const visit = (node, depth) => {
+  const visit = (node, depth, hue) => {
     const children = node.children || node.branches
     const isLeaf = !children || children.length === 0
     const chunks = node.chunk_indices || []
@@ -212,10 +237,21 @@ function adaptBackend(tree) {
       __leaf: isLeaf,
       __hasChunks: chunks.length > 0,
       __chunk_indices: chunks,
-      children: isLeaf ? undefined : children.map(c => visit(c, depth + 1)),
+      __hue: hue, // null at central; depth-1 nodes get an index; deeper inherit.
+      children: isLeaf
+        ? undefined
+        : children.map((c, i) =>
+            visit(
+              c,
+              depth + 1,
+              // depth=0 children (i.e. branches) each pick their own hue;
+              // deeper nodes inherit the branch ancestor's hue unchanged.
+              depth === 0 ? i % HUE_VARS.length : hue,
+            ),
+          ),
     }
   }
-  return visit({ name: tree.central, children: tree.branches || [] }, 0)
+  return visit({ name: tree.central, children: tree.branches || [] }, 0, null)
 }
 
 function clampLabel(text, maxChars) {

@@ -34,6 +34,14 @@
   --collection-soft: rgba(212,166,74,0.16);
   --collection-dim: #a8761e;
 
+  /* Mindmap branch palette — 5 hues, dark-mode tuning.
+     Each branch in MindmapTree picks one (i % 5); leaves inherit. */
+  --mm-hue-1: #6b8fd6;  --mm-hue-1-soft: rgba(107,143,214,0.18);  /* blue */
+  --mm-hue-2: #d4a64a;  --mm-hue-2-soft: rgba(212,166,74,0.18);   /* amber */
+  --mm-hue-3: #4ade80;  --mm-hue-3-soft: rgba(74,222,128,0.18);   /* emerald */
+  --mm-hue-4: #f472b6;  --mm-hue-4-soft: rgba(244,114,182,0.18);  /* pink */
+  --mm-hue-5: #a78bfa;  --mm-hue-5-soft: rgba(167,139,250,0.18);  /* violet */
+
   /* Score tiers (functional) */
   --ok: #10b981;
   --warn: #f59e0b;
@@ -90,6 +98,14 @@
   --collection: #a8761e;
   --collection-soft: rgba(168,118,30,0.12);
   --collection-dim: #6c4e0f;
+
+  /* Mindmap branch palette — light-mode (darker / lower-chroma so they
+     read against the paper bg). */
+  --mm-hue-1: #34528f;  --mm-hue-1-soft: rgba(52,82,143,0.10);
+  --mm-hue-2: #a8761e;  --mm-hue-2-soft: rgba(168,118,30,0.12);
+  --mm-hue-3: #15803d;  --mm-hue-3-soft: rgba(21,128,61,0.10);
+  --mm-hue-4: #be185d;  --mm-hue-4-soft: rgba(190,24,93,0.10);
+  --mm-hue-5: #7c3aed;  --mm-hue-5-soft: rgba(124,58,237,0.10);
 
   --ok: #059669;
   --warn: #d97706;
