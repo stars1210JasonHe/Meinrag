@@ -40,13 +40,6 @@ function markUserSaved(name) {
   }
 }
 
-// Shape colors — matched to GraphPage's document color + Windows-folder-yellow for domains
-const DOC_COLOR = '#6366f1'        // indigo (same as GraphPage's document node)
-const DOC_COLOR_DIM = '#4f52c5'
-const FOLDER_COLOR = '#f0b72a'     // warm yellow (Windows folder)
-const FOLDER_FILL = '#f0b72a22'    // translucent yellow fill
-const FOLDER_TAB_COLOR = '#c99018'
-
 // Graph node colors reading live from CSS vars (captured at paint time)
 function cssVar(name, fallback = '#5b7ec9') {
   try {
@@ -54,6 +47,14 @@ function cssVar(name, fallback = '#5b7ec9') {
     return v || fallback
   } catch { return fallback }
 }
+
+// Shape colors — derived from CSS tokens. Read once at module init via cssVar().
+// If theme switches at runtime, ForceGraph2D refresh-on-key handles it.
+const DOC_COLOR = cssVar('--signature',     '#6b8fd6')
+const DOC_COLOR_DIM = cssVar('--signature-dim', '#4a6cb4')
+const FOLDER_COLOR = cssVar('--collection',    '#d4a64a')
+const FOLDER_FILL = cssVar('--collection-soft', 'rgba(212,166,74,0.16)')
+const FOLDER_TAB_COLOR = cssVar('--collection-dim', '#a8761e')
 
 // Debounce hook — for search input
 function useDebounced(value, delay = 300) {

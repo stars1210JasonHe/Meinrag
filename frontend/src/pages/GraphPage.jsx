@@ -13,20 +13,22 @@ import { useDocMindmap } from '@/hooks/useDocMindmap'
 const USER_ID = 'admin'
 
 const NODE_COLORS = {
-  text: '#3b82f6',
-  table: '#f59e0b',
-  formula: '#a855f7',
-  image: '#10b981',
-  document: '#6366f1',
+  text: cssVar('--signature',  '#6b8fd6'),
+  table: cssVar('--warn',      '#f59e0b'),
+  formula: cssVar('--collection', '#d4a64a'),
+  image: cssVar('--ok',        '#10b981'),
+  document: cssVar('--signature-dim', '#4a6cb4'),
 }
 
 const EDGE_TYPES = ['follows', 'co_located', 'describes', 'references', 'similar_to']
+// Edge colors derived from tokens. similar_to uses fg-faint to read as
+// "inferred" (the deck's §B.3 recommendation); explicit edges use signature.
 const EDGE_COLORS = {
-  follows: '#64748b',     // gray — sequential order
-  co_located: '#6366f1',  // indigo — same page
-  describes: '#10b981',   // green — text explains visual
-  references: '#f59e0b',  // amber — cross-reference
-  similar_to: '#ec4899',  // pink — semantic similarity
+  follows: cssVar('--fg-dim',      '#9a9690'),  // sequential
+  co_located: cssVar('--signature','#6b8fd6'),  // same page
+  describes: cssVar('--ok',        '#10b981'),  // text explains visual
+  references: cssVar('--warn',     '#f59e0b'),  // cross-reference
+  similar_to: cssVar('--fg-faint', 'rgba(154,150,144,0.6)'),  // inferred — soft
 }
 const TYPE_ICONS = { text: FileText, table: Table2, image: Image, formula: Calculator }
 

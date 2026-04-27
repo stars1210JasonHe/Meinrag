@@ -867,11 +867,21 @@ export default function ChatPage() {
               <button
                 onClick={handleSend}
                 disabled={!input.trim()}
-                className="p-2 rounded-lg transition-opacity disabled:opacity-40 shrink-0"
-                style={{
-                  backgroundColor: 'var(--signature, #5b7ec9)',
-                  color: 'var(--fg, #f4f2ee)',
-                }}
+                className="p-2 rounded-lg transition-colors shrink-0"
+                style={
+                  input.trim()
+                    ? {
+                        backgroundColor: 'var(--signature)',
+                        color: '#fff',
+                        border: '1px solid var(--signature)',
+                      }
+                    : {
+                        backgroundColor: 'transparent',
+                        color: 'var(--signature)',
+                        border: '1px solid var(--signature)',
+                        opacity: 0.5,
+                      }
+                }
               >
                 <Send size={16} />
               </button>

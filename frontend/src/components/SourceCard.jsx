@@ -1,5 +1,4 @@
 import { FileText, Table2, Image, Calculator } from 'lucide-react'
-import { cn } from '@/lib/utils'
 import { HIGHLIGHT_COLORS } from './TextDocViewer'
 
 const TYPE_ICONS = {
@@ -30,10 +29,8 @@ export default function SourceCard({ source, index, isActive, onClick }) {
     <button
       type="button"
       onClick={onClick}
-      className={cn(
-        'w-full text-left px-3 py-2 border-l-2 transition-colors',
-        isActive ? 'bg-white/5' : 'hover:bg-white/5',
-      )}
+      className="w-full text-left px-3 py-2 border-l-2 transition-colors source-card"
+      data-active={isActive ? 'true' : 'false'}
       style={{
         borderLeftColor: isActive ? color.border : 'transparent',
         color: 'var(--fg)',
@@ -55,9 +52,8 @@ export default function SourceCard({ source, index, isActive, onClick }) {
           <span
             className="text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 tabular-nums"
             style={{
-              backgroundColor: 'rgba(255,255,255,0.08)',
-              color: 'var(--fg)',
-              opacity: 0.75,
+              backgroundColor: 'var(--bg-3)',
+              color: 'var(--fg-1)',
             }}
             title={`Retrieval score: ${source.score.toFixed(1)} / 100`}
           >
