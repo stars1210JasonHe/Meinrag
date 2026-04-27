@@ -18,7 +18,9 @@
     "dashboard": "Dashboard",
     "chat": "Chat",
     "graph": "Graph",
-    "pdfViewer": "PDF Viewer"
+    "pdfViewer": "PDF Viewer",
+    "collapseSidebar": "Collapse sidebar",
+    "expandSidebar": "Expand sidebar"
   },
   "dashboard": {
     "searchPlaceholder": "Search documents...",

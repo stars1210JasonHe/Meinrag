@@ -1,13 +1,13 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Send, FileText, Loader2, X, History, Plus, Square } from 'lucide-react'
+import { Send, FileText, Loader2, X, Square } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
-import { fetchSessions, fetchSessionMessages } from '@/lib/api'
+import { fetchSessionMessages } from '@/lib/api'
 import CitationBadge from '@/components/CitationBadge'
 import QueryTypeBadges from '@/components/QueryTypeBadges'
 import ConfidenceBadge from '@/components/ConfidenceBadge'
@@ -95,9 +95,9 @@ export default function ChatPage() {
     [scopeDocIdsParam]
   )
   const prefillQuestion = searchParams.get('q')
+  const urlSessionId = searchParams.get('session')
 
   const [sessionId, setSessionId] = useState(null)
-  const [showHistory, setShowHistory] = useState(false)
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState(prefillQuestion || '')
   const [loading, setLoading] = useState(false)
@@ -151,12 +151,6 @@ export default function ChatPage() {
     () => makeMarkdownComponents(onCitationClick),
     [onCitationClick],
   )
-
-  const { data: sessions = [] } = useQuery({
-    queryKey: ['sessions', USER_ID],
-    queryFn: () => fetchSessions(USER_ID),
-    enabled: showHistory,
-  })
 
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
@@ -246,6 +240,15 @@ export default function ChatPage() {
   useEffect(() => {
     scrollToBottom()
   }, [messages, scrollToBottom])
+
+  // URL-driven session load: when ?session=<id> changes (set by HistoryPanel
+  // in AppLayout), load that session's messages. Skip if it's already loaded.
+  useEffect(() => {
+    if (urlSessionId && urlSessionId !== sessionId) {
+      loadSession(urlSessionId)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlSessionId])
 
   const handleSend = async () => {
     const question = input.trim()
@@ -563,45 +566,9 @@ export default function ChatPage() {
   return (
     // overflow-hidden so the inner areas control their own scrolling
     <div className="flex h-full overflow-hidden">
-      {/* ── Session history panel ────────────────────────────── */}
-      {showHistory && (
-        <div
-          className="w-56 border-r flex flex-col shrink-0"
-          style={{ borderColor: 'var(--border-strong, rgba(255,255,255,0.14))', backgroundColor: 'var(--bg-1, #0c0c0f)' }}
-        >
-          <div className="p-2 border-b" style={{ borderColor: 'var(--border-strong, rgba(255,255,255,0.14))' }}>
-            <button
-              onClick={startNewChat}
-              className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-xs"
-              style={{ backgroundColor: 'var(--signature, #5b7ec9)', color: '#fff' }}
-            >
-              <Plus size={14} /> {t('chat.newChat')}
-            </button>
-          </div>
-          <div className="flex-1 overflow-auto py-1">
-            {sessions.length === 0 ? (
-              <p className="px-3 py-4 text-xs opacity-30 text-center">{t('chat.noSessionsYet')}</p>
-            ) : (
-              sessions.map(s => (
-                <button
-                  key={s.session_id}
-                  onClick={() => loadSession(s.session_id)}
-                  className={cn(
-                    'w-full px-3 py-2 text-left text-xs truncate transition-colors',
-                    sessionId === s.session_id ? 'bg-white/10' : 'hover:bg-white/5'
-                  )}
-                  style={{ color: 'var(--fg, #f4f2ee)' }}
-                >
-                  <div className="truncate">{s.preview || t('common.empty')}</div>
-                  <div className="opacity-30 mt-0.5">
-                    {new Date(s.last_access).toLocaleDateString()}
-                  </div>
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-      )}
+      {/* History panel now lives in AppLayout (mounted only on /chat).
+          It writes ?session=<id> to the URL; ChatPage reacts via the
+          URL-sync effect above. */}
 
       {/* ── Main area: tabs + viewer ─────────────────────────── */}
       <div className="flex-1 flex flex-col min-w-0">
@@ -826,17 +793,6 @@ export default function ChatPage() {
             </div>
           )}
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowHistory(h => !h)}
-              className={cn(
-                'p-2 rounded-lg transition-opacity shrink-0',
-                showHistory ? 'opacity-100' : 'opacity-40 hover:opacity-100'
-              )}
-              title={t('chat.chatHistory')}
-              style={{ color: 'var(--fg, #f4f2ee)' }}
-            >
-              <History size={16} />
-            </button>
             <input
               ref={inputRef}
               type="text"

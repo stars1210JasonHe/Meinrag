@@ -18,7 +18,9 @@
     "dashboard": "仪表板",
     "chat": "聊天",
     "graph": "图谱",
-    "pdfViewer": "PDF 查看器"
+    "pdfViewer": "PDF 查看器",
+    "collapseSidebar": "收起侧栏",
+    "expandSidebar": "展开侧栏"
   },
   "dashboard": {
     "searchPlaceholder": "搜索文档...",
