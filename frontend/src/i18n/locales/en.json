@@ -49,6 +49,8 @@
     "newChat": "New Chat",
     "noSessionsYet": "No sessions yet",
     "chatHistory": "Chat history",
+    "collapseHistory": "Hide chat history",
+    "expandHistory": "Show chat history",
     "hideSources": "Hide sources",
     "showSources": "Show sources",
     "stopGeneration": "Stop generation",

@@ -63,6 +63,7 @@ const NAV_ITEMS = [
 ]
 
 const SIDEBAR_COLLAPSED_KEY = 'meinrag.sidebar.collapsed'
+const HISTORY_COLLAPSED_KEY = 'meinrag.historyPanel.collapsed'
 
 export default function AppLayout() {
   const { t } = useTranslation()
@@ -77,6 +78,14 @@ export default function AppLayout() {
   useEffect(() => {
     localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0')
   }, [collapsed])
+
+  const [historyCollapsed, setHistoryCollapsed] = useState(() => {
+    if (typeof localStorage === 'undefined') return false
+    return localStorage.getItem(HISTORY_COLLAPSED_KEY) === '1'
+  })
+  useEffect(() => {
+    localStorage.setItem(HISTORY_COLLAPSED_KEY, historyCollapsed ? '1' : '0')
+  }, [historyCollapsed])
 
   // History panel only on /chat routes
   const showHistoryPanel = location.pathname.startsWith('/chat')
@@ -217,6 +226,8 @@ export default function AppLayout() {
           activeSessionId={activeSessionId}
           onSelectSession={onSelectSession}
           onNewChat={onNewChat}
+          collapsed={historyCollapsed}
+          onToggleCollapse={() => setHistoryCollapsed(c => !c)}
         />
       )}
 

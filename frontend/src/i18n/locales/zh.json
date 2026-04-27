@@ -49,6 +49,8 @@
     "newChat": "新对话",
     "noSessionsYet": "暂无会话",
     "chatHistory": "聊天记录",
+    "collapseHistory": "隐藏聊天记录",
+    "expandHistory": "显示聊天记录",
     "hideSources": "隐藏来源",
     "showSources": "显示来源",
     "stopGeneration": "停止生成",
