@@ -43,7 +43,9 @@
     "panelSearching": "Documents (showing {{shown}} of {{total}} matches)",
     "panelDomain": "Documents in \"{{domain}}\" ({{shown}})",
     "panelDefault": "Documents (showing {{shown}} of {{total}})",
-    "thisDocument": "this document"
+    "thisDocument": "this document",
+    "collapseDomains": "Hide domains",
+    "expandDomains": "Show domains"
   },
   "chat": {
     "newChat": "New Chat",

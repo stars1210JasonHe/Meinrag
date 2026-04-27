@@ -43,7 +43,9 @@
     "panelSearching": "文档（显示 {{shown}} / {{total}} 条匹配）",
     "panelDomain": "\"{{domain}}\" 中的文档（{{shown}}）",
     "panelDefault": "文档（显示 {{shown}} / {{total}}）",
-    "thisDocument": "此文档"
+    "thisDocument": "此文档",
+    "collapseDomains": "隐藏领域",
+    "expandDomains": "显示领域"
   },
   "chat": {
     "newChat": "新对话",

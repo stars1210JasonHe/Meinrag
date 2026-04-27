@@ -6,6 +6,7 @@ import ForceGraph2D from 'react-force-graph-2d'
 import {
   Search, Upload, MoreVertical, Trash2, Download, RefreshCw,
   FileText, X, MessageSquare, Filter, ChevronUp, ChevronDown, Network,
+  PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { fetchDocuments, fetchCollections, fetchGraphDocuments, deleteDocument } from '@/lib/api'
@@ -101,6 +102,13 @@ export default function DashboardPage() {
   const [showPanel, setShowPanel] = useState(false)
   const [menuOpen, setMenuOpen] = useState(null)
   const [uploading, setUploading] = useState(false)
+  const [domainsCollapsed, setDomainsCollapsed] = useState(() => {
+    if (typeof localStorage === 'undefined') return false
+    return localStorage.getItem('meinrag.dashboard.domainsCollapsed') === '1'
+  })
+  useEffect(() => {
+    localStorage.setItem('meinrag.dashboard.domainsCollapsed', domainsCollapsed ? '1' : '0')
+  }, [domainsCollapsed])
   const [hoverNode, setHoverNode] = useState(null)
   const [highlightNodes, setHighlightNodes] = useState(new Set())
   const [highlightLinks, setHighlightLinks] = useState(new Set())
@@ -640,16 +648,47 @@ export default function DashboardPage() {
   return (
     <div className="flex h-full" style={{ backgroundColor: 'var(--bg)' }}>
 
-      {/* === Left: Domain sidebar === */}
+      {/* === Left: Domain sidebar (collapsible) === */}
+      {domainsCollapsed ? (
+        <aside
+          className="w-8 shrink-0 flex flex-col items-center border-r py-2 gap-2"
+          style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-1)' }}
+        >
+          <button
+            type="button"
+            onClick={() => setDomainsCollapsed(false)}
+            className="p-1.5 rounded transition-colors hover:bg-white/5"
+            title={t('dashboard.expandDomains', { defaultValue: 'Show domains' })}
+            aria-label={t('dashboard.expandDomains', { defaultValue: 'Show domains' })}
+            style={{ color: 'var(--fg-dim)' }}
+          >
+            <PanelLeftOpen size={14} />
+          </button>
+        </aside>
+      ) : (
       <aside
         className="w-56 shrink-0 flex flex-col border-r"
         style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-1)' }}
       >
         <div
-          className="px-4 pt-5 pb-2 text-[10px] uppercase tracking-[0.1em]"
-          style={{ color: 'var(--fg-faint)', fontFamily: 'var(--mono)' }}
+          className="px-4 pt-5 pb-2 flex items-center justify-between"
         >
-          {t('dashboard.domains')}
+          <span
+            className="text-[10px] uppercase tracking-[0.1em]"
+            style={{ color: 'var(--fg-faint)', fontFamily: 'var(--mono)' }}
+          >
+            {t('dashboard.domains')}
+          </span>
+          <button
+            type="button"
+            onClick={() => setDomainsCollapsed(true)}
+            className="p-1 rounded transition-colors hover:bg-white/5"
+            title={t('dashboard.collapseDomains', { defaultValue: 'Hide domains' })}
+            aria-label={t('dashboard.collapseDomains', { defaultValue: 'Hide domains' })}
+            style={{ color: 'var(--fg-faint)' }}
+          >
+            <PanelLeftClose size={12} />
+          </button>
         </div>
         <div className="flex-1 overflow-auto py-1 px-2">
           <DomainItem
@@ -696,6 +735,7 @@ export default function DashboardPage() {
           </div>
         )}
       </aside>
+      )}
 
       {/* === Main: search bar + graph + collapsible panel === */}
       <main className="flex-1 flex flex-col overflow-hidden relative">
@@ -726,6 +766,30 @@ export default function DashboardPage() {
           >
             <Filter size={14} />
           </button>
+          {/* Upload — moved from floating bottom-right to header so it
+              doesn't overlap the document list. */}
+          <label
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium cursor-pointer transition-colors shrink-0',
+              uploading ? 'opacity-50 pointer-events-none' : '',
+            )}
+            style={{
+              backgroundColor: 'var(--signature)',
+              color: '#fff',
+              border: '1px solid var(--signature)',
+            }}
+            title={t('dashboard.upload')}
+          >
+            {uploading ? <RefreshCw size={14} className="animate-spin" /> : <Upload size={14} />}
+            <span>{uploading ? t('dashboard.uploading') : t('dashboard.upload')}</span>
+            <input
+              type="file"
+              className="hidden"
+              onChange={handleUpload}
+              disabled={uploading}
+              accept=".pdf,.docx,.txt,.md,.html,.xlsx,.pptx"
+            />
+          </label>
         </div>
 
         {/* Filter chips */}
@@ -868,29 +932,7 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Floating upload button */}
-        <label
-          className={cn(
-            'absolute bottom-6 right-6 flex items-center gap-2 px-4 py-2.5 rounded-lg text-[13px] font-medium cursor-pointer transition-all z-30',
-            uploading ? 'opacity-50 pointer-events-none' : 'hover:scale-105'
-          )}
-          style={{
-            backgroundColor: 'var(--signature)',
-            color: 'var(--bg)',
-            boxShadow: '0 10px 30px var(--signature-soft), 0 0 0 1px var(--signature-glow)',
-            fontFamily: 'var(--sans)',
-          }}
-        >
-          {uploading ? <RefreshCw size={15} className="animate-spin" /> : <Upload size={15} />}
-          {uploading ? t('dashboard.uploading') : t('dashboard.upload')}
-          <input
-            type="file"
-            className="hidden"
-            onChange={handleUpload}
-            disabled={uploading}
-            accept=".pdf,.docx,.txt,.md,.html,.xlsx,.pptx"
-          />
-        </label>
+        {/* Floating upload button removed — moved to the search-row header. */}
 
         {contextMenu && (
           <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenu.items} onClose={() => setContextMenu(null)} />
