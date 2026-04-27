@@ -65,9 +65,5 @@
   animation: mm-shimmer 1.6s linear infinite;
   border-radius: 2px;
 }
-@keyframes mm-shimmer {
-  from { background-position: 200% 0; }
-  to   { background-position: -200% 0; }
-}
 
 .rd3t-link { stroke: var(--border-strong, rgba(255, 255, 255, 0.25)) !important; }

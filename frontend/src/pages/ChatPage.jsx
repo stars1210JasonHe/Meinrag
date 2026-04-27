@@ -20,6 +20,7 @@ import TextDocViewer from '@/components/TextDocViewer'
 import SourceCard from '@/components/SourceCard'
 import PdfViewer from '@/components/PdfViewer'
 import ChatEmptyState from '@/components/ChatEmptyState'
+import { ParagraphSkeleton, SourceCardSkeleton } from '@/components/skeletons'
 
 // Substring that identifies a corpus-refusal answer. Anchored to the exact
 // phrase the RAG_SYSTEM_PROMPT instructs the LLM to emit.
@@ -677,7 +678,10 @@ export default function ChatPage() {
                             <span>{msg.supplementBanner}</span>
                           </div>
                         ) : (
-                          <Loader2 size={16} className="animate-spin opacity-40" />
+                          <>
+                            {!msg.content && <ParagraphSkeleton />}
+                            <Loader2 size={16} className="animate-spin opacity-40" />
+                          </>
                         )
                       ) : msg.role === 'ai' ? (
                         <>
@@ -743,7 +747,7 @@ export default function ChatPage() {
         </div>
 
         {/* Sources compact list — between messages and input */}
-        {sources.length > 0 && (
+        {(sources.length > 0 || (loading && sources.length === 0)) && (
           <div
             className="border-t shrink-0 max-h-[40%] overflow-y-auto"
             style={{ borderColor: 'var(--border-strong, rgba(255,255,255,0.14))' }}
@@ -752,25 +756,33 @@ export default function ChatPage() {
               className="px-3 py-2 text-[10px] uppercase tracking-wider opacity-40 sticky top-0"
               style={{ backgroundColor: 'var(--bg-1, #0c0c0f)' }}
             >
-              {t('chat.sourcesWithCount', { count: sources.length })}
+              {sources.length > 0 ? t('chat.sourcesWithCount', { count: sources.length }) : t('chat.sourcesLabel')}
             </div>
-            {displaySources.map(({ source: s, originalIndex }) => (
-              <SourceCard
-                key={originalIndex}
-                source={s}
-                index={originalIndex}
-                isActive={originalIndex === selectedSource}
-                onClick={() => {
-                  setSelectedSource(originalIndex)
-                  openTab({
-                    doc_id: s.doc_id,
-                    filename: s.source_file,
-                    file_type: null,
-                  })
-                  activateTab(s.doc_id)
-                }}
-              />
-            ))}
+            {loading && sources.length === 0 ? (
+              <>
+                <SourceCardSkeleton />
+                <SourceCardSkeleton />
+                <SourceCardSkeleton />
+              </>
+            ) : (
+              displaySources.map(({ source: s, originalIndex }) => (
+                <SourceCard
+                  key={originalIndex}
+                  source={s}
+                  index={originalIndex}
+                  isActive={originalIndex === selectedSource}
+                  onClick={() => {
+                    setSelectedSource(originalIndex)
+                    openTab({
+                      doc_id: s.doc_id,
+                      filename: s.source_file,
+                      file_type: null,
+                    })
+                    activateTab(s.doc_id)
+                  }}
+                />
+              ))
+            )}
           </div>
         )}
 

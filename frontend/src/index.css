@@ -118,3 +118,21 @@ body {
 
 .source-card:hover { background-color: var(--bg-2); }
 .source-card[data-active="true"] { background-color: var(--bg-3); }
+
+/* Shared loading-skeleton primitives */
+@keyframes mm-shimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+.skeleton-line {
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.10), transparent);
+  background-size: 200% 100%;
+  animation: mm-shimmer 1.6s linear infinite;
+  border-radius: 4px;
+  display: block;
+}
+[data-theme="light"] .skeleton-line {
+  background: linear-gradient(90deg, transparent, rgba(30,25,15,0.10), transparent);
+  background-size: 200% 100%;
+  animation: mm-shimmer 1.6s linear infinite;
+}

@@ -15,6 +15,7 @@ import ConfirmDialog from '@/components/ConfirmDialog'
 import SelectionActionBar from '@/components/SelectionActionBar'
 import SaveCollectionDialog from '@/components/SaveCollectionDialog'
 import { useSelection } from '@/hooks/useSelection'
+import { DocCardSkeleton } from '@/components/skeletons'
 
 const USER_ID = 'admin'
 
@@ -931,7 +932,13 @@ export default function DashboardPage() {
               className="max-h-56 overflow-auto border-t"
               style={{ borderColor: 'var(--border)' }}
             >
-              {displayedDocs.length === 0 ? (
+              {isLoading ? (
+                <>
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <DocCardSkeleton key={i} />
+                  ))}
+                </>
+              ) : displayedDocs.length === 0 ? (
                 <div
                   className="p-6 text-center"
                   style={{
