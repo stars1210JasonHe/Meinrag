@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Send, FileText, Loader2, X, Square } from 'lucide-react'
+import { Send, FileText, Loader2, X, Square, PanelRightClose, PanelRightOpen } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useQuery } from '@tanstack/react-query'
@@ -109,6 +109,16 @@ export default function ChatPage() {
   const [contextInfo, setContextInfo] = useState(null)
   const [selectedSource, setSelectedSource] = useState(null)
   const abortControllerRef = useRef(null)
+
+  // Right-side chat panel collapse — persisted in localStorage so users
+  // who prefer a wide PDF view can leave it hidden across sessions.
+  const [chatCollapsed, setChatCollapsed] = useState(() => {
+    if (typeof localStorage === 'undefined') return false
+    return localStorage.getItem('meinrag.chatPanel.collapsed') === '1'
+  })
+  useEffect(() => {
+    localStorage.setItem('meinrag.chatPanel.collapsed', chatCollapsed ? '1' : '0')
+  }, [chatCollapsed])
 
   const {
     tabs,
@@ -633,7 +643,27 @@ export default function ChatPage() {
         )}
       </div>
 
-      {/* ── Chat sidebar (right) ─────────────────────────────── */}
+      {/* ── Chat sidebar (right) — collapsible ───────────────── */}
+      {chatCollapsed ? (
+        <aside
+          className="w-8 border-l flex flex-col items-center shrink-0 py-2 gap-2"
+          style={{
+            borderColor: 'var(--border-strong, rgba(255,255,255,0.14))',
+            backgroundColor: 'var(--bg-1, #0c0c0f)',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setChatCollapsed(false)}
+            className="p-1.5 rounded transition-colors hover:bg-white/5"
+            title={t('chat.expandChat', { defaultValue: 'Show chat' })}
+            aria-label={t('chat.expandChat', { defaultValue: 'Show chat' })}
+            style={{ color: 'var(--fg-dim)' }}
+          >
+            <PanelRightOpen size={14} />
+          </button>
+        </aside>
+      ) : (
       <div
         className="w-[360px] border-l flex flex-col shrink-0"
         style={{
@@ -641,6 +671,23 @@ export default function ChatPage() {
           backgroundColor: 'var(--bg-1, #0c0c0f)',
         }}
       >
+        {/* Collapse toggle in a thin top bar */}
+        <div
+          className="flex items-center justify-end px-2 py-1 border-b shrink-0"
+          style={{ borderColor: 'var(--border-strong, rgba(255,255,255,0.14))' }}
+        >
+          <button
+            type="button"
+            onClick={() => setChatCollapsed(true)}
+            className="p-1.5 rounded transition-colors hover:bg-white/5"
+            title={t('chat.collapseChat', { defaultValue: 'Hide chat' })}
+            aria-label={t('chat.collapseChat', { defaultValue: 'Hide chat' })}
+            style={{ color: 'var(--fg-dim)' }}
+          >
+            <PanelRightClose size={14} />
+          </button>
+        </div>
+
         {/* Chat messages */}
         <div className="flex-1 overflow-y-auto px-3 py-3">
           {messages.length === 0 ? (
@@ -877,6 +924,7 @@ export default function ChatPage() {
           </div>
         </div>
       </div>
+      )}
 
     </div>
   )

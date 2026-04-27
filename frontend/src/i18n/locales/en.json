@@ -51,6 +51,8 @@
     "chatHistory": "Chat history",
     "collapseHistory": "Hide chat history",
     "expandHistory": "Show chat history",
+    "collapseChat": "Hide chat",
+    "expandChat": "Show chat",
     "hideSources": "Hide sources",
     "showSources": "Show sources",
     "stopGeneration": "Stop generation",
