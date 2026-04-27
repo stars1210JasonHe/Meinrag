@@ -774,25 +774,44 @@ export default function ChatPage() {
           </div>
         )}
 
-        {/* Scope indicator + Input bar */}
+        {/* Input bar with inline scope chip (F07) */}
         <div
           className="px-3 py-3 border-t shrink-0"
           style={{ borderColor: 'var(--border-strong, rgba(255,255,255,0.14))' }}
         >
-          {(scopeDocId || scopeCollection || scopeDocIds) && (
-            <div className="mb-2 flex items-center gap-2 text-xs"
-                 style={{ color: 'var(--fg-dim, #9a9690)' }}>
-              <FileText size={12} />
-              <span className="truncate">{t('chat.searchingIn')} <strong style={{ color: 'var(--fg, #f4f2ee)' }}>
-                {scopeDocIds
-                  ? t('chat.nDocs', { count: scopeDocIds.length, defaultValue: `${scopeDocIds.length} selected documents` })
-                  : scopeDocId ? scopeDocName
-                  : scopeCollection}
-              </strong></span>
-              <button onClick={clearScope} className="opacity-40 hover:opacity-100 shrink-0"><X size={12} /></button>
-            </div>
-          )}
           <div className="flex items-center gap-2">
+            {(scopeDocId || scopeCollection || scopeDocIds) && (
+              <div
+                className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] shrink-0 max-w-[40%]"
+                style={{
+                  backgroundColor: 'var(--signature-soft)',
+                  color: 'var(--signature)',
+                  border: '1px solid var(--signature)',
+                }}
+                title={
+                  scopeDocIds
+                    ? t('chat.nDocs', { count: scopeDocIds.length, defaultValue: `${scopeDocIds.length} selected documents` })
+                    : scopeDocId ? scopeDocName
+                    : scopeCollection
+                }
+              >
+                <FileText size={11} className="shrink-0" />
+                <span className="truncate">
+                  {scopeDocIds
+                    ? t('chat.nDocs', { count: scopeDocIds.length, defaultValue: `${scopeDocIds.length} selected documents` })
+                    : scopeDocId ? scopeDocName
+                    : scopeCollection}
+                </span>
+                <button
+                  type="button"
+                  onClick={clearScope}
+                  className="opacity-60 hover:opacity-100 shrink-0"
+                  aria-label={t('inputBar.clearFilter')}
+                >
+                  <X size={10} />
+                </button>
+              </div>
+            )}
             <input
               ref={inputRef}
               type="text"
