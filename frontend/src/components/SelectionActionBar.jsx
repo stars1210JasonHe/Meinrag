@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { MessageSquare, Network, BookmarkPlus, X, AlertTriangle } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { MessageSquare, Network, BookmarkPlus, X, AlertTriangle, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
 import { useSelection } from '@/hooks/useSelection'
@@ -13,10 +13,29 @@ import { useSelection } from '@/hooks/useSelection'
  *   onVisualize: () => void      — Phase 5 action (required)
  *   onSave: () => void           — Phase 6 action (required); disabled until count >= 2
  */
+const HINT_KEY = 'meinrag.multiselect.hinted'
+
 export default function SelectionActionBar({ onAsk, onVisualize, onSave }) {
   const { t } = useTranslation()
   const selection = useSelection()
   const [hoverItems, setHoverItems] = useState(false)
+  const [showHint, setShowHint] = useState(() => {
+    if (typeof localStorage === 'undefined') return false
+    return localStorage.getItem(HINT_KEY) !== '1'
+  })
+
+  // Auto-dismiss the hint after 8 s; click ✕ also dismisses.
+  useEffect(() => {
+    if (!showHint || selection.count < 1) return
+    const timer = setTimeout(() => dismissHint(), 8000)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showHint, selection.count])
+
+  const dismissHint = () => {
+    setShowHint(false)
+    try { localStorage.setItem(HINT_KEY, '1') } catch { /* ignore */ }
+  }
 
   const count = selection.count
   if (count < 1) return null
@@ -50,15 +69,46 @@ export default function SelectionActionBar({ onAsk, onVisualize, onSave }) {
   ].slice(0, 5)
 
   return (
-    <div
-      role="toolbar"
-      aria-label={t('selection.toolbar', { defaultValue: 'Selection actions' })}
-      className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40
-                 flex items-center gap-2 px-3 py-2 rounded-full
-                 bg-[color:var(--bg-2,#111115)]/95 backdrop-blur
-                 border border-[color:var(--signature,#5b7ec9)]/50
-                 shadow-xl shadow-black/30"
-    >
+    <>
+      {showHint && (
+        <div
+          role="status"
+          className="fixed bottom-24 left-1/2 -translate-x-1/2 z-40
+                     flex items-start gap-2 px-3.5 py-2.5 rounded-lg
+                     max-w-[420px] text-[12px] leading-snug
+                     bg-[color:var(--bg-2,#111115)]/95 backdrop-blur
+                     border border-[color:var(--signature,#5b7ec9)]
+                     shadow-xl shadow-black/30 animate-in fade-in"
+          style={{ color: 'var(--fg)' }}
+        >
+          <Sparkles size={14} style={{ color: 'var(--signature)', marginTop: 2 }} />
+          <div className="flex-1">
+            <div className="font-medium mb-0.5">
+              {t('selection.hintTitle', { defaultValue: 'Selection actions' })}
+            </div>
+            <div className="opacity-70">
+              {t('selection.hintBody', { defaultValue: 'Ask AI about your selection, visualize as a graph, or save as a named collection.' })}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={dismissHint}
+            aria-label={t('common.close', { defaultValue: 'Close' })}
+            className="opacity-50 hover:opacity-100 shrink-0 -mr-1"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
+      <div
+        role="toolbar"
+        aria-label={t('selection.toolbar', { defaultValue: 'Selection actions' })}
+        className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40
+                   flex items-center gap-2 px-3 py-2 rounded-full
+                   bg-[color:var(--bg-2,#111115)]/95 backdrop-blur
+                   border border-[color:var(--signature,#5b7ec9)]/50
+                   shadow-xl shadow-black/30"
+      >
       {warnLarge && (
         <div
           className="flex items-center gap-1 px-2 py-0.5 rounded-full
@@ -144,6 +194,7 @@ export default function SelectionActionBar({ onAsk, onVisualize, onSave }) {
       >
         <X size={14} />
       </button>
-    </div>
+      </div>
+    </>
   )
 }

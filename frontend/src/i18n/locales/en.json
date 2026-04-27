@@ -196,6 +196,8 @@
     "saveHelp": "{{count}} item(s) will be grouped into a new collection.",
     "saveNameLabel": "Collection name",
     "saveNameHint": "Letters, numbers, hyphens, underscores. Spaces become hyphens.",
+    "hintTitle": "Selection actions",
+    "hintBody": "Ask AI about your selection, visualize as a graph, or save as a named collection.",
     "saveSuccess": "Saved collection \"{{name}}\"",
     "conflictTitle": "Name already exists",
     "conflictBody": "Collection \"{{name}}\" already has {{count}} documents. Pick a different name, or merge your selection into it.",
