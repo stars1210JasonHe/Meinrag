@@ -261,3 +261,12 @@ class MindmapTreeResponse(BaseModel):
     filename: str
     cached: bool              # True if served from data/mindmaps/ cache
     tree: MindmapTree
+
+
+class CorpusStatsResponse(BaseModel):
+    """Aggregate corpus stats for the chat empty state."""
+    chunks: int          # total chunks across all docs visible to this user
+    collections: int     # distinct collections with at least one doc
+    edges: int           # total chunk_edges rows in the corpus
+    documents: int       # doc count (bonus, useful for "0 docs" empty state)
+

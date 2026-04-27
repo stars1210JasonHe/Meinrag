@@ -622,3 +622,10 @@ class EdgeRepository:
         )
         result = await self._db.execute(stmt)
         return result.rowcount
+
+    async def count_all(self) -> int:
+        """Total number of edges across the entire corpus."""
+        result = await self._db.execute(
+            select(func.count()).select_from(ChunkEdgeModel)
+        )
+        return int(result.scalar() or 0)

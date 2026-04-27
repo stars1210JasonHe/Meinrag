@@ -33,6 +33,7 @@ from app.models.schemas import (
     ChunkListResponse,
     DocGraphResponse,
     MindmapTreeResponse,
+    CorpusStatsResponse,
 )
 from app.services.document_processor import DocumentProcessor, SUPPORTED_EXTENSIONS
 from app.services.mindmap import build_doc_graph, build_mindmap_tree
@@ -224,6 +225,31 @@ async def list_collections(
     return CollectionsResponse(
         taxonomy_categories=PRIMARY_CATEGORIES,
         existing_collections=existing,
+    )
+
+
+@router.get("/stats", response_model=CorpusStatsResponse)
+async def get_corpus_stats(
+    settings: Settings = Depends(get_settings),
+    registry: DocumentRepository = Depends(get_registry),
+    edge_repo=Depends(get_edge_repository),
+    current_user: str = Depends(get_current_user),
+):
+    """Aggregate corpus stats for the chat empty state and similar surfaces.
+
+    Returns total documents, total chunks (summed across docs), distinct
+    collections in use, and total chunk_edges rows. Edge count is corpus-wide
+    (no per-user scoping yet — chunk_edges has no user_id column).
+    """
+    user_filter = _get_user_filter(settings, current_user)
+    docs = await registry.list_all(user_id=user_filter)
+    collections = await registry.get_all_collections(user_id=user_filter)
+    edges = await edge_repo.count_all()
+    return CorpusStatsResponse(
+        chunks=sum(d.get("chunk_count", 0) or 0 for d in docs),
+        collections=len(collections),
+        edges=edges,
+        documents=len(docs),
     )
 
 

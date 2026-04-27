@@ -257,7 +257,10 @@ def _build_test_app():
         "current_user": "admin",
     }
     stubs["registry"].get = AsyncMock()
+    stubs["registry"].list_all = AsyncMock(return_value=[])
+    stubs["registry"].get_all_collections = AsyncMock(return_value=[])
     stubs["edge_repo"].get_edges_in_doc = AsyncMock()
+    stubs["edge_repo"].count_all = AsyncMock(return_value=0)
 
     app.dependency_overrides[get_settings] = lambda: stubs["settings"]
     app.dependency_overrides[get_vector_store] = lambda: stubs["vector_store"]
@@ -676,6 +679,41 @@ class TestMindmapTreeRoute:
                 headers={"X-User-Id": "bob"},
             )
         assert resp.status_code == 403
+
+
+class TestCorpusStatsRoute:
+    """GET /documents/stats — aggregate corpus stats for the chat empty state."""
+
+    def test_happy_path(self):
+        app, stubs = _build_test_app()
+        stubs["registry"].list_all = AsyncMock(return_value=[
+            {"doc_id": "d1", "chunk_count": 50, "user_id": "admin"},
+            {"doc_id": "d2", "chunk_count": 75, "user_id": "admin"},
+        ])
+        stubs["registry"].get_all_collections = AsyncMock(
+            return_value=["col-a", "col-b"]
+        )
+        stubs["edge_repo"].count_all = AsyncMock(return_value=42)
+
+        with TestClient(app) as client:
+            resp = client.get("/documents/stats", headers={"X-User-Id": "admin"})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data == {
+            "chunks": 125,
+            "collections": 2,
+            "edges": 42,
+            "documents": 2,
+        }
+
+    def test_empty_corpus(self):
+        app, stubs = _build_test_app()
+        # defaults: list_all=[], get_all_collections=[], count_all=0
+        with TestClient(app) as client:
+            resp = client.get("/documents/stats", headers={"X-User-Id": "admin"})
+        assert resp.status_code == 200
+        assert resp.json() == {"chunks": 0, "collections": 0, "edges": 0, "documents": 0}
 
 
 @pytest.mark.asyncio
