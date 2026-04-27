@@ -86,6 +86,25 @@ export default function GraphPage() {
     multiDocIds ? 'docs' : (docId ? 'doc' : 'all')
   ) // 'all' | 'collection' | 'doc' | 'docs'
   const [scopeLabel, setScopeLabel] = useState('')
+
+  // Sync scope state when the URL :docId changes — e.g. when the user
+  // clicks a document node in the all-docs view and we navigate(/graph/<id>).
+  // Without this, scope stayed at its initial value and the graph query
+  // never re-fetched.
+  useEffect(() => {
+    if (docId) {
+      setScope(docId)
+      setScopeType('doc')
+    } else if (multiDocIds) {
+      setScopeType('docs')
+      setScope('')
+    } else {
+      setScope('')
+      setScopeType('all')
+      setScopeLabel('')
+    }
+  }, [docId, multiDocsParam])
+
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
   // Track theme so the force-graph canvas background re-renders on toggle
   const [themeTick, setThemeTick] = useState(0)
