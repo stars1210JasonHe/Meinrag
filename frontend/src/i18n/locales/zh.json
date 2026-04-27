@@ -114,6 +114,7 @@
     "loadingGraph": "正在加载图谱...",
     "noGraphData": "暂无图谱数据。请选择或上传文档。",
     "exploreChunks": "探索块",
+    "viewAsMindmap": "查看思维导图",
     "viewNeighbors": "查看邻居",
     "askAboutThis": "就此提问",
     "page": "第 {{num}} 页",

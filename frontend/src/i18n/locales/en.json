@@ -114,6 +114,7 @@
     "loadingGraph": "Loading graph...",
     "noGraphData": "No graph data. Select a document or upload one.",
     "exploreChunks": "Explore chunks",
+    "viewAsMindmap": "View as Mind Map",
     "viewNeighbors": "View neighbors",
     "askAboutThis": "Ask about this",
     "page": "Page {{num}}",

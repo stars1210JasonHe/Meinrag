@@ -242,14 +242,17 @@ export default function GraphPage() {
   }, [graphFormatted.links])
 
   const handleNodeClick = useCallback((node) => {
-    // Document node: always drill-down immediately
+    // Document node: navigate so the URL reflects the per-doc view.
+    // Was setScope(...) which only updated local state, leaving the URL
+    // at /graph and the Mind Map toggle disabled (because that toggle
+    // is gated on useParams().docId).
     if (node._data?.node_type === 'document') {
       clearTimeout(clickTimerRef.current)
-      setScope(node._data.doc_id)
       setSelectedNode(null)
       setPinnedNode(null)
       setHighlightNodes(new Set())
       setHighlightLinks(new Set())
+      navigate(`/graph/${node._data.doc_id}`)
       return
     }
 
@@ -307,7 +310,8 @@ export default function GraphPage() {
 
     if (node._data?.node_type === 'document') {
       items.push(
-        { label: t('graph.exploreChunks'), icon: Network, action: () => { setScope(node._data.doc_id); setSelectedNode(null) } },
+        { label: t('graph.exploreChunks'), icon: Network, action: () => navigate(`/graph/${node._data.doc_id}`) },
+        { label: t('graph.viewAsMindmap', { defaultValue: 'View as Mind Map' }), icon: GitBranch, action: () => navigate(`/graph/${node._data.doc_id}?mode=mindmap`) },
         { label: t('dashboard.chatAboutThis'), icon: MessageSquare, action: () => navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.source_file || '')}`) },
         { label: t('dashboard.openInPdf'), icon: ExternalLink, action: () => navigate(`/pdf/${node._data.doc_id}`) },
       )
