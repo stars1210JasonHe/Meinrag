@@ -3,19 +3,52 @@ import { Tree } from 'react-d3-tree'
 import './MindmapTree.css'
 
 /**
- * MindmapTree — horizontal dendrogram renderer for the LLM-derived
- * concept tree (see GET /documents/:id/mindmap).
+ * Per-depth visual style. Index = node depth. Append rows to add layers.
+ * Each row is fully self-contained — the renderer reads it without branching.
+ *
+ *   shape:        'pill' | 'rounded' | 'underline'  — how the node draws
+ *   width/height: bounding box for the shape + label hit target
+ *   maxChars:     label truncation (set high to disable)
+ *   fill:         background colour for shape
+ *   stroke:       border colour (resting); selected state overrides to --signature
+ *   labelColor:   text fill
+ *   font:         { size, weight }
+ *   showBadge:    whether to draw the chunk-count circle (typically only on leaves)
+ */
+const DEPTH_STYLES = [
+  // depth 0 — central concept (one node)
+  { shape: 'pill',      width: 220, height: 44, maxChars: 40,
+    fill: 'var(--signature)', stroke: 'transparent',
+    labelColor: '#fff', font: { size: 17, weight: 700 }, showBadge: false },
+  // depth 1 — branches
+  { shape: 'rounded',   width: 200, height: 36, maxChars: 32,
+    fill: 'var(--bg-2)', stroke: 'var(--border-strong)',
+    labelColor: 'var(--fg)', font: { size: 15, weight: 600 }, showBadge: false },
+  // depth 2 — leaves (clickable, has chunks)
+  { shape: 'underline', width: 240, height: 36, maxChars: 36,
+    fill: 'transparent', stroke: 'var(--border)',
+    labelColor: 'var(--fg-1)', font: { size: 13, weight: 400 }, showBadge: true },
+  // depth 3+ — fallback (last row repeats for any deeper depth)
+  // To add real layer 4 styling: append a row above this comment.
+]
+
+const FALLBACK_STYLE = DEPTH_STYLES[DEPTH_STYLES.length - 1]
+function styleFor(depth) {
+  return DEPTH_STYLES[depth] ?? FALLBACK_STYLE
+}
+
+/**
+ * MindmapTree — horizontal dendrogram for the LLM-derived concept tree.
  *
  * Props:
- *   tree              -- { central, branches: [{ name, children: [{ name, chunk_indices }] }] }
- *   selectedChunkIds  -- number[] — chunks to visually mark on matching leaves
- *   onLeafClick       -- (leaf) => void — parent handles NodePanel update
+ *   tree              -- backend shape; see adaptBackend() below
+ *   selectedChunkIds  -- number[] — visually mark nodes whose chunks intersect
+ *   onLeafClick       -- (node) => void — fires for nodes flagged __leaf
  */
 export default function MindmapTree({ tree, selectedChunkIds = [], onLeafClick }) {
   const containerRef = useRef(null)
   const [translate, setTranslate] = useState({ x: 120, y: 240 })
 
-  // Fit-to-screen on mount (research §6: explicit fit + wheel/button zoom)
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
@@ -28,22 +61,11 @@ export default function MindmapTree({ tree, selectedChunkIds = [], onLeafClick }
 
   const renderNode = useCallback(
     ({ nodeDatum, toggleNode }) => {
-      const isCentral = nodeDatum.__depth === 0
-      const isBranch = nodeDatum.__depth === 1
-      const isLeaf = nodeDatum.__depth === 2
-      const chunkIndices = nodeDatum.__chunk_indices
-      const chunkCount = chunkIndices?.length ?? 0
-
-      const isSelected =
-        isLeaf && chunkIndices?.some(i => selectedSet.has(i))
-
-      const handle = isLeaf ? () => onLeafClick?.(nodeDatum) : toggleNode
-
-      const width = isCentral ? 220 : isBranch ? 200 : 220
-      const height = isCentral ? 44 : isBranch ? 36 : 40
-
-      const fontSize = isCentral ? 17 : isBranch ? 15 : 13
-      const fontWeight = isCentral ? 700 : isBranch ? 600 : 400
+      const style = styleFor(nodeDatum.__depth)
+      const chunks = nodeDatum.__chunk_indices ?? []
+      const chunkCount = chunks.length
+      const isSelected = nodeDatum.__leaf && chunks.some(i => selectedSet.has(i))
+      const handle = nodeDatum.__leaf ? () => onLeafClick?.(nodeDatum) : toggleNode
 
       return (
         <g
@@ -54,42 +76,29 @@ export default function MindmapTree({ tree, selectedChunkIds = [], onLeafClick }
           onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handle() } }}
           style={{ cursor: 'pointer' }}
         >
-          <rect
-            x={-width / 2} y={-height / 2} width={width} height={height}
-            rx={6} ry={6}
-            style={{
-              fill: 'var(--bg-1, #0c0c0f)',
-              stroke: isSelected
-                ? 'var(--signature, #5b7ec9)'
-                : 'var(--border-strong, rgba(255,255,255,0.14))',
-              strokeWidth: isSelected ? 2 : 1,
-              transition: 'stroke 0.12s, fill 0.12s',
-            }}
-          />
+          {renderShape(style, isSelected)}
           <text
             x={0} y={0}
             textAnchor="middle" dominantBaseline="central"
             style={{
-              fill: 'var(--fg, #f4f2ee)',
-              fontSize: `${fontSize}px`,
-              fontWeight,
+              fill: style.labelColor,
+              fontSize: `${style.font.size}px`,
+              fontWeight: style.font.weight,
               pointerEvents: 'none',
               userSelect: 'none',
             }}
           >
-            {clampLabel(nodeDatum.name, isCentral ? 36 : isBranch ? 30 : 28)}
+            {clampLabel(nodeDatum.name, style.maxChars)}
           </text>
           <title>{nodeDatum.name}</title>
-          {isLeaf && chunkCount > 0 && (
-            <g transform={`translate(${width / 2 - 10}, ${-height / 2 + 10})`}>
-              <circle r={10} style={{ fill: 'var(--signature, #5b7ec9)', opacity: 0.9 }} />
+          {style.showBadge && chunkCount > 0 && (
+            <g transform={`translate(${style.width / 2 - 10}, ${-style.height / 2 + 10})`}>
+              <circle r={9} style={{ fill: 'var(--signature)', opacity: 0.9 }} />
               <text
                 style={{
                   fill: '#fff',
                   fontSize: '10px',
                   fontWeight: 600,
-                  textAnchor: 'middle',
-                  dominantBaseline: 'central',
                   pointerEvents: 'none',
                 }}
                 textAnchor="middle"
@@ -121,7 +130,7 @@ export default function MindmapTree({ tree, selectedChunkIds = [], onLeafClick }
         zoom={0.9}
         scaleExtent={{ min: 0.3, max: 2 }}
         separation={{ siblings: 1.2, nonSiblings: 1.6 }}
-        nodeSize={{ x: 260, y: 50 }}
+        nodeSize={{ x: 280, y: 56 }}
         translate={translate}
         renderCustomNodeElement={renderNode}
       />
@@ -129,21 +138,84 @@ export default function MindmapTree({ tree, selectedChunkIds = [], onLeafClick }
   )
 }
 
-function adaptBackend(tree) {
-  const root = {
-    name: tree.central,
-    __depth: 0,
-    children: (tree.branches || []).map(b => ({
-      name: b.name,
-      __depth: 1,
-      children: (b.children || []).map(c => ({
-        name: c.name,
-        __depth: 2,
-        __chunk_indices: c.chunk_indices || [],
-      })),
-    })),
+/* ─── shape renderers ──────────────────────────────────────── */
+
+function renderShape(style, isSelected) {
+  const stroke = isSelected ? 'var(--signature)' : style.stroke
+  const strokeWidth = isSelected ? 2 : 1
+  const common = {
+    style: {
+      fill: style.fill,
+      stroke, strokeWidth,
+      transition: 'stroke 0.12s, fill 0.12s',
+    },
   }
-  return root
+  switch (style.shape) {
+    case 'pill':
+      return (
+        <rect
+          x={-style.width / 2} y={-style.height / 2}
+          width={style.width} height={style.height}
+          rx={style.height / 2} ry={style.height / 2}
+          {...common}
+        />
+      )
+    case 'rounded':
+      return (
+        <rect
+          x={-style.width / 2} y={-style.height / 2}
+          width={style.width} height={style.height}
+          rx={6} ry={6}
+          {...common}
+        />
+      )
+    case 'underline':
+      // Invisible hit target + a baseline rule under the label.
+      return (
+        <>
+          <rect
+            x={-style.width / 2} y={-style.height / 2}
+            width={style.width} height={style.height}
+            rx={4} ry={4}
+            style={{ fill: 'transparent', stroke: 'transparent' }}
+          />
+          <line
+            x1={-style.width / 2 + 8} x2={style.width / 2 - 8}
+            y1={style.height / 2 - 2}  y2={style.height / 2 - 2}
+            style={{ stroke, strokeWidth }}
+          />
+        </>
+      )
+    default:
+      return null
+  }
+}
+
+/* ─── data adapter ─────────────────────────────────────────── */
+
+/**
+ * Walks the backend tree once, stamping each node with __depth, __leaf,
+ * __hasChunks, __chunk_indices. Renderer reads only these flags — depth
+ * is no longer overloaded with semantic meaning.
+ *
+ * To add layer 4: change the recursion below to keep going past
+ * b.children[].children[]. The flags carry the meaning forward.
+ */
+function adaptBackend(tree) {
+  const visit = (node, depth) => {
+    const children = node.children || node.branches
+    const isLeaf = !children || children.length === 0
+    const chunks = node.chunk_indices || []
+    return {
+      name: node.name ?? node.central,
+      __depth: depth,
+      __leaf: isLeaf,
+      __hasChunks: chunks.length > 0,
+      __chunk_indices: chunks,
+      children: isLeaf ? undefined : children.map(c => visit(c, depth + 1)),
+    }
+  }
+  return visit({ name: tree.central, children: tree.branches || [] }, 0)
 }
 
 function clampLabel(text, maxChars) {
