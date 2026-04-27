@@ -61,7 +61,17 @@
     "requestFailed": "请求失败：{{message}}",
     "responseFailed": "获取响应失败：{{message}}",
     "nDocs": "{{count}} selected documents",
-    "emptyMain": "提问后,相关的文档会出现在这里。"
+    "emptyMain": "提问后,相关的文档会出现在这里。",
+    "corpusStats": "你的语料库",
+    "corpusChunks": "块",
+    "corpusCollections": "合集",
+    "corpusEdges": "关系",
+    "tryAsking": "试着问",
+    "suggestion1": "比较你文档中的关键方法",
+    "suggestion2": "总结最近上传的文档",
+    "suggestion3": "查找支持核心论点的最强证据",
+    "upload": "上传文档",
+    "browseDashboard": "浏览仪表板"
   },
   "inputBar": {
     "askCollection": "在 {{collection}} 文档中提问...",

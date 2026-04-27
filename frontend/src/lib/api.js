@@ -99,6 +99,10 @@ export const sendQuery = (question, options, userId) =>
     body: JSON.stringify({ question, ...options }),
   })
 
+// Corpus stats
+export const fetchCorpusStats = (userId) =>
+  apiFetch('/documents/stats', { headers: headers(userId) })
+
 // Sessions
 export const fetchSessions = (userId, scopeType, scopeValue) => {
   let params = ''

@@ -61,7 +61,17 @@
     "requestFailed": "Request failed: {{message}}",
     "responseFailed": "Failed to get response: {{message}}",
     "nDocs": "{{count}} selected documents",
-    "emptyMain": "Your source documents will appear here when you ask a question."
+    "emptyMain": "Your source documents will appear here when you ask a question.",
+    "corpusStats": "YOUR CORPUS",
+    "corpusChunks": "CHUNKS",
+    "corpusCollections": "COLLECTIONS",
+    "corpusEdges": "EDGES",
+    "tryAsking": "TRY ASKING",
+    "suggestion1": "Compare key approaches across your documents",
+    "suggestion2": "Summarize the most recent document",
+    "suggestion3": "Find the strongest evidence for the central claim",
+    "upload": "Upload a document",
+    "browseDashboard": "Browse dashboard"
   },
   "inputBar": {
     "askCollection": "Ask about {{collection}} documents...",

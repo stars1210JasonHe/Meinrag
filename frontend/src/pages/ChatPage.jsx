@@ -19,6 +19,7 @@ import SourceTabs from '@/components/SourceTabs'
 import TextDocViewer from '@/components/TextDocViewer'
 import SourceCard from '@/components/SourceCard'
 import PdfViewer from '@/components/PdfViewer'
+import ChatEmptyState from '@/components/ChatEmptyState'
 
 // Substring that identifies a corpus-refusal answer. Anchored to the exact
 // phrase the RAG_SYSTEM_PROMPT instructs the LLM to emit.
@@ -675,10 +676,10 @@ export default function ChatPage() {
         {/* Chat messages */}
         <div className="flex-1 overflow-y-auto px-3 py-3">
           {messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full opacity-40">
-              <FileText size={40} className="mb-3" />
-              <p className="text-sm text-center px-4">{t('chat.askEmpty')}</p>
-            </div>
+            <ChatEmptyState onSuggestionClick={(text) => {
+              setInput(text)
+              inputRef.current?.focus()
+            }} />
           ) : (
             <div className="space-y-3">
               {messages.map((msg, i) => {
