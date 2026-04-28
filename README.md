@@ -5,8 +5,8 @@
 MEINRAG is a full-stack application that allows you to upload documents, organize them into collections, and ask questions in natural language. Get accurate answers with source citations from your document library.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Python](https://img.shields.io/badge/python-3.12+-blue.svg)
-![React](https://img.shields.io/badge/react-18+-blue.svg)
+![Python](https://img.shields.io/badge/python-3.13+-blue.svg)
+![React](https://img.shields.io/badge/react-19+-blue.svg)
 
 ---
 
@@ -101,8 +101,8 @@ For day-to-day development with hot-reload on backend (uvicorn `--reload`) and
 frontend (`vite`). Docker only runs the supporting services.
 
 **Prerequisites**:
-- Python 3.12+
-- Node.js 18+
+- Python 3.13+
+- Node.js 20+
 - Docker Desktop (for PostgreSQL)
 - OpenAI API key
 
@@ -224,9 +224,12 @@ MEINRAG/
 │   └── package.json
 ├── tests/                        # Test suite (125 tests, in-memory SQLite)
 ├── data/                         # Uploaded files + vector store
-├── Dockerfile                    # Production container (python:3.12-slim + uv)
+├── Dockerfile                    # Backend image (python:3.13-slim + uv, multi-stage)
+├── frontend/Dockerfile           # Frontend image (vite build → nginx:alpine)
+├── frontend/nginx.conf           # SPA + reverse proxy + SSE-friendly
 ├── .dockerignore                 # Docker build exclusions
-├── docker-compose.yml            # PostgreSQL 16 + app containers
+├── docker-compose.yml            # Dev helpers only: postgres + redis
+├── docker-compose.prod.yml       # Full prod stack: postgres + backend + frontend
 ├── alembic.ini                   # Alembic config
 ├── .env                          # Environment variables
 ├── pyproject.toml                # Python dependencies

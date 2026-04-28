@@ -13,8 +13,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # uv for fast, deterministic installs
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Cache layer — only copies dep files
-COPY pyproject.toml uv.lock* ./
+# Cache layer — only copies dep files. uv.lock must exist (no glob); a
+# missing lockfile would make --frozen silently no-op a fresh resolve.
+COPY pyproject.toml uv.lock ./
 
 # Install only runtime deps into a venv at /app/.venv
 RUN uv sync --no-dev --frozen --no-editable
