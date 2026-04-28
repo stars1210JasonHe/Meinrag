@@ -1,30 +1,44 @@
-FROM python:3.12-slim
+# syntax=docker/dockerfile:1.6
+
+# ── Stage 1: builder — install deps with uv ──────────────────
+FROM python:3.13-slim AS builder
 
 WORKDIR /app
 
-# Install system dependencies for document processing
+# Build-time deps for some Python wheels (e.g. lxml)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv for fast dependency management
+# uv for fast, deterministic installs
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Copy dependency files first (cache layer)
+# Cache layer — only copies dep files
 COPY pyproject.toml uv.lock* ./
 
-# Install dependencies (no dev deps)
-RUN uv sync --no-dev --no-editable
+# Install only runtime deps into a venv at /app/.venv
+RUN uv sync --no-dev --frozen --no-editable
 
-# Copy application code
-COPY app/ app/
-COPY alembic/ alembic/
+# ── Stage 2: runtime — slim, no uv, no build tooling ─────────
+FROM python:3.13-slim
+
+WORKDIR /app
+
+# Make the venv binaries primary
+COPY --from=builder /app/.venv /app/.venv
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# App code
+COPY app/ ./app/
+COPY alembic/ ./alembic/
 COPY alembic.ini ./
 
-# Create data directories
-RUN mkdir -p data/uploads data/vectorstore
+# Pre-create the dirs we mount volumes onto so the app finds them
+RUN mkdir -p /app/data/uploads /app/data/vectorstore /app/data/mindmaps /root/.cache/docling
 
-EXPOSE ${PORT:-8000}
+EXPOSE 8000
 
-# Run with uv to ensure correct virtual env — port from env
-CMD ["sh", "-c", "uv run uvicorn app.main:app --host ${HOST:-0.0.0.0} --port ${PORT:-8000}"]
+# Run alembic migrations then uvicorn. exec replaces sh so signals reach uvicorn.
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
