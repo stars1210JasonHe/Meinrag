@@ -17,18 +17,18 @@ import './MindmapTree.css'
  */
 const DEPTH_STYLES = [
   // depth 0 — central concept (one node)
-  // maxChars tightened from 40 → 25 so the label doesn't overflow the pill
-  // (17px × 40 chars ≈ 360-400px wide, which spills past the 220px pill).
+  // 17px × 25 chars fits the 220px pill comfortably. Weight dropped
+  // 700 → 600 — still distinct from branches but no longer chunky.
   { shape: 'pill',      width: 220, height: 44, maxChars: 25,
     fill: 'var(--signature)', stroke: 'transparent',
-    labelColor: '#fff', font: { size: 17, weight: 700 }, showBadge: false },
+    labelColor: '#fff', font: { size: 17, weight: 600 }, showBadge: false },
   // depth 1 — branches
-  // weight dropped 600 → 500: bold dark text on the colored soft fills
-  // had low contrast on pink/violet hues. Medium weight + tightened
-  // maxChars to fit comfortably in the 200px pill at 15px.
+  // Weight 600 → 500 → 400. Bold weight on the colored soft fills was
+  // muddy on pink/violet; regular weight reads cleanly. The hue + size
+  // (15px vs 13px leaves) carries the level distinction now.
   { shape: 'rounded',   width: 200, height: 36, maxChars: 24,
     fill: 'var(--bg-2)', stroke: 'var(--border-strong)',
-    labelColor: 'var(--fg)', font: { size: 15, weight: 500 }, showBadge: false },
+    labelColor: 'var(--fg)', font: { size: 15, weight: 400 }, showBadge: false },
   // depth 2 — leaves (clickable, has chunks)
   { shape: 'underline', width: 240, height: 36, maxChars: 30,
     fill: 'transparent', stroke: 'var(--border)',
