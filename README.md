@@ -60,13 +60,53 @@ MEINRAG is a full-stack application that allows you to upload documents, organiz
 
 ## Quick Start
 
-### Prerequisites
+### Run from scratch with Docker (production stack)
+
+The fastest way to get the full stack running. Postgres, backend, and frontend
+are built and orchestrated by `docker-compose.prod.yml`.
+
+**Prereqs**: Docker Desktop (or Docker Engine + Compose v2) and an OpenAI API key.
+
+```bash
+git clone https://github.com/stars1210JasonHe/Meinrag.git
+cd Meinrag
+cp .env.example .env
+# Edit .env — at minimum set OPENAI_API_KEY=sk-...
+docker compose -f docker-compose.prod.yml up --build
+```
+
+Then open http://localhost:5173.
+
+**First-boot timings** (one-time):
+- Postgres ready: ~5s
+- Backend image build (uv sync): ~2 min
+- Frontend image build (npm ci + vite build): ~1 min
+- First docling model download (cached to `docling_cache` volume): ~5 min
+
+Subsequent `up` is fast — images, deps, and docling models are all cached.
+
+**Stop / wipe**:
+```bash
+docker compose -f docker-compose.prod.yml down       # stop, keep data
+docker compose -f docker-compose.prod.yml down -v    # stop + wipe DB, uploads, vectors
+```
+
+Data lives in named volumes: `pgdata` (Postgres), `app_data` (uploads + vectorstore + mindmaps), `docling_cache` (models).
+
+---
+
+### Dev mode (hot-reload)
+
+For day-to-day development with hot-reload on backend (uvicorn `--reload`) and
+frontend (`vite`). Docker only runs the supporting services.
+
+**Prerequisites**:
 - Python 3.12+
 - Node.js 18+
 - Docker Desktop (for PostgreSQL)
 - OpenAI API key
 
-### Installation
+**Installation**:
 
 1. **Clone the repository**
 ```bash
@@ -109,7 +149,7 @@ cd frontend
 npm install
 ```
 
-### Running the Application
+**Running the Application**:
 
 **Terminal 1 - Start Backend:**
 ```bash
