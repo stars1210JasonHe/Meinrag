@@ -17,15 +17,20 @@ import './MindmapTree.css'
  */
 const DEPTH_STYLES = [
   // depth 0 — central concept (one node)
-  { shape: 'pill',      width: 220, height: 44, maxChars: 40,
+  // maxChars tightened from 40 → 25 so the label doesn't overflow the pill
+  // (17px × 40 chars ≈ 360-400px wide, which spills past the 220px pill).
+  { shape: 'pill',      width: 220, height: 44, maxChars: 25,
     fill: 'var(--signature)', stroke: 'transparent',
     labelColor: '#fff', font: { size: 17, weight: 700 }, showBadge: false },
   // depth 1 — branches
-  { shape: 'rounded',   width: 200, height: 36, maxChars: 32,
+  // weight dropped 600 → 500: bold dark text on the colored soft fills
+  // had low contrast on pink/violet hues. Medium weight + tightened
+  // maxChars to fit comfortably in the 200px pill at 15px.
+  { shape: 'rounded',   width: 200, height: 36, maxChars: 24,
     fill: 'var(--bg-2)', stroke: 'var(--border-strong)',
-    labelColor: 'var(--fg)', font: { size: 15, weight: 600 }, showBadge: false },
+    labelColor: 'var(--fg)', font: { size: 15, weight: 500 }, showBadge: false },
   // depth 2 — leaves (clickable, has chunks)
-  { shape: 'underline', width: 240, height: 36, maxChars: 36,
+  { shape: 'underline', width: 240, height: 36, maxChars: 30,
     fill: 'transparent', stroke: 'var(--border)',
     labelColor: 'var(--fg-1)', font: { size: 13, weight: 400 }, showBadge: true },
   // depth 3+ — fallback (last row repeats for any deeper depth)
