@@ -159,7 +159,7 @@ class TestEmbeddingClassification:
         assert result is None
 
     def test_returns_category_when_confident(self):
-        """When a category matches well, returns category + domains."""
+        """When a category matches well, returns ClassificationResult with primary."""
         from app.classification import TAXONOMY
 
         # Build a mock where we control exactly what vectors are returned
@@ -190,10 +190,9 @@ class TestEmbeddingClassification:
         result = classify_by_embedding(chunks, emb)
 
         assert result is not None
-        assert len(result) >= 1
-        # First element should be a category from our taxonomy
         first_cat = [c for c in TAXONOMY if c != "other"][0]
-        assert result[0] == first_cat
+        assert result.primary_category == first_cat
+        assert isinstance(result.subtags, list)
 
     def test_empty_chunks(self):
         emb = _mock_embeddings()
@@ -215,49 +214,112 @@ class TestEmbeddingClassification:
         assert second_embed_count == first_embed_count
 
 
-# ── TestSuggestCollectionsIntegration ────────────────────────────────────
+# ── TestClassifyDocumentIntegration ──────────────────────────────────────
 
-class TestSuggestCollectionsIntegration:
+class TestClassifyDocumentIntegration:
 
     def test_without_embeddings_uses_llm(self):
-        """When embeddings=None, LLM path is used (backward compat)."""
-        from app.services.collection_suggester import suggest_collections
+        """When embeddings=None, LLM path is used and returns ClassificationResult."""
+        from app.services.collection_suggester import classify_document, ClassificationResult
 
         llm = MagicMock()
-        llm.invoke.return_value = MagicMock(content='["research-scientific", "physics"]')
+        llm.invoke.return_value = MagicMock(content=(
+            '{"primary_category": "research-scientific", '
+            '"subtags": ["fundamental-science"], '
+            '"collection_suggestions": []}'
+        ))
 
         chunks = _make_chunks(["Some text about physics"])
-        result = suggest_collections(chunks, llm, embeddings=None)
+        result = classify_document(chunks, llm, embeddings=None)
+
         assert llm.invoke.called
-        assert "research-scientific" in result
+        assert isinstance(result, ClassificationResult)
+        assert result.primary_category == "research-scientific"
+        assert "fundamental-science" in result.subtags
 
     def test_with_embeddings_skips_llm_when_confident(self):
-        """When embedding classifier returns a result, LLM is never called."""
-        from app.services.collection_suggester import suggest_collections
+        """When embedding classifier returns a primary, LLM is never called."""
+        from app.services.collection_suggester import classify_document, ClassificationResult
 
         llm = MagicMock()
         chunks = _make_chunks(["Physics paper"])
 
         with patch("app.services.embedding_classifier.classify_by_embedding") as mock_cls:
-            mock_cls.return_value = ["research-scientific", "fundamental-science"]
+            mock_cls.return_value = ClassificationResult(
+                primary_category="research-scientific",
+                subtags=["fundamental-science"],
+            )
             emb = _mock_embeddings()
-            result = suggest_collections(chunks, llm, embeddings=emb)
+            result = classify_document(chunks, llm, embeddings=emb)
 
         assert not llm.invoke.called
-        assert result == ["research-scientific", "fundamental-science"]
+        assert result.primary_category == "research-scientific"
+        assert result.subtags == ["fundamental-science"]
 
     def test_with_embeddings_falls_back_on_none(self):
         """When embedding classifier returns None, LLM is used as fallback."""
-        from app.services.collection_suggester import suggest_collections
+        from app.services.collection_suggester import classify_document
 
         llm = MagicMock()
-        llm.invoke.return_value = MagicMock(content='["other"]')
+        llm.invoke.return_value = MagicMock(content=(
+            '{"primary_category": null, "subtags": [], "collection_suggestions": []}'
+        ))
         chunks = _make_chunks(["Ambiguous text"])
 
         with patch("app.services.embedding_classifier.classify_by_embedding") as mock_cls:
             mock_cls.return_value = None
             emb = _mock_embeddings()
-            result = suggest_collections(chunks, llm, embeddings=emb)
+            result = classify_document(chunks, llm, embeddings=emb)
 
         assert llm.invoke.called
-        assert result == ["other"]
+        assert result.primary_category is None
+        assert result.subtags == []
+
+    def test_collection_suggestions_filtered_to_existing(self):
+        """LLM-proposed collections not in the existing list are dropped."""
+        from app.services.collection_suggester import classify_document
+
+        llm = MagicMock()
+        llm.invoke.return_value = MagicMock(content=(
+            '{"primary_category": "research-scientific", '
+            '"subtags": ["fundamental-science"], '
+            '"collection_suggestions": ["physics-papers", "made-up-name"]}'
+        ))
+
+        chunks = _make_chunks(["Physics paper"])
+        result = classify_document(
+            chunks, llm,
+            existing_collections=["physics-papers", "law-cases"],
+            embeddings=None,
+        )
+
+        assert "physics-papers" in result.collection_suggestions
+        assert "made-up-name" not in result.collection_suggestions
+
+    def test_invalid_primary_category_dropped(self):
+        """Unknown primary_category from LLM falls back to None."""
+        from app.services.collection_suggester import classify_document
+
+        llm = MagicMock()
+        llm.invoke.return_value = MagicMock(content=(
+            '{"primary_category": "made-up-category", '
+            '"subtags": [], "collection_suggestions": []}'
+        ))
+
+        result = classify_document(_make_chunks(["text"]), llm, embeddings=None)
+        assert result.primary_category is None
+
+    def test_invalid_subtag_dropped(self):
+        """Subtags not in the taxonomy vocabulary are dropped silently."""
+        from app.services.collection_suggester import classify_document
+
+        llm = MagicMock()
+        llm.invoke.return_value = MagicMock(content=(
+            '{"primary_category": "research-scientific", '
+            '"subtags": ["fundamental-science", "totally-fake-tag"], '
+            '"collection_suggestions": []}'
+        ))
+
+        result = classify_document(_make_chunks(["text"]), llm, embeddings=None)
+        assert "fundamental-science" in result.subtags
+        assert "totally-fake-tag" not in result.subtags

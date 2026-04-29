@@ -39,6 +39,8 @@ class DocumentRepository:
         collections: list[str] | None = None,
         user_id: str = "admin",
         file_hash: str | None = None,
+        primary_category: str | None = None,
+        subtags: list[str] | None = None,
     ) -> None:
         doc = DocumentModel(
             doc_id=doc_id,
@@ -47,9 +49,11 @@ class DocumentRepository:
             chunk_count=chunk_count,
             user_id=user_id,
             file_hash=file_hash,
+            primary_category=primary_category,
+            subtags=list(subtags or []),
         )
         self._session.add(doc)
-        for coll_name in (collections or ["other"]):
+        for coll_name in (collections or []):
             self._session.add(
                 DocumentCollectionModel(doc_id=doc_id, collection=coll_name)
             )
@@ -108,6 +112,25 @@ class DocumentRepository:
             self._session.add(
                 DocumentCollectionModel(doc_id=doc_id, collection=coll_name)
             )
+        await self._session.flush()
+        return True
+
+    async def update_classification(
+        self,
+        doc_id: str,
+        primary_category: str | None,
+        subtags: list[str],
+    ) -> bool:
+        """Replace ``primary_category`` and ``subtags`` on a document. Does not
+        touch ``document_collections`` (those are user-curated)."""
+        result = await self._session.execute(
+            select(DocumentModel).where(DocumentModel.doc_id == doc_id)
+        )
+        doc = result.scalar_one_or_none()
+        if not doc:
+            return False
+        doc.primary_category = primary_category
+        doc.subtags = list(subtags or [])
         await self._session.flush()
         return True
 

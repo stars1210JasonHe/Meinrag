@@ -181,9 +181,17 @@ class TestDocumentUpdateRequest:
         req = DocumentUpdateRequest(collections=["legal-compliance", "contracts-agreements"])
         assert req.collections == ["legal-compliance", "contracts-agreements"]
 
-    def test_empty_collections_rejected(self):
-        with pytest.raises(ValidationError):
-            DocumentUpdateRequest(collections=[])
+    def test_partial_update_allowed(self):
+        """All fields optional — request with just primary_category is valid."""
+        req = DocumentUpdateRequest(primary_category="legal-compliance")
+        assert req.primary_category == "legal-compliance"
+        assert req.subtags is None
+        assert req.collections is None
+
+    def test_empty_request_allowed(self):
+        """No-op update is allowed — caller decides what to do with it."""
+        req = DocumentUpdateRequest()
+        assert req.primary_category is None and req.subtags is None and req.collections is None
 
 
 class TestDocumentUpdateResponse:

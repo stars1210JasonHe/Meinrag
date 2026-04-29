@@ -162,12 +162,15 @@ def classify_by_embedding(
     embeddings: Embeddings,
     category_threshold: float = CATEGORY_THRESHOLD,
     domain_threshold: float = DOMAIN_THRESHOLD,
-) -> list[str] | None:
+):
     """Classify document chunks using embedding cosine similarity.
 
-    Returns a list like ``["research-scientific", "physics"]`` or ``None``
+    Returns a ``ClassificationResult`` (primary_category + subtags), or ``None``
     if confidence is below *category_threshold* (caller should fall back to LLM).
+    The embedding path never proposes user collections.
     """
+    from app.services.collection_suggester import ClassificationResult
+
     sample = _extract_smart_sample(chunks)
     if not sample.strip():
         return None
@@ -189,8 +192,7 @@ def classify_by_embedding(
     best_category = tax.category_names[best_cat_idx]
 
     # ── domain match (within winning category) ───────────────────────
-    result = [best_category]
-
+    subtags: list[str] = []
     domain_indices = [i for i, c in enumerate(tax.domain_categories) if c == best_category]
     if domain_indices:
         dom_vecs = tax.domain_vectors[domain_indices]
@@ -200,10 +202,16 @@ def classify_by_embedding(
         for local_idx, score in ranked[:MAX_DOMAINS]:
             if score >= domain_threshold:
                 global_idx = domain_indices[local_idx]
-                result.append(tax.domain_names[global_idx])
+                subtags.append(tax.domain_names[global_idx])
 
-    logger.info("Embedding classifier: %s (score=%.3f)", result, best_cat_score)
-    return result
+    logger.info(
+        "Embedding classifier: primary=%s subtags=%s (score=%.3f)",
+        best_category, subtags, best_cat_score,
+    )
+    return ClassificationResult(
+        primary_category=best_category,
+        subtags=subtags,
+    )
 
 
 def clear_cache() -> None:

@@ -16,11 +16,13 @@ class TestRegistryAdd:
         assert doc["user_id"] == "admin"
 
     async def test_add_without_collections(self, registry):
-        """A3.2: Document stored with default collections=["other"]."""
+        """A3.2: Document stored with no collections — empty list, not the legacy ['other']."""
         await registry.add("doc2", "readme.txt", ".txt", 3)
         doc = await registry.get("doc2")
         assert doc is not None
-        assert doc["collections"] == ["other"]
+        assert doc["collections"] == []
+        assert doc["primary_category"] is None
+        assert doc["subtags"] == []
 
     async def test_add_with_user_id(self, registry, db_session):
         """Document stored with custom user_id."""

@@ -212,4 +212,12 @@ PRIMARY_CATEGORIES: list[str] = list(TAXONOMY.keys())
 ALL_DOMAINS: list[str] = [
     domain for domains in TAXONOMY.values() for domain in domains
 ]
+ALL_SUBDOMAINS: list[str] = [
+    sub
+    for domains in TAXONOMY.values()
+    for subs in domains.values()
+    for sub in subs
+]
+# Valid sub-tag vocabulary — domains + sub-domains, used by classifier validation.
+ALL_TAGS: set[str] = set(ALL_DOMAINS) | set(ALL_SUBDOMAINS)
 DEFAULT_COLLECTION = "other"

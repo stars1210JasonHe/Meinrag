@@ -2,7 +2,7 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    String, Text, Integer, Float, DateTime, ForeignKey, CheckConstraint, UniqueConstraint, Index,
+    String, Text, Integer, Float, DateTime, ForeignKey, CheckConstraint, UniqueConstraint, Index, JSON,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -45,6 +45,8 @@ class DocumentModel(Base):
     file_hash: Mapped[str | None] = mapped_column(String(64), index=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="ready")
+    primary_category: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    subtags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list, server_default="[]")
     uploaded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -62,6 +64,8 @@ class DocumentModel(Base):
             "filename": self.filename,
             "file_type": self.file_type,
             "chunk_count": self.chunk_count,
+            "primary_category": self.primary_category,
+            "subtags": list(self.subtags or []),
             "collections": [dc.collection for dc in self.collections],
             "user_id": self.user_id,
             "uploaded_at": self.uploaded_at.isoformat(),

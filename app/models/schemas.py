@@ -14,6 +14,8 @@ class UploadResponse(BaseModel):
     doc_id: str
     filename: str
     chunk_count: int
+    primary_category: str | None = None
+    subtags: list[str] = Field(default_factory=list)
     collections: list[str] = Field(default_factory=list)
     suggested_collections: list[str] | None = None
     user_id: str | None = None
@@ -25,6 +27,8 @@ class DocumentInfo(BaseModel):
     filename: str
     file_type: str
     chunk_count: int
+    primary_category: str | None = None
+    subtags: list[str] = Field(default_factory=list)
     collections: list[str] = Field(default_factory=list)
     user_id: str | None = None
     uploaded_at: str
@@ -41,12 +45,17 @@ class DeleteResponse(BaseModel):
 
 
 class DocumentUpdateRequest(BaseModel):
-    collections: list[str] = Field(..., min_length=1)
+    """Partial update — any field omitted is left unchanged."""
+    primary_category: str | None = Field(default=None, description="One of PRIMARY_CATEGORIES, or '' to clear")
+    subtags: list[str] | None = Field(default=None, description="Replace subtags wholesale")
+    collections: list[str] | None = Field(default=None, description="Replace user-curated collections wholesale")
 
 
 class DocumentUpdateResponse(BaseModel):
     doc_id: str
-    collections: list[str]
+    primary_category: str | None = None
+    subtags: list[str] = Field(default_factory=list)
+    collections: list[str] = Field(default_factory=list)
     message: str
 
 
@@ -133,8 +142,21 @@ class ChunkContextRequest(BaseModel):
 
 
 class CollectionsResponse(BaseModel):
+    """Deprecated — kept until T4 swaps the endpoint to TaxonomyResponse."""
     taxonomy_categories: list[str]
     existing_collections: list[str]
+
+
+class TaxonomyResponse(BaseModel):
+    """Three-layer taxonomy returned by GET /documents/taxonomy.
+
+    primary_categories: fixed top-level types from data/taxonomy.json
+    domain_options: primary -> [domain, ...] (for UI sub-tag suggestions)
+    user_collections: free-form, user-curated collection names
+    """
+    primary_categories: list[str]
+    domain_options: dict[str, list[str]]
+    user_collections: list[str]
 
 
 class SaveCollectionRequest(BaseModel):

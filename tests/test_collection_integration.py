@@ -213,7 +213,7 @@ def corpus_uploaded(api_env, ground_truth) -> dict[str, dict[str, Any]]:
 
         data = resp.json()
         results[rel] = data
-        print(f"  [{i}/{total}] {rel} ... ok {data['collections']}")
+        print(f"  [{i}/{total}] {rel} ... ok primary={data.get('primary_category')} subtags={data.get('subtags')}")
 
     # Save raw results for debugging
     RESULTS_JSON.parent.mkdir(parents=True, exist_ok=True)
@@ -250,7 +250,11 @@ class TestSeedClassification:
         assert not failed, f"Failed seed uploads: {failed}"
 
     def test_seed_classifications_match_ground_truth(self, corpus_uploaded, ground_truth):
-        """Every seed file's auto-classification should match expected or acceptable."""
+        """Every seed file's auto-classification should match expected or acceptable.
+
+        T3: classifier writes primary_category + subtags (not collections). Ground
+        truth's ``expected: [primary, ...subtags]`` shape maps directly.
+        """
         mismatches: list[tuple[str, list[str], str]] = []
         matches = 0
         for rel, data in corpus_uploaded.items():
@@ -259,7 +263,8 @@ class TestSeedClassification:
             if "error" in data:
                 continue
             truth = ground_truth[rel]
-            actual = data["collections"]
+            primary = data.get("primary_category")
+            actual = ([primary] if primary else []) + list(data.get("subtags") or [])
             ok, msg = _classification_matches(
                 actual,
                 expected=truth["expected"],
@@ -298,7 +303,8 @@ class TestNewDocsJoinExistingCollections:
             if "error" in data:
                 continue
             truth = ground_truth[rel]
-            actual = data["collections"]
+            primary = data.get("primary_category")
+            actual = ([primary] if primary else []) + list(data.get("subtags") or [])
             ok, msg = _classification_matches(
                 actual,
                 expected=truth["expected"],
@@ -351,7 +357,8 @@ class TestAmbiguousDocs:
             if "error" in data:
                 continue
             truth = ground_truth[rel]
-            actual = data["collections"]
+            primary = data.get("primary_category")
+            actual = ([primary] if primary else []) + list(data.get("subtags") or [])
             ok, msg = _classification_matches(
                 actual,
                 expected=truth["expected"],
@@ -373,35 +380,19 @@ class TestAmbiguousDocs:
 
 @online
 class TestRetrievalByCollection:
-    """Collection-filtered listing returns only docs in that collection."""
+    """Collection-filtered listing — user-curated collections only.
 
+    T3: AI no longer auto-files docs into collections, so a clean upload run
+    leaves ``document_collections`` empty until the user manually files.
+    Collection-filter retrieval is exercised in the multi-select test suite
+    instead, where the user actively saves a collection.
+    """
+
+    @pytest.mark.skip(
+        reason="T3: AI doesn't write to collections anymore. Filter-by-collection coverage moved to test_multi_select_backend.TestSaveCollection."
+    )
     def test_list_by_seed_collection(self, api_env, corpus_uploaded):
-        """For each seeded primary category, listing by that name should return
-        >=1 document AND every returned doc must have that collection."""
-        client = api_env["client"]
-        seeded_primaries = set()
-        for rel, data in corpus_uploaded.items():
-            if rel.startswith("seed/") and "collections" in data:
-                for c in data["collections"]:
-                    seeded_primaries.add(c)
-
-        assert seeded_primaries, "no seed uploads recorded"
-
-        for collection in sorted(seeded_primaries):
-            resp = client.get(
-                "/documents",
-                params={"collection": collection},
-                headers={"X-User-Id": "admin"},
-            )
-            assert resp.status_code == 200, f"list by {collection}: {resp.text}"
-            docs = resp.json()["documents"]
-            # We don't require >=1 doc because "accepted" edge cases may not
-            # land in every category, but if there IS a doc it must tag correctly.
-            for doc in docs:
-                assert collection in doc["collections"], (
-                    f"doc {doc['doc_id']} listed under {collection} but its "
-                    f"collections are {doc['collections']}"
-                )
+        pass
 
 
 @online
@@ -409,17 +400,16 @@ class TestCollectionsEndpoint:
     """Verify /documents/collections returns expected structure."""
 
     def test_returns_taxonomy_plus_existing(self, api_env, corpus_uploaded):
+        """Endpoint returns taxonomy categories. ``existing_collections`` is
+        only populated by user action (T3: AI doesn't write here)."""
         client = api_env["client"]
         resp = client.get("/documents/collections", headers={"X-User-Id": "admin"})
         assert resp.status_code == 200
         data = resp.json()
-        # Taxonomy has 11 primary categories (per test_api_workflow.py)
+        # Taxonomy has 11 primary categories
         assert len(data["taxonomy_categories"]) == 11
-        # Existing should include things we seeded
-        existing = set(data["existing_collections"])
-        assert "research-scientific" in existing or "legal-compliance" in existing, (
-            f"Expected at least one research or legal primary in existing, got {existing}"
-        )
+        # existing_collections is a list (possibly empty when no user has filed anything)
+        assert isinstance(data["existing_collections"], list)
 
 
 @online
@@ -468,21 +458,17 @@ class TestReclassifyConsistency:
         if target is None:
             pytest.skip("Planck paper upload did not succeed")
 
-        results: list[list[str]] = []
+        primaries: list[str | None] = []
         for _ in range(2):
             resp = client.post(
                 f"/documents/{target['doc_id']}/reclassify",
                 headers={"X-User-Id": "admin"},
             )
             assert resp.status_code == 200
-            results.append(resp.json()["collections"])
+            primaries.append(resp.json().get("primary_category"))
 
-        # Primary category should be identical across runs (classifier is deterministic for embeddings)
-        first_primary = results[0][0] if results[0] else None
-        for r in results[1:]:
-            assert r and r[0] == first_primary, (
-                f"Reclassify inconsistent: {results}"
-            )
+        # primary_category must be deterministic across reclassify calls
+        assert len(set(primaries)) == 1, f"Reclassify primary_category inconsistent: {primaries}"
 
 
 @online

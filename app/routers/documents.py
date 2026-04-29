@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.classification import PRIMARY_CATEGORIES
+from app.classification import PRIMARY_CATEGORIES, TAXONOMY
 from app.dependencies import (
     get_settings, get_vector_store, get_registry, get_llm, get_embeddings, get_current_user, get_db,
     get_summary_store, get_edge_repository,
@@ -27,6 +27,7 @@ from app.models.schemas import (
     DocumentUpdateRequest,
     DocumentUpdateResponse,
     CollectionsResponse,
+    TaxonomyResponse,
     SaveCollectionRequest,
     SaveCollectionResponse,
     ChunkDetail,
@@ -103,27 +104,30 @@ async def upload_document(
         processor = DocumentProcessor(settings)
         chunks = await processor.load_and_split(upload_path, doc_id=doc_id, llm=llm)
 
-        # Parse collections from comma-separated string
-        parsed_collections: list[str] | None = None
+        # Parse user-curated collections from comma-separated form field
+        parsed_collections: list[str] = []
         if collections:
             parsed_collections = [c.strip() for c in collections.split(",") if c.strip()]
 
-        # AI suggests collections if requested and not manually specified
-        suggested_collections = None
-        if auto_suggest and not parsed_collections:
-            from app.services.collection_suggester import suggest_collections
+        # Auto-classify into primary_category + subtags. The classifier never
+        # invents new collections — it can only suggest existing user ones.
+        primary_category: str | None = None
+        subtags: list[str] = []
+        suggested_collections: list[str] = []
+        if auto_suggest:
+            from app.services.collection_suggester import classify_document
             existing = await registry.get_all_collections()
-            suggested_collections = suggest_collections(chunks, llm, existing, embeddings=embeddings)
-            parsed_collections = suggested_collections
+            classification = classify_document(chunks, llm, existing, embeddings=embeddings)
+            primary_category = classification.primary_category
+            subtags = classification.subtags
+            suggested_collections = classification.collection_suggestions
 
-        # Default to ["other"] if nothing specified
-        if not parsed_collections:
-            parsed_collections = ["other"]
-
-        # Add collections_csv to chunk metadata (pipe-delimited for informational use)
+        # Bake user-curated collections into chunk metadata for retrieval filtering
         collections_csv = "|".join(parsed_collections)
         for chunk in chunks:
             chunk.metadata["collections_csv"] = collections_csv
+            if primary_category:
+                chunk.metadata["primary_category"] = primary_category
 
         vector_store.add_documents(chunks, doc_id=doc_id)
         from app.rag.chain import invalidate_bm25_cache
@@ -175,18 +179,22 @@ async def upload_document(
             collections=parsed_collections,
             user_id=current_user,
             file_hash=file_hash,
+            primary_category=primary_category,
+            subtags=subtags,
         )
 
         message = "Document uploaded and indexed successfully"
-        if suggested_collections:
-            message += f". AI suggested: {', '.join(suggested_collections)}"
+        if primary_category:
+            message += f". Classified as {primary_category}"
 
         return UploadResponse(
             doc_id=doc_id,
             filename=filename,
             chunk_count=len(chunks),
+            primary_category=primary_category,
+            subtags=subtags,
             collections=parsed_collections,
-            suggested_collections=suggested_collections,
+            suggested_collections=suggested_collections or None,
             user_id=current_user,
             message=message,
         )
@@ -214,17 +222,39 @@ async def list_documents(
     )
 
 
-@router.get("/collections", response_model=CollectionsResponse)
+@router.get("/collections", response_model=CollectionsResponse, deprecated=True)
 async def list_collections(
     settings: Settings = Depends(get_settings),
     registry: DocumentRepository = Depends(get_registry),
     current_user: str = Depends(get_current_user),
 ):
+    """Legacy endpoint — use ``GET /documents/taxonomy`` instead. Removed in T8."""
     user_filter = _get_user_filter(settings, current_user)
     existing = await registry.get_all_collections(user_id=user_filter)
     return CollectionsResponse(
         taxonomy_categories=PRIMARY_CATEGORIES,
         existing_collections=existing,
+    )
+
+
+@router.get("/taxonomy", response_model=TaxonomyResponse)
+async def get_taxonomy(
+    settings: Settings = Depends(get_settings),
+    registry: DocumentRepository = Depends(get_registry),
+    current_user: str = Depends(get_current_user),
+):
+    """Three-layer taxonomy:
+
+    - ``primary_categories`` — fixed top-level types from ``data/taxonomy.json``.
+    - ``domain_options`` — ``primary -> [domain, ...]`` for the Auto-Categorize UI.
+    - ``user_collections`` — free-form, user-curated collection names from the DB.
+    """
+    user_filter = _get_user_filter(settings, current_user)
+    user_collections = await registry.get_all_collections(user_id=user_filter)
+    return TaxonomyResponse(
+        primary_categories=PRIMARY_CATEGORIES,
+        domain_options={cat: list(domains.keys()) for cat, domains in TAXONOMY.items()},
+        user_collections=user_collections,
     )
 
 
@@ -686,16 +716,20 @@ async def update_document_collections(
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
 
-    # Update registry
-    await registry.update_collections(doc_id, request.collections)
-
-    # Update vector store chunk metadata
-    collections_csv = "|".join(request.collections)
-    vector_store.update_document_metadata(doc_id, {"collections_csv": collections_csv})
+    # T2: only the legacy collections layer is wired here. T7 plumbs primary_category + subtags.
+    if request.collections is not None:
+        await registry.update_collections(doc_id, request.collections)
+        collections_csv = "|".join(request.collections)
+        vector_store.update_document_metadata(doc_id, {"collections_csv": collections_csv})
+        updated_collections = request.collections
+    else:
+        updated_collections = doc.get("collections", [])
 
     return DocumentUpdateResponse(
         doc_id=doc_id,
-        collections=request.collections,
+        primary_category=doc.get("primary_category"),
+        subtags=doc.get("subtags", []),
+        collections=updated_collections,
         message="Collections updated successfully",
     )
 
@@ -720,21 +754,33 @@ async def reclassify_document(
     if not doc_chunks:
         raise HTTPException(status_code=404, detail="No chunks found for this document")
 
-    from app.services.collection_suggester import suggest_collections
+    from app.services.collection_suggester import classify_document
     existing = await registry.get_all_collections()
-    new_collections = suggest_collections(doc_chunks, llm, existing, embeddings=embeddings)
+    classification = classify_document(doc_chunks, llm, existing, embeddings=embeddings)
 
-    # Update registry
-    await registry.update_collections(doc_id, new_collections)
+    await registry.update_classification(
+        doc_id,
+        classification.primary_category,
+        classification.subtags,
+    )
 
-    # Update vector store chunk metadata
-    collections_csv = "|".join(new_collections)
-    vector_store.update_document_metadata(doc_id, {"collections_csv": collections_csv})
+    # Update vector store chunk metadata so retrieval can filter by primary_category
+    metadata: dict = {}
+    if classification.primary_category:
+        metadata["primary_category"] = classification.primary_category
+    if metadata:
+        vector_store.update_document_metadata(doc_id, metadata)
 
     return DocumentUpdateResponse(
         doc_id=doc_id,
-        collections=new_collections,
-        message=f"Document reclassified to: {', '.join(new_collections)}",
+        primary_category=classification.primary_category,
+        subtags=classification.subtags,
+        collections=doc.get("collections", []),
+        message=(
+            f"Reclassified to {classification.primary_category}"
+            if classification.primary_category
+            else "Reclassified (uncategorized)"
+        ),
     )
 
 
