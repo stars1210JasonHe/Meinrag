@@ -38,6 +38,11 @@ export const fetchDocuments = (userId) =>
 export const fetchCollections = (userId) =>
   apiFetch('/documents/collections', { headers: headers(userId) })
 
+// Three-layer taxonomy: primary_categories + domain_options + user_collections.
+// New T4 endpoint — replaces fetchCollections for the dashboard sidebar.
+export const fetchTaxonomy = (userId) =>
+  apiFetch('/documents/taxonomy', { headers: headers(userId) })
+
 export const deleteDocument = (docId, userId) =>
   apiFetch(`/documents/${docId}`, { method: 'DELETE', headers: headers(userId) })
 

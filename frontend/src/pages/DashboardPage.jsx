@@ -2,14 +2,17 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import ForceGraph2D from 'react-force-graph-2d'
+import Sunburst from '@/components/Sunburst'
+import RecentStrip from '@/components/RecentStrip'
+import CategorySection from '@/components/CategorySection'
+import { useTaxonomyHierarchy } from '@/hooks/useTaxonomyHierarchy'
 import {
   Search, Upload, MoreVertical, Trash2, Download, RefreshCw,
   FileText, X, MessageSquare, Filter, ChevronUp, ChevronDown, Network,
   PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { fetchDocuments, fetchCollections, fetchGraphDocuments, deleteDocument } from '@/lib/api'
+import { fetchDocuments, fetchTaxonomy, deleteDocument } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import ContextMenu from '@/components/ContextMenu'
 import ConfirmDialog from '@/components/ConfirmDialog'
@@ -92,14 +95,13 @@ export default function DashboardPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { t } = useTranslation()
-  const graphRef = useRef(null)
-  const containerRef = useRef(null)
+  // (D-sprint: graphRef/containerRef removed — no force graph on dashboard)
 
   const [rawSearch, setRawSearch] = useState('')
   const search = useDebounced(rawSearch, 300)
   const [activeFilters, setActiveFilters] = useState([])
   const [showFilters, setShowFilters] = useState(false)
-  const [showPanel, setShowPanel] = useState(false)
+  // (D-sprint: showPanel removed — docs always rendered as category sections)
   const [menuOpen, setMenuOpen] = useState(null)
   const [uploading, setUploading] = useState(false)
   const [domainsCollapsed, setDomainsCollapsed] = useState(() => {
@@ -109,13 +111,29 @@ export default function DashboardPage() {
   useEffect(() => {
     localStorage.setItem('meinrag.dashboard.domainsCollapsed', domainsCollapsed ? '1' : '0')
   }, [domainsCollapsed])
-  const [hoverNode, setHoverNode] = useState(null)
-  const [highlightNodes, setHighlightNodes] = useState(new Set())
-  const [highlightLinks, setHighlightLinks] = useState(new Set())
-  const [dimensions, setDimensions] = useState({ width: 800, height: 500 })
-  const [selectedDomain, setSelectedDomain] = useState(null)
+  // (D-sprint: hoverNode / highlightNodes / highlightLinks / dimensions removed
+  //  — those were force-graph-only state)
+  // T6: scope is either a primary category OR a user-curated collection.
+  // {type: 'category' | 'collection', value: string} | null
+  const [selectedScope, setSelectedScope] = useState(null)
   const [contextMenu, setContextMenu] = useState(null)
   const [confirmDelete, setConfirmDelete] = useState(null)
+  // D-sprint: per-category collapse state, persisted in localStorage.
+  const [collapsedCategories, setCollapsedCategories] = useState(() => {
+    if (typeof localStorage === 'undefined') return new Set()
+    try {
+      const raw = localStorage.getItem('meinrag.dashboard.collapsedCategories')
+      return new Set(raw ? JSON.parse(raw) : [])
+    } catch { return new Set() }
+  })
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        'meinrag.dashboard.collapsedCategories',
+        JSON.stringify(Array.from(collapsedCategories)),
+      )
+    } catch { /* quota or json — ignore */ }
+  }, [collapsedCategories])
 
   // Multi-select (shift-click nodes to add to selection)
   const selection = useSelection()
@@ -150,14 +168,9 @@ export default function DashboardPage() {
   })
   const documents = documentsData?.documents || (Array.isArray(documentsData) ? documentsData : [])
 
-  const { data: collectionsData } = useQuery({
-    queryKey: ['collections', USER_ID],
-    queryFn: () => fetchCollections(USER_ID),
-  })
-
-  const { data: graphEdges } = useQuery({
-    queryKey: ['graph-documents', USER_ID],
-    queryFn: () => fetchGraphDocuments(USER_ID),
+  const { data: taxonomyData } = useQuery({
+    queryKey: ['taxonomy', USER_ID],
+    queryFn: () => fetchTaxonomy(USER_ID),
   })
 
   const deleteMutation = useMutation({
@@ -165,350 +178,116 @@ export default function DashboardPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['documents', USER_ID] })
       queryClient.invalidateQueries({ queryKey: ['graph-documents', USER_ID] })
-      queryClient.invalidateQueries({ queryKey: ['collections', USER_ID] })
+      queryClient.invalidateQueries({ queryKey: ['taxonomy', USER_ID] })
       toast.success(t('toasts.documentDeleted'))
     },
     onError: (err) => toast.error(t('toasts.deleteFailed', { message: err.message || t('toasts.unknownError') })),
   })
 
-  // Measure container for graph sizing
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
-    const measure = () => setDimensions({ width: el.clientWidth, height: el.clientHeight })
-    measure()
-    const observer = new ResizeObserver(measure)
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [])
+  // T6: Categories — fixed primary categories from taxonomy.json. Counts are
+  // computed from the loaded documents (so we only show categories with docs).
+  const categoryList = useMemo(() => {
+    const primaries = taxonomyData?.primary_categories || []
+    const counts = new Map()
+    documents.forEach(d => {
+      if (d.primary_category) {
+        counts.set(d.primary_category, (counts.get(d.primary_category) || 0) + 1)
+      }
+    })
+    const uncategorized = documents.filter(d => !d.primary_category).length
+    const list = primaries
+      .map(p => ({ name: p, count: counts.get(p) || 0 }))
+      .filter(c => c.count > 0)
+      .sort((a, b) => b.count - a.count)
+    return { list, uncategorized }
+  }, [documents, taxonomyData])
 
-  // Sync domain → filter
-  useEffect(() => {
-    setActiveFilters(selectedDomain ? [selectedDomain] : [])
-  }, [selectedDomain])
-
-  const availableTags = useMemo(() => {
-    if (!collectionsData) return []
-    const tags = new Set()
-    collectionsData.taxonomy_categories?.forEach(c => tags.add(c))
-    collectionsData.existing_collections?.forEach(c => tags.add(c))
-    return [...tags].sort()
-  }, [collectionsData])
-
-  const collectionList = useMemo(() => {
-    const cols = collectionsData?.existing_collections || []
+  // T6: User-curated collections only — what the user has manually filed into.
+  const userCollectionList = useMemo(() => {
+    const cols = taxonomyData?.user_collections || []
     return cols.map(col => ({
       name: col,
       count: documents.filter(d => d.collections?.includes(col)).length,
     })).sort((a, b) => b.count - a.count)
-  }, [documents, collectionsData])
+  }, [documents, taxonomyData])
+
+  // T6: Subtags actually present in the loaded corpus — drives the chip filter row.
+  const availableTags = useMemo(() => {
+    const tags = new Set()
+    documents.forEach(d => (d.subtags || []).forEach(t => tags.add(t)))
+    return [...tags].sort()
+  }, [documents])
 
   const filtered = useMemo(() => {
     let docs = Array.isArray(documents) ? documents : []
+    // Sidebar scope: primary category OR user collection
+    if (selectedScope) {
+      if (selectedScope.type === 'category') {
+        docs = docs.filter(d => d.primary_category === selectedScope.value)
+      } else if (selectedScope.type === 'uncategorized') {
+        docs = docs.filter(d => !d.primary_category)
+      } else if (selectedScope.type === 'collection') {
+        docs = docs.filter(d => d.collections?.includes(selectedScope.value))
+      }
+    }
     if (search) {
       const q = search.toLowerCase()
       docs = docs.filter(d =>
         d.filename?.toLowerCase().includes(q) ||
-        d.collections?.some(c => c.toLowerCase().includes(q))
+        d.collections?.some(c => c.toLowerCase().includes(q)) ||
+        d.subtags?.some(s => s.toLowerCase().includes(q))
       )
     }
     if (activeFilters.length > 0) {
-      docs = docs.filter(d => activeFilters.some(f => d.collections?.includes(f)))
+      // Multi-tag chip filter — narrow within the current scope by required subtags
+      docs = docs.filter(d => activeFilters.every(f => d.subtags?.includes(f)))
     }
     return docs
-  }, [documents, search, activeFilters])
+  }, [documents, search, selectedScope, activeFilters])
 
-  const displayedDocs = useMemo(() => {
-    const allDocs = Array.isArray(documents) ? documents : []
-    if (search) return filtered.slice(0, 50)
-    if (selectedDomain) return filtered
-    const sorted = [...allDocs].sort((a, b) => {
-      const da = a.uploaded_at || a.created_at || ''
-      const db = b.uploaded_at || b.created_at || ''
-      return db.localeCompare(da)
+  // D-sprint: hierarchical data for the Sunburst hero.
+  const taxonomyTree = useTaxonomyHierarchy(documents, taxonomyData)
+
+  // D-sprint: filtered docs grouped by primary_category, ordered by category count desc.
+  const docsByCategory = useMemo(() => {
+    const groups = new Map()
+    for (const d of filtered) {
+      const key = d.primary_category || '__uncategorized__'
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key).push(d)
+    }
+    const ordered = Array.from(groups.entries())
+      .map(([key, docs]) => ({
+        primaryCategory: key === '__uncategorized__' ? null : key,
+        docs: docs.sort((a, b) => {
+          const da = a.uploaded_at || ''
+          const db = b.uploaded_at || ''
+          return db.localeCompare(da)
+        }),
+      }))
+      .sort((a, b) => b.docs.length - a.docs.length)
+    return ordered
+  }, [filtered])
+
+  // D-sprint: any scope change clears the per-doc subtag refinement.
+  // Without this, chips set from a prior context (e.g. sunburst click) would
+  // keep narrowing the doc list after the user switches sidebar.
+  const setScope = useCallback((next) => {
+    setSelectedScope(next)
+    setActiveFilters([])
+  }, [])
+
+  const toggleCategoryCollapsed = useCallback((catName) => {
+    setCollapsedCategories(prev => {
+      const next = new Set(prev)
+      if (next.has(catName)) next.delete(catName)
+      else next.add(catName)
+      return next
     })
-    return sorted.slice(0, 20)
-  }, [documents, filtered, search, selectedDomain])
+  }, [])
 
-  // Build graph data
-  const graphData = useMemo(() => {
-    const docs = Array.isArray(documents) ? documents : []
-    if (docs.length === 0) return { nodes: [], links: [] }
-
-    const nodes = []
-    const links = []
-    const collectionSet = new Set()
-    const searchLower = search.toLowerCase()
-    const filteredIds = new Set(filtered.map(d => d.doc_id))
-
-    // Collect counts to size collection nodes
-    const collectionCounts = {}
-
-    for (const d of docs) {
-      const matchesSearch = !search ||
-        d.filename?.toLowerCase().includes(searchLower) ||
-        d.collections?.some(c => c.toLowerCase().includes(searchLower))
-      const matchesFilter = activeFilters.length === 0 || filteredIds.has(d.doc_id)
-
-      // Size documents by chunk count: sqrt scale to avoid huge outliers
-      const chunkSize = Math.max(1, Math.sqrt(d.chunk_count || 1))
-
-      nodes.push({
-        id: `doc:${d.doc_id}`,
-        label: d.filename?.replace(/\.[^.]+$/, '').slice(0, 30) || d.doc_id,
-        val: 2 + chunkSize * 0.8,
-        _type: 'document',
-        _data: d,
-        _chunks: d.chunk_count || 0,
-        _dimmed: (search && !matchesSearch) || (activeFilters.length > 0 && !matchesFilter),
-      })
-
-      for (const c of (d.collections || [])) {
-        collectionCounts[c] = (collectionCounts[c] || 0) + 1
-        collectionSet.add(c)
-        links.push({ source: `col:${c}`, target: `doc:${d.doc_id}`, _type: 'belongs_to' })
-      }
-    }
-
-    for (const c of collectionSet) {
-      const matchesSearch = !search || c.toLowerCase().includes(searchLower)
-      const matchesFilter = activeFilters.length === 0 || activeFilters.includes(c)
-      const count = collectionCounts[c] || 0
-      // Size collections by member count
-      nodes.push({
-        id: `col:${c}`,
-        label: formatName(c),
-        val: 4 + Math.sqrt(count) * 1.2,
-        _type: 'collection',
-        _count: count,
-        _dimmed: (search && !matchesSearch) || (activeFilters.length > 0 && !matchesFilter),
-      })
-    }
-
-    if (graphEdges?.edges) {
-      for (const e of graphEdges.edges) {
-        links.push({
-          source: `doc:${e.source_doc_id}`,
-          target: `doc:${e.target_doc_id}`,
-          _type: 'similar_to',
-        })
-      }
-    }
-
-    const nodeIds = new Set(nodes.map(n => n.id))
-    const validLinks = links.filter(l => nodeIds.has(l.source) && nodeIds.has(l.target))
-
-    return { nodes: nodes.map(n => ({ ...n })), links: validLinks.map(l => ({ ...l })) }
-  }, [documents, filtered, search, activeFilters, graphEdges])
-
-  // Tune force simulation — cleaner layout when collections >> documents
-  useEffect(() => {
-    const g = graphRef.current
-    if (!g || !g.d3Force) return
-    try {
-      const charge = g.d3Force('charge')
-      if (charge?.strength) charge.strength(n => n._type === 'collection' ? -260 : -90)
-      const link = g.d3Force('link')
-      if (link?.distance) link.distance(l => l._type === 'similar_to' ? 80 : 35)
-      if (link?.strength) link.strength(0.7)
-      const collide = g.d3Force('collide')
-      if (collide?.radius) collide.radius(n => Math.sqrt(n.val || 3) * 2.2 + 6)
-      if (g.d3ReheatSimulation) g.d3ReheatSimulation()
-    } catch (e) {
-      console.warn('[Dashboard] force tune failed:', e)
-    }
-  }, [graphData])
-
-  // Custom node paint — file/folder shapes w/ hover highlight
-  const paintNode = useCallback((node, ctx) => {
-    // Guard: simulation may not have set coordinates yet
-    if (typeof node.x !== 'number' || typeof node.y !== 'number' ||
-        !isFinite(node.x) || !isFinite(node.y)) return
-
-    const s = Math.max(3, Math.sqrt(node.val || 3) * 2.2)  // size baseline
-    const hovered = hoverNode?.id === node.id
-    const active = hoverNode != null
-    // Dim unless highlighted (hover) or search/filter-matched
-    const isHighlighted = !active || highlightNodes.has(node.id)
-    const staticDimmed = node._dimmed && !active
-    const opacity = staticDimmed ? 0.18 : (isHighlighted ? 1.0 : 0.2)
-
-    // Selected state (multi-select): draws a signature-color ring behind the shape
-    const isSelected = (node._type === 'document' && selection.hasDoc(node._data?.doc_id))
-      || (node._type === 'collection' && selection.hasCollection(node.id.replace('col:', '')))
-
-    const fg1 = cssVar('--fg-1', '#d4d0ca')
-    const fgDim = cssVar('--fg-dim', '#9a9690')
-    const fgFaint = cssVar('--fg-faint', '#5a564f')
-
-    ctx.globalAlpha = opacity
-
-    if (node._type === 'collection') {
-      // ==== FOLDER SHAPE ====
-      const w = s * 2.4, h = s * 1.9
-      const tabW = s * 0.9, tabH = s * 0.45
-      const x = node.x, y = node.y
-
-      // Selection ring (behind everything)
-      if (isSelected) {
-        ctx.globalAlpha = 1.0
-        ctx.beginPath()
-        ctx.roundRect?.(x - w/2 - 5, y - h/2 - tabH - 5, w + 10, h + tabH + 10, 5) ||
-          ctx.rect(x - w/2 - 5, y - h/2 - tabH - 5, w + 10, h + tabH + 10)
-        ctx.strokeStyle = cssVar('--signature', '#5b7ec9')
-        ctx.lineWidth = 2.5
-        ctx.stroke()
-        ctx.globalAlpha = opacity
-      }
-
-      // Hover glow
-      if (hovered) {
-        ctx.beginPath()
-        ctx.roundRect?.(x - w/2 - 3, y - h/2 - tabH - 3, w + 6, h + tabH + 6, 4) ||
-          ctx.rect(x - w/2 - 3, y - h/2 - tabH - 3, w + 6, h + tabH + 6)
-        ctx.fillStyle = FOLDER_COLOR + '33'
-        ctx.fill()
-      }
-
-      // Folder tab
-      ctx.beginPath()
-      ctx.moveTo(x - w/2, y - h/2)
-      ctx.lineTo(x - w/2 + tabW, y - h/2)
-      ctx.lineTo(x - w/2 + tabW + tabH * 0.6, y - h/2 + tabH)
-      ctx.lineTo(x + w/2, y - h/2 + tabH)
-      ctx.lineTo(x + w/2, y + h/2)
-      ctx.lineTo(x - w/2, y + h/2)
-      ctx.closePath()
-      ctx.fillStyle = FOLDER_COLOR
-      ctx.fill()
-      // Subtle top highlight
-      ctx.strokeStyle = FOLDER_TAB_COLOR
-      ctx.lineWidth = 0.8
-      ctx.stroke()
-
-      // Star marker for user-saved collections (top-left corner of folder)
-      const collName = node.id.replace('col:', '')
-      if (userSaved.has(collName)) {
-        const sx = x - w/2 + tabH * 0.8
-        const sy = y - h/2 - tabH * 0.1
-        const sr = Math.max(2, s * 0.32)
-        // 5-point star
-        ctx.beginPath()
-        for (let i = 0; i < 10; i++) {
-          const r = i % 2 === 0 ? sr : sr * 0.45
-          const a = (Math.PI / 5) * i - Math.PI / 2
-          const px = sx + Math.cos(a) * r
-          const py = sy + Math.sin(a) * r
-          if (i === 0) ctx.moveTo(px, py)
-          else ctx.lineTo(px, py)
-        }
-        ctx.closePath()
-        ctx.fillStyle = cssVar('--signature', '#5b7ec9')
-        ctx.fill()
-        ctx.strokeStyle = '#ffffffcc'
-        ctx.lineWidth = 0.6
-        ctx.stroke()
-      }
-
-    } else {
-      // ==== DOCUMENT (paper w/ folded corner) SHAPE ====
-      const w = s * 1.7, h = s * 2.1
-      const fold = s * 0.55
-      const x = node.x, y = node.y
-
-      // Selection ring (behind everything)
-      if (isSelected) {
-        ctx.globalAlpha = 1.0
-        ctx.beginPath()
-        ctx.roundRect?.(x - w/2 - 5, y - h/2 - 5, w + 10, h + 10, 4) ||
-          ctx.rect(x - w/2 - 5, y - h/2 - 5, w + 10, h + 10)
-        ctx.strokeStyle = cssVar('--signature', '#5b7ec9')
-        ctx.lineWidth = 2.5
-        ctx.stroke()
-        ctx.globalAlpha = opacity
-      }
-
-      // Hover glow
-      if (hovered) {
-        ctx.beginPath()
-        ctx.roundRect?.(x - w/2 - 3, y - h/2 - 3, w + 6, h + 6, 3) ||
-          ctx.rect(x - w/2 - 3, y - h/2 - 3, w + 6, h + 6)
-        ctx.fillStyle = DOC_COLOR + '33'
-        ctx.fill()
-      }
-
-      // Paper body (rectangle w/ top-right corner cut)
-      ctx.beginPath()
-      ctx.moveTo(x - w/2, y - h/2)
-      ctx.lineTo(x + w/2 - fold, y - h/2)
-      ctx.lineTo(x + w/2, y - h/2 + fold)
-      ctx.lineTo(x + w/2, y + h/2)
-      ctx.lineTo(x - w/2, y + h/2)
-      ctx.closePath()
-      ctx.fillStyle = DOC_COLOR
-      ctx.fill()
-
-      // Folded corner triangle (inner darker shade)
-      ctx.beginPath()
-      ctx.moveTo(x + w/2 - fold, y - h/2)
-      ctx.lineTo(x + w/2 - fold, y - h/2 + fold)
-      ctx.lineTo(x + w/2, y - h/2 + fold)
-      ctx.closePath()
-      ctx.fillStyle = DOC_COLOR_DIM
-      ctx.fill()
-    }
-
-    // Label
-    const fontSize = Math.max(4, s * 0.55)
-    const isCollection = node._type === 'collection'
-    ctx.font = `${isCollection ? '500' : '400'} ${fontSize}px 'IBM Plex Sans', sans-serif`
-    ctx.fillStyle = !isHighlighted ? fgFaint : (isCollection ? fg1 : fgDim)
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'top'
-    const label = node.label?.length > 28 ? node.label.slice(0, 25) + '…' : node.label
-    const labelY = node.y + (isCollection ? s * 1.9 / 2 : s * 2.1 / 2) + 4
-    ctx.fillText(label || '', node.x, labelY)
-
-    ctx.globalAlpha = 1.0
-  }, [hoverNode, highlightNodes, selection, userSaved])
-
-  const handleNodeClick = useCallback((node, event) => {
-    // Shift-click → toggle multi-select instead of navigating
-    if (event?.shiftKey) {
-      if (node._type === 'document' && node._data?.doc_id) {
-        selection.toggleDoc(node._data.doc_id)
-      } else if (node._type === 'collection') {
-        selection.toggleCollection(node.id.replace('col:', ''))
-      }
-      return
-    }
-    if (node._type === 'document' && node._data?.doc_id) {
-      navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.filename || '')}`)
-    } else if (node._type === 'collection') {
-      setSelectedDomain(prev => prev === node.id.replace('col:', '') ? null : node.id.replace('col:', ''))
-      setShowPanel(true)
-    }
-  }, [navigate, selection])
-
-  const handleNodeHover = useCallback((node) => {
-    setHoverNode(node || null)
-    if (!node) {
-      setHighlightNodes(new Set())
-      setHighlightLinks(new Set())
-      return
-    }
-    // Collect neighbors via current graph links
-    const neighbors = new Set([node.id])
-    const linkSet = new Set()
-    for (const l of graphData.links) {
-      const srcId = typeof l.source === 'object' ? l.source.id : l.source
-      const tgtId = typeof l.target === 'object' ? l.target.id : l.target
-      if (srcId === node.id) { neighbors.add(tgtId); linkSet.add(l) }
-      if (tgtId === node.id) { neighbors.add(srcId); linkSet.add(l) }
-    }
-    setHighlightNodes(neighbors)
-    setHighlightLinks(linkSet)
-  }, [graphData])
+  // (D-sprint: graphData / paintNode / handleNodeClick / handleNodeHover removed
+  //  — those rendered the now-deleted force graph)
 
   // Map of collection_name -> [docs]
   const docsByCollection = useMemo(() => {
@@ -551,7 +330,7 @@ export default function DashboardPage() {
     toast.success(t('selection.saveSuccess', {
       name, defaultValue: `Saved collection "${name}"`,
     }))
-    queryClient.invalidateQueries({ queryKey: ['collections', USER_ID] })
+    queryClient.invalidateQueries({ queryKey: ['taxonomy', USER_ID] })
     queryClient.invalidateQueries({ queryKey: ['documents', USER_ID] })
     queryClient.invalidateQueries({ queryKey: ['graph-documents', USER_ID] })
   }, [selection, queryClient, t])
@@ -572,28 +351,7 @@ export default function DashboardPage() {
     setActiveFilters(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag])
   }
 
-  const handleGraphRightClick = useCallback((node, event) => {
-    event.preventDefault()
-    const items = []
-    if (node._type === 'document' && node._data) {
-      items.push(
-        { label: t('dashboard.chatAboutThis'), icon: MessageSquare, action: () => navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.filename || '')}`) },
-        { label: t('dashboard.openInPdf'), icon: FileText, action: () => navigate(`/pdf/${node._data.doc_id}`) },
-        { label: t('dashboard.viewInGraph'), icon: Network, action: () => navigate(`/graph/${node._data.doc_id}`) },
-        { separator: true },
-        { label: t('common.download'), icon: Download, action: () => handleDownload(node._data.doc_id) },
-        { label: t('common.delete'), icon: Trash2, action: () => handleDelete(node._data.doc_id), danger: true },
-      )
-    } else if (node._type === 'collection') {
-      const col = node.id.replace('col:', '')
-      items.push(
-        { label: t('dashboard.chatAboutCollection'), icon: MessageSquare, action: () => navigate(`/chat?collection=${encodeURIComponent(col)}`) },
-        { label: t('dashboard.filterByThis'), icon: Filter, action: () => setSelectedDomain(col) },
-      )
-    }
-    items.push({ separator: true }, { label: t('common.cancel'), action: () => {} })
-    setContextMenu({ x: event.clientX, y: event.clientY, items })
-  }, [navigate, t])
+  // (D-sprint: handleGraphRightClick removed — was the force-graph context menu)
 
   const handleUpload = async (e) => {
     const file = e.target.files?.[0]
@@ -624,7 +382,7 @@ export default function DashboardPage() {
     try {
       await uploadPromise
       queryClient.invalidateQueries({ queryKey: ['documents', USER_ID] })
-      queryClient.invalidateQueries({ queryKey: ['collections', USER_ID] })
+      queryClient.invalidateQueries({ queryKey: ['taxonomy', USER_ID] })
       queryClient.invalidateQueries({ queryKey: ['graph-documents', USER_ID] })
     } catch { /* toast shown */ }
     finally {
@@ -632,18 +390,6 @@ export default function DashboardPage() {
       e.target.value = ''
     }
   }
-
-  // Auto-expand panel when searching
-  useEffect(() => {
-    if (search) setShowPanel(true)
-  }, [search])
-
-  const panelTitle = useMemo(() => {
-    const total = documents.length
-    if (search) return t('dashboard.panelSearching', { shown: displayedDocs.length, total: filtered.length })
-    if (selectedDomain) return t('dashboard.panelDomain', { domain: formatName(selectedDomain), shown: displayedDocs.length })
-    return t('dashboard.panelDefault', { shown: displayedDocs.length, total })
-  }, [documents, displayedDocs, filtered, search, selectedDomain, t])
 
   return (
     <div className="flex h-full" style={{ backgroundColor: 'var(--bg)' }}>
@@ -670,21 +416,19 @@ export default function DashboardPage() {
         className="w-56 shrink-0 flex flex-col border-r"
         style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-1)' }}
       >
-        <div
-          className="px-4 pt-5 pb-2 flex items-center justify-between"
-        >
+        <div className="px-4 pt-5 pb-2 flex items-center justify-between">
           <span
             className="text-[10px] uppercase tracking-[0.1em]"
             style={{ color: 'var(--fg-faint)', fontFamily: 'var(--mono)' }}
           >
-            {t('dashboard.domains')}
+            {t('dashboard.scopes', { defaultValue: 'Scope' })}
           </span>
           <button
             type="button"
             onClick={() => setDomainsCollapsed(true)}
             className="p-1 rounded transition-colors hover:bg-white/5"
-            title={t('dashboard.collapseDomains', { defaultValue: 'Hide domains' })}
-            aria-label={t('dashboard.collapseDomains', { defaultValue: 'Hide domains' })}
+            title={t('dashboard.collapseDomains', { defaultValue: 'Hide scope' })}
+            aria-label={t('dashboard.collapseDomains', { defaultValue: 'Hide scope' })}
             style={{ color: 'var(--fg-faint)' }}
           >
             <PanelLeftClose size={12} />
@@ -694,33 +438,89 @@ export default function DashboardPage() {
           <DomainItem
             label={t('common.all')}
             count={documents.length}
-            active={!selectedDomain}
-            onClick={() => setSelectedDomain(null)}
+            active={!selectedScope}
+            onClick={() => setScope(null)}
           />
-          {collectionList.length === 0 ? (
+
+          {/* Categories — fixed primary categories from taxonomy.json */}
+          <div
+            className="px-3 pt-3 pb-1 text-[9px] uppercase tracking-[0.1em]"
+            style={{ color: 'var(--fg-faint)', fontFamily: 'var(--mono)' }}
+          >
+            {t('dashboard.categories', { defaultValue: 'Categories' })}
+          </div>
+          {categoryList.list.length === 0 ? (
             <div
-              className="px-3 py-6 text-xs text-center"
+              className="px-3 py-2 text-[11px]"
               style={{ color: 'var(--fg-faint)', fontFamily: 'var(--mono)' }}
             >
-              {t('dashboard.noCollections')}
+              {t('dashboard.noCategories', { defaultValue: 'No categories yet' })}
             </div>
           ) : (
-            collectionList.map(col => (
+            categoryList.list.map(cat => (
               <DomainItem
-                key={col.name}
+                key={`cat:${cat.name}`}
+                label={formatName(cat.name)}
+                count={cat.count}
+                active={selectedScope?.type === 'category' && selectedScope.value === cat.name}
+                onClick={() => setScope(
+                  selectedScope?.type === 'category' && selectedScope.value === cat.name
+                    ? null
+                    : { type: 'category', value: cat.name }
+                )}
+              />
+            ))
+          )}
+          {categoryList.uncategorized > 0 && (
+            <DomainItem
+              label={t('dashboard.uncategorized', { defaultValue: 'Uncategorized' })}
+              count={categoryList.uncategorized}
+              active={selectedScope?.type === 'uncategorized'}
+              onClick={() => setScope(
+                selectedScope?.type === 'uncategorized' ? null : { type: 'uncategorized' }
+              )}
+            />
+          )}
+
+          {/* My Collections — user-curated, may be empty */}
+          <div
+            className="px-3 pt-4 pb-1 text-[9px] uppercase tracking-[0.1em]"
+            style={{ color: 'var(--fg-faint)', fontFamily: 'var(--mono)' }}
+          >
+            {t('dashboard.collections', { defaultValue: 'My Collections' })}
+          </div>
+          {userCollectionList.length === 0 ? (
+            <div
+              className="px-3 py-2 text-[11px]"
+              style={{ color: 'var(--fg-faint)', fontFamily: 'var(--mono)' }}
+            >
+              {t('dashboard.noCollections', { defaultValue: 'None yet — pick docs and save a collection' })}
+            </div>
+          ) : (
+            userCollectionList.map(col => (
+              <DomainItem
+                key={`col:${col.name}`}
                 label={formatName(col.name)}
                 count={col.count}
-                active={selectedDomain === col.name}
-                onClick={() => setSelectedDomain(d => (d === col.name ? null : col.name))}
+                active={selectedScope?.type === 'collection' && selectedScope.value === col.name}
+                onClick={() => setScope(
+                  selectedScope?.type === 'collection' && selectedScope.value === col.name
+                    ? null
+                    : { type: 'collection', value: col.name }
+                )}
               />
             ))
           )}
         </div>
 
-        {selectedDomain && (
+        {selectedScope && selectedScope.type !== 'uncategorized' && (
           <div className="p-3 border-t" style={{ borderColor: 'var(--border)' }}>
             <button
-              onClick={() => navigate(`/chat?collection=${encodeURIComponent(selectedDomain)}`)}
+              onClick={() => navigate(
+                selectedScope.type === 'collection'
+                  ? `/chat?collection=${encodeURIComponent(selectedScope.value)}`
+                  : `/chat?category=${encodeURIComponent(selectedScope.value)}`
+              )}
               className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[12px] font-medium transition-all hover:scale-[1.02]"
               style={{
                 background: 'var(--signature)',
@@ -837,89 +637,57 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* Graph area */}
+        {/* === Hero band: Sunburst (left) + Stats/Recent (right) === */}
         <div
-          ref={containerRef}
-          className="flex-1 relative min-h-0"
-          style={{ backgroundColor: 'var(--bg)' }}
+          className="flex gap-6 px-5 py-5 border-b shrink-0"
+          style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg)' }}
         >
-          {isLoading ? (
-            <div
-              className="absolute inset-0 flex items-center justify-center"
-              style={{
-                color: 'var(--fg-dim)',
-                fontFamily: 'var(--display)',
-                fontStyle: 'italic',
-                fontSize: 18,
-              }}
-            >
-              {t('common.loading')}
-            </div>
-          ) : graphData.nodes.length === 0 ? (
-            <div
-              className="absolute inset-0 flex flex-col items-center justify-center"
-              style={{ color: 'var(--fg-dim)' }}
-            >
-              <FileText size={48} className="mb-4 opacity-60" />
-              <p
-                className="text-lg mb-1"
-                style={{
-                  fontFamily: 'var(--display)',
-                  fontStyle: 'italic',
-                  fontWeight: 400,
-                  letterSpacing: '-0.015em',
-                }}
+          {/* Sunburst */}
+          <div className="shrink-0 flex items-center justify-center" style={{ width: 280, height: 280 }}>
+            {isLoading ? (
+              <div
+                className="text-[11px] italic"
+                style={{ color: 'var(--fg-faint)', fontFamily: 'var(--display)' }}
               >
-                {t('dashboard.uploadFirst')}
-              </p>
-              <p
-                className="text-[11px] uppercase"
-                style={{
-                  fontFamily: 'var(--mono)',
-                  letterSpacing: '0.08em',
-                  color: 'var(--fg-faint)',
+                {t('common.loading')}
+              </div>
+            ) : (
+              <Sunburst
+                data={taxonomyTree}
+                size={280}
+                totalDocs={documents.length}
+                primaryCategoryOrder={taxonomyData?.primary_categories}
+                onSegmentClick={(seg) => {
+                  if (seg.layer === 'category') {
+                    setScope(
+                      selectedScope?.type === 'category' && selectedScope.value === seg.name
+                        ? null
+                        : { type: 'category', value: seg.name }
+                    )
+                  } else {
+                    // domain / sub-domain — scope to its parent category (seg.path[0]),
+                    // then set this single tag as the only active refinement.
+                    const parentCategory = seg.path?.[0]
+                    const same = activeFilters.length === 1 && activeFilters[0] === seg.name
+                      && selectedScope?.type === 'category' && selectedScope.value === parentCategory
+                    if (same) {
+                      // Click again → release the refinement, keep parent category scope
+                      setActiveFilters([])
+                    } else {
+                      setSelectedScope(parentCategory ? { type: 'category', value: parentCategory } : null)
+                      setActiveFilters([seg.name])
+                    }
+                  }
                 }}
-              >
-                {t('dashboard.uploadFirstHint')}
-              </p>
-            </div>
-          ) : (
-            <ForceGraph2D
-              ref={graphRef}
-              graphData={graphData}
-              width={dimensions.width}
-              height={dimensions.height}
-              backgroundColor="rgba(0,0,0,0)"
-              nodeCanvasObject={paintNode}
-              nodePointerAreaPaint={(node, color, ctx) => {
-                const r = Math.sqrt(node.val || 3) * 2.2 + 3
-                ctx.beginPath()
-                ctx.arc(node.x, node.y, r, 0, Math.PI * 2)
-                ctx.fillStyle = color
-                ctx.fill()
-              }}
-              onNodeClick={handleNodeClick}
-              onNodeHover={handleNodeHover}
-              onNodeRightClick={handleGraphRightClick}
-              linkColor={l => {
-                const dim = hoverNode && !highlightLinks.has(l)
-                if (l._type === 'similar_to') {
-                  return dim ? '#6366f122' : '#6366f188'
-                }
-                return dim ? cssVar('--fg-faint', '#5a564f') + '15' : cssVar('--fg-faint', '#5a564f') + '40'
-              }}
-              linkWidth={l => highlightLinks.has(l) ? 2 : (l._type === 'similar_to' ? 1.5 : 0.5)}
-              linkLineDash={l => l._type === 'similar_to' ? [3, 3] : []}
-              cooldownTicks={30}
-              onEngineStop={() => graphRef.current?.zoomToFit(300, 40)}
-              enableNodeDrag={true}
-            />
-          )}
+              />
+            )}
+          </div>
 
-          {/* Stats overlay — top right */}
-          {graphData.nodes.length > 0 && (
+          {/* Right: Stats + Recent */}
+          <div className="flex-1 min-w-0 flex flex-col gap-4 justify-center">
+            {/* Stats */}
             <div
-              className="absolute top-4 right-5 text-[10px] uppercase flex gap-5"
+              className="flex gap-6 text-[10px] uppercase"
               style={{
                 color: 'var(--fg-faint)',
                 fontFamily: 'var(--mono)',
@@ -927,12 +695,95 @@ export default function DashboardPage() {
               }}
             >
               <Stat label="Documents" value={documents.length} />
-              <Stat label="Collections" value={collectionList.length} />
+              <Stat label="Categories" value={categoryList.list.length} />
+              <Stat label="Collections" value={userCollectionList.length} />
             </div>
-          )}
+
+            {/* Recent strip */}
+            <div className="flex flex-col gap-2 min-w-0">
+              <span
+                className="text-[10px] uppercase tracking-[0.08em]"
+                style={{ color: 'var(--fg-faint)', fontFamily: 'var(--mono)' }}
+              >
+                {t('dashboard.recentLabel', { defaultValue: 'Recent uploads' })}
+              </span>
+              <RecentStrip
+                documents={documents}
+                max={5}
+                onDocClick={(doc) => navigate(`/chat?doc=${doc.doc_id}&name=${encodeURIComponent(doc.filename || '')}`)}
+              />
+            </div>
+          </div>
         </div>
 
-        {/* Floating upload button removed — moved to the search-row header. */}
+        {/* === Doc list grouped by category === */}
+        <div className="flex-1 overflow-auto" style={{ backgroundColor: 'var(--bg)' }}>
+          {isLoading ? (
+            <div className="p-2">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <DocCardSkeleton key={i} />
+              ))}
+            </div>
+          ) : docsByCategory.length === 0 ? (
+            <div
+              className="flex flex-col items-center justify-center py-16"
+              style={{ color: 'var(--fg-dim)' }}
+            >
+              <FileText size={36} className="mb-3 opacity-60" />
+              <p
+                className="text-base mb-1"
+                style={{
+                  fontFamily: 'var(--display)',
+                  fontStyle: 'italic',
+                  fontWeight: 400,
+                  letterSpacing: '-0.015em',
+                }}
+              >
+                {documents.length === 0 ? t('dashboard.uploadFirst') : t('dashboard.noMatch')}
+              </p>
+              {documents.length === 0 && (
+                <p
+                  className="text-[11px] uppercase"
+                  style={{
+                    fontFamily: 'var(--mono)',
+                    letterSpacing: '0.08em',
+                    color: 'var(--fg-faint)',
+                  }}
+                >
+                  {t('dashboard.uploadFirstHint')}
+                </p>
+              )}
+            </div>
+          ) : (
+            docsByCategory.map(group => {
+              const catKey = group.primaryCategory || '__uncategorized__'
+              return (
+                <CategorySection
+                  key={catKey}
+                  primaryCategory={group.primaryCategory}
+                  docs={group.docs}
+                  collapsed={collapsedCategories.has(catKey)}
+                  onToggle={() => toggleCategoryCollapsed(catKey)}
+                  renderDoc={(doc) => (
+                    <DocRow
+                      key={doc.doc_id}
+                      doc={doc}
+                      onClick={() => navigate(`/chat?doc=${doc.doc_id}&name=${encodeURIComponent(doc.filename || '')}`)}
+                      onViewPdf={(e) => { e.stopPropagation(); navigate(`/pdf/${doc.doc_id}`) }}
+                      onMoreClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === doc.doc_id ? null : doc.doc_id) }}
+                      menuOpen={menuOpen === doc.doc_id}
+                      onDownload={() => handleDownload(doc.doc_id)}
+                      onDelete={() => handleDelete(doc.doc_id)}
+                      tDownload={t('common.download')}
+                      tDelete={t('common.delete')}
+                      tViewPdf={t('dashboard.viewPdf')}
+                    />
+                  )}
+                />
+              )
+            })
+          )}
+        </div>
 
         {contextMenu && (
           <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenu.items} onClose={() => setContextMenu(null)} />
@@ -950,68 +801,6 @@ export default function DashboardPage() {
           }}
           onCancel={() => setConfirmDelete(null)}
         />
-
-        {/* Collapsible documents panel */}
-        <div
-          className="border-t shrink-0"
-          style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-1)' }}
-        >
-          <button
-            onClick={() => setShowPanel(p => !p)}
-            className="flex items-center justify-between w-full px-5 py-2 text-[11px] uppercase"
-            style={{
-              color: 'var(--fg-dim)',
-              fontFamily: 'var(--mono)',
-              letterSpacing: '0.08em',
-            }}
-          >
-            <span>{panelTitle}</span>
-            {showPanel ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
-          </button>
-
-          {showPanel && (
-            <div
-              className="max-h-56 overflow-auto border-t"
-              style={{ borderColor: 'var(--border)' }}
-            >
-              {isLoading ? (
-                <>
-                  {Array.from({ length: 6 }).map((_, i) => (
-                    <DocCardSkeleton key={i} />
-                  ))}
-                </>
-              ) : displayedDocs.length === 0 ? (
-                <div
-                  className="p-6 text-center"
-                  style={{
-                    color: 'var(--fg-faint)',
-                    fontFamily: 'var(--display)',
-                    fontStyle: 'italic',
-                    fontSize: 14,
-                  }}
-                >
-                  {t('dashboard.noMatch')}
-                </div>
-              ) : (
-                displayedDocs.map(doc => (
-                  <DocRow
-                    key={doc.doc_id}
-                    doc={doc}
-                    onClick={() => navigate(`/chat?doc=${doc.doc_id}&name=${encodeURIComponent(doc.filename || '')}`)}
-                    onViewPdf={(e) => { e.stopPropagation(); navigate(`/pdf/${doc.doc_id}`) }}
-                    onMoreClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === doc.doc_id ? null : doc.doc_id) }}
-                    menuOpen={menuOpen === doc.doc_id}
-                    onDownload={() => handleDownload(doc.doc_id)}
-                    onDelete={() => handleDelete(doc.doc_id)}
-                    tDownload={t('common.download')}
-                    tDelete={t('common.delete')}
-                    tViewPdf={t('dashboard.viewPdf')}
-                  />
-                ))
-              )}
-            </div>
-          )}
-        </div>
       </main>
 
       {/* Multi-select action bar (floats at bottom of viewport) */}
@@ -1153,6 +942,7 @@ function SearchInput({ value, onChange, matching, total, showCount }) {
 }
 
 function DocRow({ doc, onClick, onViewPdf, onMoreClick, menuOpen, onDownload, onDelete, tDownload, tDelete, tViewPdf }) {
+  const subtags = Array.isArray(doc.subtags) ? doc.subtags : []
   return (
     <div
       onClick={onClick}
@@ -1162,17 +952,42 @@ function DocRow({ doc, onClick, onViewPdf, onMoreClick, menuOpen, onDownload, on
       onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
     >
       <FileText size={12} className="shrink-0" style={{ color: 'var(--fg-faint)' }} />
-      <span
-        className="flex-1 truncate"
-        style={{
-          color: 'var(--fg-1)',
-          fontFamily: 'var(--display)',
-          fontSize: 14,
-          letterSpacing: '-0.008em',
-        }}
-      >
-        {doc.filename}
-      </span>
+      <div className="flex-1 min-w-0 flex items-center gap-2">
+        <span
+          className="truncate"
+          style={{
+            color: 'var(--fg-1)',
+            fontFamily: 'var(--display)',
+            fontSize: 14,
+            letterSpacing: '-0.008em',
+          }}
+        >
+          {doc.filename}
+        </span>
+        {/* T6: subtag chips — searchable metadata, not navigation */}
+        {subtags.slice(0, 3).map(tag => (
+          <span
+            key={tag}
+            className="shrink-0 px-1.5 py-0.5 rounded text-[9px] uppercase tracking-[0.05em]"
+            style={{
+              color: 'var(--fg-faint)',
+              backgroundColor: 'var(--bg-2)',
+              border: '1px solid var(--border)',
+              fontFamily: 'var(--mono)',
+            }}
+          >
+            {tag}
+          </span>
+        ))}
+        {subtags.length > 3 && (
+          <span
+            className="shrink-0 text-[9px]"
+            style={{ color: 'var(--fg-faint)', fontFamily: 'var(--mono)' }}
+          >
+            +{subtags.length - 3}
+          </span>
+        )}
+      </div>
       <span
         className="shrink-0 text-[10px] tabular-nums"
         style={{ color: 'var(--fg-faint)', fontFamily: 'var(--mono)', letterSpacing: '0.05em' }}
