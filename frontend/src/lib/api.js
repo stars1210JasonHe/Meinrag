@@ -46,6 +46,24 @@ export const fetchTaxonomy = (userId) =>
 export const deleteDocument = (docId, userId) =>
   apiFetch(`/documents/${docId}`, { method: 'DELETE', headers: headers(userId) })
 
+// Update one or more of (primary_category, subtags, collections). Any field
+// omitted / undefined is left unchanged on the server (partial update).
+export const patchDocument = (docId, patch, userId) =>
+  apiFetch(`/documents/${docId}`, {
+    method: 'PATCH',
+    headers: headers(userId),
+    body: JSON.stringify(patch),
+  })
+
+// Run AI re-classification on the doc — returns + persists the new
+// {primary_category, subtags} immediately. Use as the "Suggest with AI"
+// button in the edit-classification dialog.
+export const reclassifyDocument = (docId, userId) =>
+  apiFetch(`/documents/${docId}/reclassify`, {
+    method: 'POST',
+    headers: headers(userId),
+  })
+
 export const fetchDocumentChunks = (docId, page, userId) => {
   const params = page != null ? `?page=${page}` : ''
   return apiFetch(`/documents/${docId}/chunks${params}`, { headers: headers(userId) })

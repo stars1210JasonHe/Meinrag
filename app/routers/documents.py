@@ -716,21 +716,40 @@ async def update_document_collections(
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
 
-    # T2: only the legacy collections layer is wired here. T7 plumbs primary_category + subtags.
-    if request.collections is not None:
-        await registry.update_collections(doc_id, request.collections)
-        collections_csv = "|".join(request.collections)
-        vector_store.update_document_metadata(doc_id, {"collections_csv": collections_csv})
-        updated_collections = request.collections
-    else:
-        updated_collections = doc.get("collections", [])
+    # Distinguish "field omitted" from "field explicitly set to null" via
+    # Pydantic's model_fields_set. An explicit null clears primary_category;
+    # an omitted field leaves the existing value untouched.
+    fields_set = request.model_fields_set
 
+    if "primary_category" in fields_set or "subtags" in fields_set:
+        new_primary = (
+            request.primary_category
+            if "primary_category" in fields_set
+            else doc.get("primary_category")
+        )
+        new_subtags = (
+            list(request.subtags or [])
+            if "subtags" in fields_set
+            else list(doc.get("subtags") or [])
+        )
+        await registry.update_classification(doc_id, new_primary, new_subtags)
+        # Mirror primary_category onto chunk metadata for retrieval-time filtering
+        if new_primary:
+            vector_store.update_document_metadata(doc_id, {"primary_category": new_primary})
+
+    if "collections" in fields_set:
+        new_collections = list(request.collections or [])
+        await registry.update_collections(doc_id, new_collections)
+        vector_store.update_document_metadata(doc_id, {"collections_csv": "|".join(new_collections)})
+
+    # Re-read so the response reflects every applied change
+    updated = await registry.get(doc_id)
     return DocumentUpdateResponse(
         doc_id=doc_id,
-        primary_category=doc.get("primary_category"),
-        subtags=doc.get("subtags", []),
-        collections=updated_collections,
-        message="Collections updated successfully",
+        primary_category=updated.get("primary_category"),
+        subtags=list(updated.get("subtags") or []),
+        collections=list(updated.get("collections") or []),
+        message="Document updated successfully",
     )
 
 

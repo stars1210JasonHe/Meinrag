@@ -5,11 +5,12 @@ import { useTranslation } from 'react-i18next'
 import Sunburst from '@/components/Sunburst'
 import RecentStrip from '@/components/RecentStrip'
 import CategorySection from '@/components/CategorySection'
+import EditClassificationDialog from '@/components/EditClassificationDialog'
 import { useTaxonomyHierarchy } from '@/hooks/useTaxonomyHierarchy'
 import {
   Search, Upload, MoreVertical, Trash2, Download, RefreshCw,
   FileText, X, MessageSquare, Filter, ChevronUp, ChevronDown, Network,
-  PanelLeftClose, PanelLeftOpen,
+  PanelLeftClose, PanelLeftOpen, Tag,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { fetchDocuments, fetchTaxonomy, deleteDocument } from '@/lib/api'
@@ -118,6 +119,8 @@ export default function DashboardPage() {
   const [selectedScope, setSelectedScope] = useState(null)
   const [contextMenu, setContextMenu] = useState(null)
   const [confirmDelete, setConfirmDelete] = useState(null)
+  // T7: doc to edit classification for; null = dialog closed
+  const [editClassDoc, setEditClassDoc] = useState(null)
   // D-sprint: per-category collapse state, persisted in localStorage.
   const [collapsedCategories, setCollapsedCategories] = useState(() => {
     if (typeof localStorage === 'undefined') return new Set()
@@ -774,8 +777,10 @@ export default function DashboardPage() {
                       menuOpen={menuOpen === doc.doc_id}
                       onDownload={() => handleDownload(doc.doc_id)}
                       onDelete={() => handleDelete(doc.doc_id)}
+                      onEditClass={() => { setMenuOpen(null); setEditClassDoc(doc) }}
                       tDownload={t('common.download')}
                       tDelete={t('common.delete')}
+                      tEditClass={t('editClass.menuItem', { defaultValue: 'Edit classification' })}
                       tViewPdf={t('dashboard.viewPdf')}
                     />
                   )}
@@ -817,6 +822,29 @@ export default function DashboardPage() {
         docIds={selectedDocIds}
         onClose={() => setSaveDialogOpen(false)}
         onSaved={handleSavedSuccess}
+      />
+
+      {/* T7: Edit classification dialog */}
+      <EditClassificationDialog
+        open={editClassDoc != null}
+        doc={editClassDoc}
+        taxonomy={taxonomyData}
+        userId={USER_ID}
+        onClose={(aiRan) => {
+          setEditClassDoc(null)
+          // If AI-suggest mutated server state, refresh even on cancel —
+          // otherwise the dashboard would show stale values.
+          if (aiRan) {
+            queryClient.invalidateQueries({ queryKey: ['documents', USER_ID] })
+            queryClient.invalidateQueries({ queryKey: ['taxonomy', USER_ID] })
+          }
+        }}
+        onSaved={() => {
+          setEditClassDoc(null)
+          queryClient.invalidateQueries({ queryKey: ['documents', USER_ID] })
+          queryClient.invalidateQueries({ queryKey: ['taxonomy', USER_ID] })
+          toast.success(t('editClass.savedToast', { defaultValue: 'Classification updated' }))
+        }}
       />
     </div>
   )
@@ -941,7 +969,7 @@ function SearchInput({ value, onChange, matching, total, showCount }) {
   )
 }
 
-function DocRow({ doc, onClick, onViewPdf, onMoreClick, menuOpen, onDownload, onDelete, tDownload, tDelete, tViewPdf }) {
+function DocRow({ doc, onClick, onViewPdf, onMoreClick, menuOpen, onDownload, onDelete, onEditClass, tDownload, tDelete, tEditClass, tViewPdf }) {
   const subtags = Array.isArray(doc.subtags) ? doc.subtags : []
   return (
     <div
@@ -1015,6 +1043,13 @@ function DocRow({ doc, onClick, onViewPdf, onMoreClick, menuOpen, onDownload, on
             className="absolute right-0 bottom-7 z-20 rounded-lg shadow-xl py-1 min-w-[130px]"
             style={{ backgroundColor: 'var(--bg-3)', border: '1px solid var(--border-2)' }}
           >
+            <button
+              onClick={(e) => { e.stopPropagation(); onEditClass?.() }}
+              className="flex items-center gap-2 px-3 py-1.5 text-[12px] w-full transition-colors hover:bg-white/5"
+              style={{ color: 'var(--fg-1)' }}
+            >
+              <Tag size={11} /> {tEditClass}
+            </button>
             <button
               onClick={(e) => { e.stopPropagation(); onDownload() }}
               className="flex items-center gap-2 px-3 py-1.5 text-[12px] w-full transition-colors hover:bg-white/5"

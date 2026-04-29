@@ -55,6 +55,17 @@
     "collapseDomains": "隐藏领域",
     "expandDomains": "显示领域"
   },
+  "editClass": {
+    "menuItem": "编辑分类",
+    "title": "编辑分类",
+    "aiSuggest": "AI 自动建议",
+    "primaryCategory": "主类别",
+    "subtags": "子标签",
+    "noSubtags": "暂无可选子标签 — 请先选择主类别。",
+    "collections": "文件夹（可选）",
+    "noCollections": "暂无文件夹 — 在仪表盘多选文档后保存。",
+    "savedToast": "分类已更新"
+  },
   "chat": {
     "newChat": "新对话",
     "noSessionsYet": "暂无会话",

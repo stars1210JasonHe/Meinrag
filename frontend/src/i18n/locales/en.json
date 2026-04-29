@@ -55,6 +55,17 @@
     "collapseDomains": "Hide domains",
     "expandDomains": "Show domains"
   },
+  "editClass": {
+    "menuItem": "Edit classification",
+    "title": "Edit classification",
+    "aiSuggest": "Suggest with AI",
+    "primaryCategory": "Primary category",
+    "subtags": "Sub-tags",
+    "noSubtags": "No subtags available — pick a primary category first.",
+    "collections": "Collections (optional)",
+    "noCollections": "No collections yet — create one from a multi-doc selection on the dashboard.",
+    "savedToast": "Classification updated"
+  },
   "chat": {
     "newChat": "New Chat",
     "noSessionsYet": "No sessions yet",
