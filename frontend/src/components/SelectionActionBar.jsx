@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { MessageSquare, Network, BookmarkPlus, X, AlertTriangle, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
 import { useSelection } from '@/hooks/useSelection'
+import SelectedDocsPopover from '@/components/SelectedDocsPopover'
 
 /**
  * Bottom action bar shown when selection count >= 1.
@@ -12,13 +13,16 @@ import { useSelection } from '@/hooks/useSelection'
  *   onAsk: () => void            — Phase 4 action (required)
  *   onVisualize: () => void      — Phase 5 action (required)
  *   onSave: () => void           — Phase 6 action (required); disabled until count >= 2
+ *   documents: Array              — full doc list; required for the peek popover
+ *                                   to look up filenames for selections that
+ *                                   aren't currently visible (cross-search case).
  */
 const HINT_KEY = 'meinrag.multiselect.hinted'
 
-export default function SelectionActionBar({ onAsk, onVisualize, onSave }) {
+export default function SelectionActionBar({ onAsk, onVisualize, onSave, documents = [] }) {
   const { t } = useTranslation()
   const selection = useSelection()
-  const [hoverItems, setHoverItems] = useState(false)
+  const [peekOpen, setPeekOpen] = useState(false)
   const [showHint, setShowHint] = useState(() => {
     if (typeof localStorage === 'undefined') return false
     return localStorage.getItem(HINT_KEY) !== '1'
@@ -36,6 +40,14 @@ export default function SelectionActionBar({ onAsk, onVisualize, onSave }) {
     setShowHint(false)
     try { localStorage.setItem(HINT_KEY, '1') } catch { /* ignore */ }
   }
+
+  // Selected docs hydrated with filenames from the full doc list — required so
+  // the peek popover can name docs that aren't in the current search filter.
+  // MUST be called before any early-return to obey React rules-of-hooks.
+  const selectedDocs = useMemo(
+    () => documents.filter(d => selection.hasDoc(d.doc_id)),
+    [documents, selection.docs],
+  )
 
   const count = selection.count
   if (count < 1) return null
@@ -60,13 +72,6 @@ export default function SelectionActionBar({ onAsk, onVisualize, onSave }) {
       }
     )
   }
-
-  const docIds = [...selection.docs]
-  const collectionNames = [...selection.collections]
-  const previewItems = [
-    ...collectionNames.map(c => `📁 ${c}`),
-    ...docIds.map(d => d.slice(0, 10) + '…'),
-  ].slice(0, 5)
 
   return (
     <>
@@ -120,28 +125,16 @@ export default function SelectionActionBar({ onAsk, onVisualize, onSave }) {
         </div>
       )}
 
-      <span
-        className="relative text-sm font-medium text-[color:var(--fg,#f4f2ee)] pl-2 pr-1 cursor-default"
-        onMouseEnter={() => setHoverItems(true)}
-        onMouseLeave={() => setHoverItems(false)}
+      <button
+        type="button"
+        data-peek-trigger
+        onClick={() => setPeekOpen(p => !p)}
+        className="text-sm font-medium text-[color:var(--fg,#f4f2ee)] pl-2 pr-1 hover:underline decoration-dotted underline-offset-4"
+        title={t('selection.peekTitle', { defaultValue: 'Selected documents' })}
+        aria-expanded={peekOpen}
       >
         {t('selection.nSelected', { count, defaultValue: `${count} selected` })}
-        {hoverItems && previewItems.length > 0 && (
-          <span
-            className="absolute bottom-full left-0 mb-2 z-50
-                       whitespace-nowrap rounded-md px-3 py-2
-                       bg-black/90 text-[11px] text-white/90 shadow-lg
-                       pointer-events-none"
-          >
-            {previewItems.map((item, i) => (
-              <div key={i}>{item}</div>
-            ))}
-            {count > previewItems.length && (
-              <div className="opacity-60 mt-1">+ {count - previewItems.length} more</div>
-            )}
-          </span>
-        )}
-      </span>
+      </button>
 
       <div className="h-5 w-px bg-white/10 mx-1" />
 
@@ -195,6 +188,14 @@ export default function SelectionActionBar({ onAsk, onVisualize, onSave }) {
         <X size={14} />
       </button>
       </div>
+
+      {peekOpen && (
+        <SelectedDocsPopover
+          selectedDocs={selectedDocs}
+          onRemove={(docId) => selection.toggleDoc(docId)}
+          onClose={() => setPeekOpen(false)}
+        />
+      )}
     </>
   )
 }

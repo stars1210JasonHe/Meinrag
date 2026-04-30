@@ -222,6 +222,8 @@
     "saveNameHint": "只能包含字母、数字、连字符和下划线。空格将转为连字符。",
     "hintTitle": "选择操作",
     "hintBody": "向 AI 询问你所选的项目、在图谱中查看，或另存为命名集合。",
+    "peekTitle": "已选文档",
+    "peekRemove": "从选择中移除",
     "saveSuccess": "已保存集合 \"{{name}}\"",
     "conflictTitle": "名称已存在",
     "conflictBody": "集合 \"{{name}}\" 已包含 {{count}} 篇文档。请选择其他名称，或合并到该集合。",

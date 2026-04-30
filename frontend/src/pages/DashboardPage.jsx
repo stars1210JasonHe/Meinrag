@@ -812,6 +812,7 @@ export default function DashboardPage() {
 
       {/* Multi-select action bar (floats at bottom of viewport) */}
       <SelectionActionBar
+        documents={documents}
         onAsk={handleSelectionAsk}
         onVisualize={handleSelectionVisualize}
         onSave={handleSelectionSave}
