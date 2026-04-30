@@ -240,50 +240,57 @@ MEINRAG/
 
 ## Configuration
 
-### Environment Variables
+Every setting lives in [`app/config.py`](app/config.py) (`Settings` class) with
+defaults baked in. Override via environment variables — see
+[`.env.example`](.env.example) for **every** supported variable, grouped by
+purpose with inline comments on when to change.
 
-Key settings in `.env`:
+### What's default-on (no opt-in needed)
 
-```env
-# LLM Provider
-LLM_PROVIDER=openai              # or openrouter
-OPENAI_API_KEY=your-key
-OPENAI_MODEL=gpt-4o-mini
+- `RETRIEVAL_TOP_K=10`
+- `ROUTER_ENABLED=true` — small-LLM doc pre-filter before vector search
+- `HYBRID_SEARCH_ENABLED=true` — BM25 + dense vectors via Reciprocal Rank Fusion
+- `SUMMARY_ENABLED=true` — per-chunk summaries for the compiled retrieval layer
+- `QUERY_EXPANSION_ENABLED=true`
+- `WEB_SEARCH_ENABLED=true` — DuckDuckGo fallback when retrieval returns empty
 
-# Database
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/meinrag
+### Common tuning knobs
 
-# Vector Store
-VECTOR_STORE=chroma              # or faiss
-
-# Features
-HYBRID_SEARCH_ENABLED=false      # Enable BM25+Vector fusion
-RERANK_ENABLED=false             # Enable LLM re-ranking
-MEMORY_SESSION_TTL=3600          # Chat session timeout (seconds)
-
-# Web Search
-WEB_SEARCH_ENABLED=true          # Fall back to DuckDuckGo when no docs match
-WEB_SEARCH_MAX_RESULTS=9         # Number of web results per query set
-WEB_SEARCH_SCORE_THRESHOLD=0.5   # Min similarity score before triggering web fallback
-
-# User System
-DEFAULT_USER=admin               # Default user ID
-USER_ISOLATION=all               # all | documents | none
-```
+| Variable | Default | When to change |
+|---|---|---|
+| `OPENAI_MODEL` | `gpt-4o-mini` | Quality vs cost. Verify with `tests/test_query_credibility.py` before committing — vendor "no regression" claims don't always survive your prompts. |
+| `RETRIEVAL_TOP_K` | `10` | Lower for speed; higher (≤20) for recall on long docs. |
+| `RERANK_ENABLED` | `false` | Turn on for ambiguous queries; uses FlashRank by default. |
+| `MEMORY_SESSION_TTL` | `2592000` (30 d) | Smaller values risk silent data loss — chat history is persistent. |
+| `MAX_CONTEXT_TOKENS` | derive from model | Hard-cap context if you hit budget overruns. |
+| `VECTOR_STORE` | `faiss` | Switch to `chroma` for richer metadata filtering. |
 
 ### Advanced Features
 
-**Enable Hybrid Search:**
+The features above are already enabled by default. The blocks below show how
+to **disable** them, or to use the alternative providers:
+
+**Disable hybrid search** (back to dense-only retrieval):
 ```env
-HYBRID_SEARCH_ENABLED=true
-HYBRID_BM25_WEIGHT=0.5
+HYBRID_SEARCH_ENABLED=false
 ```
 
-**Enable Re-ranking:**
+**Switch re-ranker provider** (when `RERANK_ENABLED=true`):
 ```env
-RERANK_ENABLED=true
-RERANK_TOP_N=3
+RERANK_PROVIDER=cross-encoder    # flashrank | cross-encoder | jina | cohere | llm
+RERANK_TOP_N=4
 ```
+
+**Use OpenRouter instead of OpenAI** (chat only — embeddings always use OpenAI):
+```env
+LLM_PROVIDER=openrouter
+OPENROUTER_API_KEY=sk-or-...
+OPENROUTER_MODEL=openai/gpt-4o-mini
+```
+
+For the full Docker production setup see
+[Run from scratch with Docker](#run-from-scratch-with-docker-production-stack)
+above.
 
 ---
 
