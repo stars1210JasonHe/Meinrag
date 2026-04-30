@@ -771,6 +771,8 @@ export default function DashboardPage() {
                     <DocRow
                       key={doc.doc_id}
                       doc={doc}
+                      selected={selection.hasDoc(doc.doc_id)}
+                      onSelectToggle={() => selection.toggleDoc(doc.doc_id)}
                       onClick={() => navigate(`/chat?doc=${doc.doc_id}&name=${encodeURIComponent(doc.filename || '')}`)}
                       onViewPdf={(e) => { e.stopPropagation(); navigate(`/pdf/${doc.doc_id}`) }}
                       onMoreClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === doc.doc_id ? null : doc.doc_id) }}
@@ -969,7 +971,7 @@ function SearchInput({ value, onChange, matching, total, showCount }) {
   )
 }
 
-function DocRow({ doc, onClick, onViewPdf, onMoreClick, menuOpen, onDownload, onDelete, onEditClass, tDownload, tDelete, tEditClass, tViewPdf }) {
+function DocRow({ doc, selected, onClick, onSelectToggle, onViewPdf, onMoreClick, menuOpen, onDownload, onDelete, onEditClass, tDownload, tDelete, tEditClass, tViewPdf }) {
   const subtags = Array.isArray(doc.subtags) ? doc.subtags : []
   return (
     <div
@@ -979,6 +981,27 @@ function DocRow({ doc, onClick, onViewPdf, onMoreClick, menuOpen, onDownload, on
       onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-2)'}
       onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
     >
+      {/* Multi-select checkbox — hover-reveal when none selected, persistent when checked */}
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onSelectToggle?.() }}
+        className={cn(
+          'shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-all',
+          selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-70 hover:opacity-100',
+        )}
+        style={{
+          borderColor: selected ? 'var(--signature)' : 'var(--fg-faint)',
+          backgroundColor: selected ? 'var(--signature)' : 'transparent',
+        }}
+        title={selected ? 'Deselect' : 'Select'}
+        aria-pressed={selected}
+      >
+        {selected && (
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+            <path d="M2 5l2 2 4-4" stroke="var(--bg)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        )}
+      </button>
       <FileText size={12} className="shrink-0" style={{ color: 'var(--fg-faint)' }} />
       <div className="flex-1 min-w-0 flex items-center gap-2">
         <span
