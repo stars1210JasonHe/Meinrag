@@ -122,9 +122,9 @@ class TestSaveCollection:
         assert body["already_in_collection"] == 0
         assert body["total_docs_in_collection"] == len(doc_ids)
 
-        # Verify it shows up in /documents/collections
-        resp = client.get("/documents/collections", headers={"X-User-Id": "admin"})
-        assert name in resp.json()["existing_collections"]
+        # Verify it shows up in /documents/taxonomy
+        resp = client.get("/documents/taxonomy", headers={"X-User-Id": "admin"})
+        assert name in resp.json()["user_collections"]
 
         # Verify list-by-collection returns the right docs
         resp = client.get(f"/documents?collection={name}", headers={"X-User-Id": "admin"})

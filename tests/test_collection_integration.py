@@ -326,9 +326,9 @@ class TestNewDocsJoinExistingCollections:
         """Listing existing collections — should NOT contain near-duplicates
         like 'physics' AND 'physicss', or differently-cased versions of the same name."""
         client = api_env["client"]
-        resp = client.get("/documents/collections", headers={"X-User-Id": "admin"})
+        resp = client.get("/documents/taxonomy", headers={"X-User-Id": "admin"})
         assert resp.status_code == 200
-        existing = set(resp.json()["existing_collections"])
+        existing = set(resp.json()["user_collections"])
 
         # All collection names must be canonicalized (lowercase, hyphen-separated)
         bad = [c for c in existing if c != c.lower().strip() or " " in c]
@@ -396,20 +396,20 @@ class TestRetrievalByCollection:
 
 
 @online
-class TestCollectionsEndpoint:
-    """Verify /documents/collections returns expected structure."""
+class TestTaxonomyEndpoint:
+    """Verify /documents/taxonomy returns expected structure."""
 
-    def test_returns_taxonomy_plus_existing(self, api_env, corpus_uploaded):
-        """Endpoint returns taxonomy categories. ``existing_collections`` is
-        only populated by user action (T3: AI doesn't write here)."""
+    def test_returns_taxonomy_plus_user_collections(self, api_env, corpus_uploaded):
+        """Endpoint returns taxonomy categories + user_collections (only
+        populated by user action; T3 made it so the AI no longer writes here)."""
         client = api_env["client"]
-        resp = client.get("/documents/collections", headers={"X-User-Id": "admin"})
+        resp = client.get("/documents/taxonomy", headers={"X-User-Id": "admin"})
         assert resp.status_code == 200
         data = resp.json()
         # Taxonomy has 11 primary categories
-        assert len(data["taxonomy_categories"]) == 11
-        # existing_collections is a list (possibly empty when no user has filed anything)
-        assert isinstance(data["existing_collections"], list)
+        assert len(data["primary_categories"]) == 11
+        # user_collections is a list (possibly empty)
+        assert isinstance(data["user_collections"], list)
 
 
 @online
@@ -504,9 +504,9 @@ class TestUserIsolation:
         assert resp.json()["total"] == 0
 
         # And the other user's collections listing is also empty of admin's seeds
-        resp = client.get("/documents/collections", headers={"X-User-Id": "other_user"})
+        resp = client.get("/documents/taxonomy", headers={"X-User-Id": "other_user"})
         assert resp.status_code == 200
-        assert resp.json()["existing_collections"] == []
+        assert resp.json()["user_collections"] == []
 
 
 @online

@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import ForceGraph2D from 'react-force-graph-2d'
 import { FileText, Table2, Image, Calculator, ExternalLink, MessageSquare, X, Network, GitBranch } from 'lucide-react'
-import { fetchGraphDocuments, fetchGraphNodes, fetchDocuments, fetchCollections, fetchDocumentChunks } from '@/lib/api'
+import { fetchGraphDocuments, fetchGraphNodes, fetchDocuments, fetchTaxonomy, fetchDocumentChunks } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import ContextMenu from '@/components/ContextMenu'
 import MindmapTree from '@/components/MindmapTree'
@@ -121,9 +121,9 @@ export default function GraphPage() {
     queryFn: () => fetchDocuments(USER_ID),
   })
 
-  const { data: collectionsData } = useQuery({
-    queryKey: ['collections', USER_ID],
-    queryFn: () => fetchCollections(USER_ID),
+  const { data: taxonomyData } = useQuery({
+    queryKey: ['taxonomy', USER_ID],
+    queryFn: () => fetchTaxonomy(USER_ID),
   })
 
   const activeEdgeTypes = EDGE_TYPES.filter(t => edgeFilter[t]).join(',')
@@ -172,7 +172,7 @@ export default function GraphPage() {
   }, [])
 
   const docList = documents?.documents || (Array.isArray(documents) ? documents : [])
-  const collections = collectionsData?.existing_collections || []
+  const collections = taxonomyData?.user_collections || []
 
   // Group documents by collection for the dropdown
   const docsByCollection = useMemo(() => {

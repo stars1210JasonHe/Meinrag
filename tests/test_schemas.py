@@ -15,7 +15,6 @@ from app.models.schemas import (
     HealthResponse,
     UserInfo,
     UserCreateRequest,
-    CollectionsResponse,
 )
 
 
@@ -272,18 +271,6 @@ class TestUserSchemas:
     def test_user_create_valid_chars(self):
         req = UserCreateRequest(user_id="user-123_test", display_name="Test User")
         assert req.user_id == "user-123_test"
-
-
-class TestCollectionsResponse:
-    """CollectionsResponse fields."""
-
-    def test_valid(self):
-        resp = CollectionsResponse(
-            taxonomy_categories=["legal-compliance", "finance-accounting"],
-            existing_collections=["law", "medical"],
-        )
-        assert len(resp.taxonomy_categories) == 2
-        assert len(resp.existing_collections) == 2
 
 
 class TestOtherSchemas:

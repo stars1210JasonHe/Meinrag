@@ -98,11 +98,11 @@ def _cleanup_test_collections(preflight_check):
     yield
     import httpx as _httpx
     try:
-        r = _httpx.get(f"{BACKEND_URL}/documents/collections",
+        r = _httpx.get(f"{BACKEND_URL}/documents/taxonomy",
                        headers={"X-User-Id": USER_ID}, timeout=5.0)
         if r.status_code != 200:
             return
-        for name in r.json().get("existing_collections", []):
+        for name in r.json().get("user_collections", []):
             if name.startswith(("e2e-", "test-col-", "has-spaces", "selection-")):
                 # For each doc in that collection, PATCH to remove it
                 dl = _httpx.get(f"{BACKEND_URL}/documents?collection={name}",
@@ -298,10 +298,10 @@ class TestMultiSelectE2E:
         page.screenshot(path=str(SHOTS_DIR / "09b-save-success.png"))
 
         # Verify via backend: collection exists
-        r = httpx.get(f"{BACKEND_URL}/documents/collections",
+        r = httpx.get(f"{BACKEND_URL}/documents/taxonomy",
                       headers={"X-User-Id": USER_ID})
         assert r.status_code == 200
-        assert unique_name in r.json()["existing_collections"]
+        assert unique_name in r.json()["user_collections"]
 
         # Stash for conflict test
         page.context.storage_state(path=None)  # no-op but harmless

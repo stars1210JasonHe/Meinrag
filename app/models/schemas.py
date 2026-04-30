@@ -141,12 +141,6 @@ class ChunkContextRequest(BaseModel):
     session_id: str | None = None
 
 
-class CollectionsResponse(BaseModel):
-    """Deprecated — kept until T4 swaps the endpoint to TaxonomyResponse."""
-    taxonomy_categories: list[str]
-    existing_collections: list[str]
-
-
 class TaxonomyResponse(BaseModel):
     """Three-layer taxonomy returned by GET /documents/taxonomy.
 

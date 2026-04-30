@@ -35,11 +35,8 @@ async function apiFetch(path, options = {}) {
 export const fetchDocuments = (userId) =>
   apiFetch('/documents', { headers: headers(userId) })
 
-export const fetchCollections = (userId) =>
-  apiFetch('/documents/collections', { headers: headers(userId) })
-
 // Three-layer taxonomy: primary_categories + domain_options + user_collections.
-// New T4 endpoint — replaces fetchCollections for the dashboard sidebar.
+// Sole replacement for the now-removed GET /documents/collections endpoint.
 export const fetchTaxonomy = (userId) =>
   apiFetch('/documents/taxonomy', { headers: headers(userId) })
 

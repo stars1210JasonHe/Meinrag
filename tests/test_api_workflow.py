@@ -207,14 +207,14 @@ class TestListWorkflow:
         for doc in data["documents"]:
             assert "legal-compliance" in doc["collections"]
 
-    def test_list_collections(self, api_env):
-        """Collections endpoint returns taxonomy + existing."""
+    def test_list_taxonomy(self, api_env):
+        """Taxonomy endpoint returns primary categories + user collections."""
         client = api_env["client"]
-        resp = client.get("/documents/collections", headers={"X-User-Id": "admin"})
+        resp = client.get("/documents/taxonomy", headers={"X-User-Id": "admin"})
         assert resp.status_code == 200
         data = resp.json()
-        assert len(data["taxonomy_categories"]) == 11
-        assert len(data["existing_collections"]) >= 1
+        assert len(data["primary_categories"]) == 11
+        assert isinstance(data["user_collections"], list)
 
 
 @online

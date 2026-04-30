@@ -26,7 +26,6 @@ from app.models.schemas import (
     DeleteResponse,
     DocumentUpdateRequest,
     DocumentUpdateResponse,
-    CollectionsResponse,
     TaxonomyResponse,
     SaveCollectionRequest,
     SaveCollectionResponse,
@@ -219,21 +218,6 @@ async def list_documents(
     return DocumentListResponse(
         documents=[DocumentInfo(**d) for d in docs],
         total=len(docs),
-    )
-
-
-@router.get("/collections", response_model=CollectionsResponse, deprecated=True)
-async def list_collections(
-    settings: Settings = Depends(get_settings),
-    registry: DocumentRepository = Depends(get_registry),
-    current_user: str = Depends(get_current_user),
-):
-    """Legacy endpoint — use ``GET /documents/taxonomy`` instead. Removed in T8."""
-    user_filter = _get_user_filter(settings, current_user)
-    existing = await registry.get_all_collections(user_id=user_filter)
-    return CollectionsResponse(
-        taxonomy_categories=PRIMARY_CATEGORIES,
-        existing_collections=existing,
     )
 
 
