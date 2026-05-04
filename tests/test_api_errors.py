@@ -4,7 +4,7 @@ Uses FastAPI TestClient with mocked dependencies and in-memory SQLite DB.
 """
 import io
 from contextlib import asynccontextmanager
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,7 +13,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.config import Settings, LLMProvider, VectorStoreType
 from app.db.models import Base, UserModel
-from app.dependencies import get_settings, get_vector_store, get_db, get_llm, get_embeddings, get_edge_repository, get_summary_store
+from app.dependencies import get_settings, get_vector_store, get_db, get_llm, get_embeddings, get_edge_repository, get_summary_store, get_registry, get_current_user
 from app.main import create_app
 
 
@@ -216,3 +216,77 @@ class TestAskAIEndpoint:
         """Question > 2000 chars returns 422."""
         resp = client.post("/query/ask-ai", json={"question": "x" * 2001})
         assert resp.status_code == 422
+
+
+class TestDownloadDirectoryCollision:
+    """Regression: download endpoint must skip the figure-extraction directory.
+
+    Every PDF that goes through figure extraction creates upload_dir/{doc_id}/
+    next to upload_dir/{doc_id}_{filename}.pdf. Before the fix, the download
+    endpoint matched on `name.startswith(doc_id)` with no is_file() guard, so
+    when iterdir() yielded the directory FileResponse choked → HTTP 500.
+    """
+
+    def _build_client(self, mock_settings, tmp_path, doc_id, filename):
+        """Build a TestClient with get_registry mocked, upload_dir at tmp_path."""
+        mock_settings.upload_dir = tmp_path
+
+        registry = MagicMock()
+        registry.get = AsyncMock(return_value={
+            "doc_id": doc_id,
+            "filename": filename,
+            "user_id": "admin",
+        })
+
+        app = create_app()
+        # No DB / lifespan needed — every dep used by /download is overridden.
+        app.dependency_overrides[get_settings] = lambda: mock_settings
+        app.dependency_overrides[get_registry] = lambda: registry
+        app.dependency_overrides[get_current_user] = lambda: "admin"
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_returns_file_when_dir_collision_exists(self, mock_settings, tmp_path):
+        """Both `{doc_id}/` dir AND `{doc_id}_*.pdf` exist → return the file."""
+        doc_id = "abcdef123456"
+        filename = "report.pdf"
+        file_bytes = b"%PDF-1.4 fake content for regression test"
+
+        # Recreate the on-disk shape that figure extraction produces
+        (tmp_path / doc_id / "images").mkdir(parents=True)
+        (tmp_path / f"{doc_id}_{filename}").write_bytes(file_bytes)
+
+        client = self._build_client(mock_settings, tmp_path, doc_id, filename)
+        resp = client.get(f"/documents/{doc_id}/download")
+
+        assert resp.status_code == 200, (
+            f"Expected 200 (file), got {resp.status_code}: {resp.text[:200]}"
+        )
+        assert resp.content == file_bytes
+
+    def test_prefix_collision_with_underscore_separator(self, mock_settings, tmp_path):
+        """doc_id `abc123` must NOT match a sibling file `abc1234_other.pdf`."""
+        target_id = "abc123"
+        sibling_id = "abc1234"  # shares the `abc123` prefix
+        filename = "ours.pdf"
+        target_bytes = b"%PDF target"
+
+        (tmp_path / f"{target_id}_{filename}").write_bytes(target_bytes)
+        (tmp_path / f"{sibling_id}_other.pdf").write_bytes(b"%PDF sibling")
+
+        client = self._build_client(mock_settings, tmp_path, target_id, filename)
+        resp = client.get(f"/documents/{target_id}/download")
+
+        assert resp.status_code == 200
+        assert resp.content == target_bytes  # not the sibling
+
+    def test_returns_404_when_only_directory_exists(self, mock_settings, tmp_path):
+        """If only the figure-extraction dir is on disk (file lost), return 404 not 500."""
+        doc_id = "deadbeef0123"
+        filename = "missing.pdf"
+        (tmp_path / doc_id / "images").mkdir(parents=True)
+
+        client = self._build_client(mock_settings, tmp_path, doc_id, filename)
+        resp = client.get(f"/documents/{doc_id}/download")
+
+        assert resp.status_code == 404
+        assert "not found" in resp.json()["detail"].lower()

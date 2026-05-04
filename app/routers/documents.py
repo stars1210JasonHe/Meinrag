@@ -616,7 +616,7 @@ async def download_document(
 
     # Find the uploaded file on disk
     for f in settings.upload_dir.iterdir():
-        if f.name.startswith(doc_id):
+        if f.is_file() and f.name.startswith(doc_id + "_"):
             return FileResponse(
                 path=str(f),
                 filename=doc["filename"],
