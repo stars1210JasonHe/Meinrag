@@ -1,8 +1,8 @@
 # MEINRAG
 
-**Your intelligent document assistant powered by RAG (Retrieval-Augmented Generation)**
+**RAG application for grounded, cited answers over your document library.**
 
-MEINRAG is a full-stack application that allows you to upload documents, organize them into collections, and ask questions in natural language. Get accurate answers with source citations from your document library.
+Upload a corpus, browse it visually, ask questions in natural language, and get answers with clickable source citations that jump straight into the PDF at the right page and bounding box. Every claim is traceable.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.13+-blue.svg)
@@ -10,60 +10,53 @@ MEINRAG is a full-stack application that allows you to upload documents, organiz
 
 ---
 
-## Features
+## What's in the box
 
-### Core Capabilities
-- **Streaming Responses**: Real-time token-by-token answer display via Server-Sent Events (SSE)
-- **Markdown Rendering**: AI responses render with proper formatting — bold, lists, code blocks, tables, syntax highlighting
-- **Multi-language Support**: Ask questions in English or Chinese (中文)
-- **Smart Collections**: Organize documents by topic or category with a hierarchical taxonomy
-- **AI Auto-Categorization**: Let AI suggest collection names based on document content
-- **Contextual Conversations**: Ask follow-up questions with persistent chat memory
-- **Source Citations**: Every answer includes source file, page number, and expandable chunk text
-- **Multiple Document Formats**: PDF, DOCX, TXT, MD, HTML, XLSX, PPTX
-- **Smart Web Search**: Auto-triggers when docs are insufficient, with LLM query rewriting and full-page fetching
-- **Dual-Answer Mode**: Get both RAG answers from your docs and pure AI general knowledge on demand
+### Four pages, one app
+- **Dashboard** — sunburst over a 3-layer taxonomy (primary category → sub-tags → user collections). Hover a wedge to see the docs in it; click to scope queries.
+- **Chat** — streaming answers with `[N]` citations that open the right doc, scroll to the chunk, and bbox-highlight. Multi-doc selection, saved collections, persistent sessions.
+- **Graph** — cross-doc similarity graph with weighted edges (thickness = supporting chunk pairs, opacity = mean similarity). Drill into a chunk → "Open chunk" lands you in chat with the PDF highlighted and a primed question.
+- **Mind map** — LLM-derived concept tree per document. 3 layers by default; auto-deepens to 4 where content earns it.
 
-### Advanced Features
-- **Hybrid Search**: Combines semantic vector search with BM25 keyword matching
-- **LLM Re-ranking**: Improves result quality using language model scoring
-- **Document Filtering**: Query specific documents or collections
-- **Chunk Interaction**: Ask follow-up questions about specific source chunks, copy/quote text
-- **Session Management**: Multiple persistent chat sessions per user
-- **Flexible Vector Stores**: Support for ChromaDB and FAISS
-- **Multi-User System**: User profiles with configurable document isolation
-- **Docker Deployment**: Production-ready Dockerfile + docker-compose for full-stack deployment
-- **Deep Health Checks**: `/health/deep` endpoint tests DB, vector store, and LLM connectivity
+### Retrieval
+- Hybrid search (BM25 + dense vectors via Reciprocal Rank Fusion)
+- Optional LLM-based router that pre-filters docs before vector search (default-on for ≥15 docs)
+- LLM listwise re-ranker (FlashRank by default; switchable to cross-encoder, Jina, Cohere, or LLM)
+- Per-chunk summaries embedded in a separate FAISS index — dual-index retrieval merges raw + summary scores
+- Chunk-edge graph (5 relation types: follows, co_located, describes, references, similar_to) feeds composite scoring + graph expansion
+- Cross-doc `similar_to` edges aggregated by doc-pair, gated by configurable score floor + minimum supporting pairs
+- Smart web search fallback (DuckDuckGo, full-page fetch, LLM query rewriting) when corpus retrieval is empty
+- Calibrated refusal: when docs don't cover the question, the system says so instead of hallucinating
 
----
+### Authoring + organization
+- Upload PDF, DOCX, TXT, MD, HTML, XLSX, PPTX
+- Docling-based PDF parser with figure/table extraction (background process, cached models)
+- AI auto-classification into the 3-layer taxonomy on upload
+- Multi-select shopping-cart pattern for ad-hoc collection building
+- Per-doc inline reclassification
 
-## Tech Stack
+### UX
+- React 19 + Vite + Tailwind 4 + shadcn/ui
+- Light + dark theme via CSS custom properties
+- EN + 中文 UI (i18n via i18next)
+- Streaming token-by-token response via Server-Sent Events
+- Markdown rendering with syntax highlighting
+- Multi-language Q&A (ask in English or Chinese)
 
-### Backend
-- **Framework**: FastAPI with SSE streaming (sse-starlette)
-- **Database**: PostgreSQL 16 (via Docker) + SQLAlchemy 2.0 async
-- **Migrations**: Alembic
-- **LLM Integration**: LangChain with OpenAI/OpenRouter (streaming enabled)
-- **Vector Stores**: ChromaDB, FAISS
-- **Embeddings**: OpenAI text-embedding-3-small
-- **Document Processing**: PyPDF2, python-docx, BeautifulSoup4, openpyxl, python-pptx
-- **Deployment**: Docker + docker-compose
-
-### Frontend
-- **Framework**: React 18 with Vite
-- **Markdown**: react-markdown + remark-gfm + rehype-highlight
-- **HTTP Client**: Axios + fetch (SSE streaming)
-- **Icons**: Lucide React
-- **Styling**: Custom CSS
+### Operations
+- Pydantic Settings with full `.env.example` coverage
+- Alembic migrations for the Postgres schema
+- Docker production stack (`docker-compose.prod.yml`) with backend, frontend, Postgres, and a docling model cache volume
+- Deep health-check endpoint that pings DB + vector store + LLM
+- Credibility benchmark harness with LLM-judge scoring (`scripts/test_dev_credibility.py`)
 
 ---
 
-## Quick Start
+## Quick start
 
-### Run from scratch with Docker (production stack)
+### Production stack via Docker
 
-The fastest way to get the full stack running. Postgres, backend, and frontend
-are built and orchestrated by `docker-compose.prod.yml`.
+The fastest way to a running app. Builds Postgres + backend + frontend in one shot.
 
 **Prereqs**: Docker Desktop (or Docker Engine + Compose v2) and an OpenAI API key.
 
@@ -71,168 +64,121 @@ are built and orchestrated by `docker-compose.prod.yml`.
 git clone https://github.com/stars1210JasonHe/Meinrag.git
 cd Meinrag
 cp .env.example .env
-# Edit .env — at minimum set OPENAI_API_KEY=sk-...
+# At minimum, set OPENAI_API_KEY=sk-...
 docker compose -f docker-compose.prod.yml up --build
 ```
 
-Then open http://localhost:5173.
+Open <http://localhost:5173>.
 
 **First-boot timings** (one-time):
-- Postgres ready: ~5s
-- Backend image build (uv sync): ~2 min
-- Frontend image build (npm ci + vite build): ~1 min
-- First docling model download (cached to `docling_cache` volume): ~5 min
+- Postgres ready: ~5 s
+- Backend image build (`uv sync`): ~2 min
+- Frontend image build (`npm ci` + `vite build`): ~1 min
+- Docling model download (cached to `docling_cache` volume): ~5 min
 
-Subsequent `up` is fast — images, deps, and docling models are all cached.
+Subsequent `up` is fast — images, deps, and docling models are cached.
 
-**Stop / wipe**:
 ```bash
 docker compose -f docker-compose.prod.yml down       # stop, keep data
-docker compose -f docker-compose.prod.yml down -v    # stop + wipe DB, uploads, vectors
+docker compose -f docker-compose.prod.yml down -v    # stop + wipe DB / uploads / vectors
 ```
 
-Data lives in named volumes: `pgdata` (Postgres), `app_data` (uploads + vectorstore + mindmaps), `docling_cache` (models).
+Persistent state lives in named volumes: `pgdata`, `app_data`, `docling_cache`.
 
----
+### Dev mode (hot reload)
 
-### Dev mode (hot-reload)
+For day-to-day work. Backend reloads on save (`uvicorn --reload`); frontend HMR via Vite. Docker only runs Postgres.
 
-For day-to-day development with hot-reload on backend (uvicorn `--reload`) and
-frontend (`vite`). Docker only runs the supporting services.
-
-**Prerequisites**:
-- Python 3.13+
-- Node.js 20+
-- Docker Desktop (for PostgreSQL)
-- OpenAI API key
-
-**Installation**:
-
-1. **Clone the repository**
 ```bash
-git clone https://github.com/stars1210JasonHe/Meinrag.git
-cd Meinrag
-```
-
-2. **Set up the backend**
-```bash
-# Install uv (Python package manager)
+# Backend
 pip install uv
-
-# Install dependencies
 uv sync
-
-# Create .env file
-cp .env.example .env
-```
-
-3. **Configure environment variables**
-Edit `.env` and add your API key:
-```env
-OPENAI_API_KEY=your-api-key-here
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/meinrag
-```
-
-4. **Start PostgreSQL**
-```bash
-docker compose up -d
-```
-
-5. **Run database migrations**
-```bash
+cp .env.example .env  # set OPENAI_API_KEY
+docker compose up -d  # starts Postgres on :5432
 uv run alembic upgrade head
-```
+uv run uvicorn app.main:app --reload  # :8000
 
-6. **Set up the frontend**
-```bash
+# Frontend (in another terminal)
 cd frontend
 npm install
+npm run dev  # :5173
 ```
 
-**Running the Application**:
-
-**Terminal 1 - Start Backend:**
-```bash
-uv run uvicorn app.main:app --reload
-```
-Backend runs at: http://localhost:8000
-
-**Terminal 2 - Start Frontend:**
-```bash
-cd frontend
-npm run dev
-```
-Frontend runs at: http://localhost:5173
+> On Windows, `uvicorn --reload` occasionally stops detecting file changes after several days uptime. Bounce the process if you commit code and the API still serves the old behaviour.
 
 ---
 
-## Usage
+## Architecture
 
-### Upload Documents
+### Request flow
 
-1. Click **"Upload Document"** in the sidebar
-2. Select a file (PDF, DOCX, TXT, etc.)
-3. Document is processed and indexed automatically
+```
+Upload  → DocumentProcessor (load + chunk + embed)
+        → VectorStoreManager.add_documents
+        → DocumentRepository (Postgres)
+        → background figure extraction + summary embedding
 
-### Use AI Auto-Categorization
+Query   → optional Router (LLM doc pre-filter for large scopes)
+        → Hybrid retrieval (BM25 + dense, RRF-merged)
+        → optional LLM re-rank
+        → context-budgeted prompt
+        → LLM (streaming SSE)
+        → response with citations + telemetry
+```
 
-1. Click **"Auto-Categorize"** button
-2. Select a file
-3. AI analyzes content and suggests a collection name
-4. Document is automatically organized
+### Key abstractions
 
-### Ask Questions
+- **`VectorStoreManager`** (`app/vectorstore/base.py`) — ABC with `ChromaStoreManager` (auto-persist) and `FAISSStoreManager` (manual persist, rebuild-on-delete) implementations. Switch via `VECTOR_STORE` env var.
+- **`build_rag_chain()`** (`app/rag/chain.py`) — LCEL chain factory. All advanced features (router, hybrid, rerank, chat history) are additive flags.
+- **Repository classes** (`app/db/repositories.py`) — async, SQLAlchemy 2.0. `DocumentRepository`, `UserRepository`, `ChatSessionRepository`, `EdgeRepository`.
+- **Edge builder** (`app/services/edge_builder.py`) — populates `chunk_edges` rows during ingest. Cross-doc `similar_to` edges are gated by `graph_similar_min_score` and aggregated for the doc-level graph view.
 
-1. Type your question in the input box
-2. Press Enter or click Send
-3. Get an answer with source citations
+### Tracked configuration
 
-### Filter by Collection
+Three JSON files in `data/` are tracked by git because the app reads them at startup:
 
-1. Collections appear in the sidebar after uploading
-2. Click a collection name to filter documents
-3. Questions will only search within that collection
+- `data/taxonomy.json` — primary categories + sub-tag definitions for classification + the dashboard sunburst
+- `data/query_types.json` — per-query-type scoring weights (fact / overview / reference / exploratory)
+- `data/scoring_profiles/*.json` — domain-specific score profiles (academic / general / law)
+
+Everything else under `data/` is gitignored (uploads, vectorstore, mindmap cache, eval artifacts).
 
 ---
 
-## Project Structure
+## Project structure
 
 ```
 MEINRAG/
-├── app/                          # Backend application
-│   ├── config.py                 # Configuration (Pydantic Settings)
-│   ├── dependencies.py           # FastAPI dependency injection
-│   ├── main.py                   # FastAPI app + lifespan
-│   ├── db/                       # Database layer
-│   │   ├── models.py             # SQLAlchemy ORM models (5 tables)
-│   │   ├── session.py            # Engine + async session factory
-│   │   └── repositories.py       # DocumentRepository, UserRepository, ChatSessionRepository
-│   ├── llm/                      # LLM provider integration
-│   ├── models/                   # Pydantic schemas
-│   ├── rag/                      # RAG pipeline (chain, prompts)
-│   ├── routers/                  # API endpoints (health, documents, query, sessions)
-│   │   └── stream_helpers.py     # SSE event formatting + streaming generator
-│   ├── services/                 # Business logic (document processing, AI suggestions, web search)
-│   └── vectorstore/              # Vector store implementations (ChromaDB, FAISS)
-├── alembic/                      # Database migrations
-├── frontend/                     # React 18 + Vite frontend
-│   ├── src/
-│   │   ├── App.jsx               # Main React component + state management
-│   │   ├── App.css               # Application styles
-│   │   ├── api/                  # API client modules (client, documents, query, sessions, users)
-│   │   └── components/           # 15+ React components + MarkdownRenderer
-│   └── package.json
-├── tests/                        # Test suite (125 tests, in-memory SQLite)
-├── data/                         # Uploaded files + vector store
-├── Dockerfile                    # Backend image (python:3.13-slim + uv, multi-stage)
-├── frontend/Dockerfile           # Frontend image (vite build → nginx:alpine)
-├── frontend/nginx.conf           # SPA + reverse proxy + SSE-friendly
-├── .dockerignore                 # Docker build exclusions
-├── docker-compose.yml            # Dev helpers only: postgres + redis
-├── docker-compose.prod.yml       # Full prod stack: postgres + backend + frontend
-├── alembic.ini                   # Alembic config
-├── .env                          # Environment variables
-├── pyproject.toml                # Python dependencies
+├── app/                      # FastAPI backend
+│   ├── config.py             # Pydantic Settings — every knob is here
+│   ├── main.py               # FastAPI app + lifespan
+│   ├── dependencies.py       # DI helpers
+│   ├── db/                   # SQLAlchemy models + async session + repositories
+│   ├── llm/                  # Provider integration (OpenAI / OpenRouter)
+│   ├── models/               # Pydantic request/response schemas
+│   ├── rag/                  # RAG chain, prompts, retrieval pipeline
+│   ├── routers/              # health, documents, query, sessions, graph, stats
+│   ├── services/             # document processor, classifier, edge builder, mindmap, etc.
+│   └── vectorstore/          # FAISS + Chroma implementations
+├── alembic/                  # DB migrations
+├── frontend/                 # React 19 + Vite + Tailwind 4
+│   └── src/
+│       ├── pages/            # DashboardPage, ChatPage, GraphPage, PdfViewerPage
+│       ├── components/       # 30+ components (SourceTabs, MindmapTree, Sunburst, ...)
+│       ├── hooks/            # useDocTabs, useDocMindmap, ...
+│       ├── i18n/             # EN + ZH locale files
+│       └── lib/              # API client, utils
+├── tests/                    # Pytest suite (in-memory SQLite, no Postgres required)
+├── scripts/                  # Active utilities (10) — see scripts/README in-source
+│   └── test_dev_credibility.py  # LLM-judge credibility benchmark
+├── data/                     # Mostly gitignored; tracked: taxonomy.json + query_types.json + scoring_profiles/
+├── Dockerfile                # Backend image
+├── frontend/Dockerfile       # Frontend image (vite build → nginx)
+├── docker-compose.yml        # Dev (just Postgres)
+├── docker-compose.prod.yml   # Full prod stack
+├── pyproject.toml            # uv-managed Python deps
+├── .env.example              # Every env var, grouped, with comments
+├── CLAUDE.md                 # Architecture + patterns for code agents
 └── README.md
 ```
 
@@ -240,228 +186,169 @@ MEINRAG/
 
 ## Configuration
 
-Every setting lives in [`app/config.py`](app/config.py) (`Settings` class) with
-defaults baked in. Override via environment variables — see
-[`.env.example`](.env.example) for **every** supported variable, grouped by
-purpose with inline comments on when to change.
+All settings live in [`app/config.py`](app/config.py) (the `Settings` Pydantic class) with defaults baked in. Override via env vars — see [`.env.example`](.env.example) for **every** supported variable, grouped by purpose with inline comments.
 
-### What's default-on (no opt-in needed)
+### Defaults you should know about
 
-- `RETRIEVAL_TOP_K=10`
-- `ROUTER_ENABLED=true` — small-LLM doc pre-filter before vector search
-- `HYBRID_SEARCH_ENABLED=true` — BM25 + dense vectors via Reciprocal Rank Fusion
-- `SUMMARY_ENABLED=true` — per-chunk summaries for the compiled retrieval layer
-- `QUERY_EXPANSION_ENABLED=true`
-- `WEB_SEARCH_ENABLED=true` — DuckDuckGo fallback when retrieval returns empty
-
-### Common tuning knobs
-
-| Variable | Default | When to change |
+| Variable | Default | Notes |
 |---|---|---|
-| `OPENAI_MODEL` | `gpt-4o-mini` | Quality vs cost. Verify with `tests/test_query_credibility.py` before committing — vendor "no regression" claims don't always survive your prompts. |
-| `RETRIEVAL_TOP_K` | `10` | Lower for speed; higher (≤20) for recall on long docs. |
-| `RERANK_ENABLED` | `false` | Turn on for ambiguous queries; uses FlashRank by default. |
-| `MEMORY_SESSION_TTL` | `2592000` (30 d) | Smaller values risk silent data loss — chat history is persistent. |
-| `MAX_CONTEXT_TOKENS` | derive from model | Hard-cap context if you hit budget overruns. |
-| `VECTOR_STORE` | `faiss` | Switch to `chroma` for richer metadata filtering. |
+| `RETRIEVAL_TOP_K` | `10` | |
+| `ROUTER_ENABLED` | `true` | LLM doc pre-filter when scope ≥ `ROUTER_MIN_SCOPE` (15) |
+| `HYBRID_SEARCH_ENABLED` | `true` | BM25 + dense via RRF |
+| `SUMMARY_ENABLED` | `true` | Per-chunk summaries → second FAISS index |
+| `QUERY_EXPANSION_ENABLED` | `true` | |
+| `WEB_SEARCH_ENABLED` | `true` | Auto-fallback when retrieval empty |
+| `RERANK_ENABLED` | `false` | Turn on for ambiguous queries |
+| `GRAPH_SIMILAR_MIN_SCORE` | `0.7` | Cosine floor per chunk pair for cross-doc edges |
+| `GRAPH_SIMILAR_MIN_PAIRS` | `2` | Minimum supporting chunk pairs for a doc-pair edge |
+| `OPENAI_MODEL` | `gpt-4o-mini` | |
+| `VECTOR_STORE` | `faiss` | Switch to `chroma` for native metadata filtering |
+| `MEMORY_SESSION_TTL` | `2592000` (30 d) | Chat history is persistent — short TTLs lose data |
 
-### Advanced Features
+### Switching providers
 
-The features above are already enabled by default. The blocks below show how
-to **disable** them, or to use the alternative providers:
-
-**Disable hybrid search** (back to dense-only retrieval):
-```env
-HYBRID_SEARCH_ENABLED=false
-```
-
-**Switch re-ranker provider** (when `RERANK_ENABLED=true`):
-```env
-RERANK_PROVIDER=cross-encoder    # flashrank | cross-encoder | jina | cohere | llm
-RERANK_TOP_N=4
-```
-
-**Use OpenRouter instead of OpenAI** (chat only — embeddings always use OpenAI):
+**OpenRouter** (chat only — embeddings always use OpenAI):
 ```env
 LLM_PROVIDER=openrouter
 OPENROUTER_API_KEY=sk-or-...
 OPENROUTER_MODEL=openai/gpt-4o-mini
 ```
 
-For the full Docker production setup see
-[Run from scratch with Docker](#run-from-scratch-with-docker-production-stack)
-above.
+**Re-ranker provider** (when `RERANK_ENABLED=true`):
+```env
+RERANK_PROVIDER=cross-encoder    # flashrank | cross-encoder | jina | cohere | llm
+RERANK_TOP_N=4
+```
 
 ---
 
-## API Endpoints
-
-### Users
-- `GET /users` - List all users
-- `POST /users` - Create a user
-- `GET /users/current` - Get current user (from `X-User-Id` header)
+## API endpoints
 
 ### Documents
-- `POST /documents/upload` - Upload document (optional: `?collections=name1,name2&auto_suggest=true`)
-- `GET /documents` - List all documents (optional: `?collection=name`)
-- `GET /documents/collections` - List all collections + taxonomy categories
-- `GET /documents/{doc_id}/download` - Download original file
-- `PATCH /documents/{doc_id}` - Update document collections
-- `POST /documents/{doc_id}/reclassify` - AI reclassify document
-- `DELETE /documents/{doc_id}` - Delete document
+- `POST /documents/upload` — upload + index
+- `GET /documents` — list (filter by `?collection=`, `?primary_category=`, `?subtags=`)
+- `GET /documents/taxonomy` — taxonomy categories + user collection counts (replaces the legacy `/documents/collections`)
+- `GET /documents/{id}/download` — original file
+- `GET /documents/{id}/chunks` — chunks with bbox + page + summary metadata
+- `GET /documents/{id}/graph` — chunk-level graph for one doc
+- `GET /documents/{id}/mindmap` — LLM-derived concept tree (recursive, up to 4 levels)
+- `PATCH /documents/{id}` — update primary_category, subtags, or collections
+- `POST /documents/{id}/reclassify` — re-run AI classification
+- `POST /documents/collections/save` — save a multi-select collection by name
+- `DELETE /documents/{id}`
 
 ### Query
-- `POST /query` - Ask a question (supports `collection`, `doc_ids`, `force_web_search`)
-  ```json
-  {
-    "question": "What is this about?",
-    "collection": "legal-compliance",
-    "session_id": "session-123",
-    "top_k": 4,
-    "force_web_search": false
-  }
-  ```
-- `POST /query/stream` - Streaming version of `/query` via SSE (sources → tokens → done)
-- `POST /query/chunk-context` - Ask about a specific source chunk
-- `POST /query/ask-ai` - Get pure AI general knowledge answer (no document context)
-- `POST /query/ask-ai/stream` - Streaming version of `/query/ask-ai` via SSE
+- `POST /query` — non-streaming, returns full response with sources + telemetry (`chunks_included`, `chunks_available`, `context_used_tokens`, `confidence_tier`, etc.)
+- `POST /query/stream` — same but SSE: `sources` → `tokens` → `done`
+- `POST /query/chunk-context` — ask about a specific source chunk
+- `POST /query/ask-ai` / `POST /query/ask-ai/stream` — pure LLM, no retrieval
+
+Common request body fields:
+```json
+{
+  "question": "What is this about?",
+  "doc_ids": ["abc123", "def456"],
+  "collection": "legal-compliance",
+  "primary_category": "research-scientific",
+  "session_id": "session-123",
+  "top_k": 10,
+  "force_web_search": false
+}
+```
+
+### Graph
+- `GET /graph/documents` — corpus-level graph: doc nodes + aggregated cross-doc similarity edges (with `supporting_pairs` + `mean_score`)
+- `GET /graph/nodes?doc_id=...` — chunk-level graph for one doc
+- `GET /graph/neighbors?doc_id=...&chunk_index=...&hops=...` — neighbourhood subgraph
 
 ### Sessions
-- `GET /sessions` - List chat sessions
-- `GET /sessions/{session_id}/messages` - Get session messages
-- `DELETE /sessions/{session_id}` - Delete a session
+- `GET /sessions` — list user sessions
+- `GET /sessions/{id}/messages` — message history
+- `DELETE /sessions/{id}`
 
-### Health
-- `GET /health` - Quick system status
-- `GET /health/deep` - Deep health check (tests DB, vector store, LLM connectivity)
+### Stats + health
+- `GET /stats/corpus` — doc count, chunk count, taxonomy distribution
+- `GET /health` — quick check
+- `GET /health/deep` — DB + vector store + LLM connectivity
+
+### Users
+- `GET /users` / `POST /users` / `GET /users/current`
 
 ---
 
 ## Development
 
-### Run Tests
+### Tests
 
 ```bash
-# Run all offline tests (no API key or PostgreSQL needed)
+# Offline tests (no API key, no Postgres — uses in-memory SQLite)
 uv run pytest tests/ --ignore=tests/test_frontend_e2e.py --ignore=tests/test_api_workflow.py -v
 
-# Run online API workflow tests (requires OPENAI_API_KEY)
+# Online API tests (requires OPENAI_API_KEY)
 uv run pytest tests/test_api_workflow.py -v
 
-# Run frontend E2E tests (requires backend + frontend servers running)
+# Frontend E2E (requires both servers + Playwright)
 uv run pytest tests/test_frontend_e2e.py -v -s
 ```
 
-Tests use in-memory SQLite automatically — no PostgreSQL needed to run the test suite.
+Current count: 94 backend tests pass offline.
 
-### Code Structure
+### Credibility benchmark
 
-- **Modular Design**: Separate concerns (routing, business logic, data access)
-- **Dependency Injection**: Clean testable code with FastAPI's `Depends()`
-- **Abstract Interfaces**: Swap vector stores via `VectorStoreManager` ABC
-- **Type Safety**: Full type hints with Pydantic models
+`scripts/test_dev_credibility.py` runs a curated query set against the live dev backend and uses an LLM judge (gpt-4o-mini at temperature 0) to score:
+- **Correctness** (does the answer address the question with the expected concepts?)
+- **Groundedness** (are claims supported by the cited chunks?)
+- **Calibration** (does the system refuse honestly on out-of-corpus questions?)
 
----
+```bash
+# Backend on :8000, OPENAI_API_KEY in env
+uv run python scripts/test_dev_credibility.py
+# Writes data/test_queries/dev_corpus_report_<date>.md
+```
 
-## Documentation
+Useful before changing prompts, swapping models, or shipping retrieval changes — vendor "no regression" claims don't always survive your specific corpus.
 
-- **[HOW_TO_RUN.md](docs/HOW_TO_RUN.md)** - Complete setup and testing guide
-- **[CLAUDE.md](CLAUDE.md)** - Architecture and development patterns
-- **[COLLECTIONS_SUMMARY.md](docs/COLLECTIONS_SUMMARY.md)** - Collections feature documentation
-- **[QUICK_START_COLLECTIONS.md](docs/QUICK_START_COLLECTIONS.md)** - API usage examples
-- **[IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)** - Technical implementation details
-- **[ROADMAP.md](docs/ROADMAP.md)** - Development phases and features
+### Code patterns
 
----
-
-## Features Roadmap
-
-### v0.1 - Foundation
-- [x] Basic RAG pipeline with FastAPI
-- [x] Document upload and processing (PDF, DOCX, TXT, MD, HTML, XLSX, PPTX)
-- [x] Vector similarity search (ChromaDB + FAISS)
-- [x] Collections organization with hierarchical taxonomy
-- [x] AI auto-categorization
-
-### v0.2 - Advanced Retrieval
-- [x] Hybrid search (BM25 + Vector fusion)
-- [x] LLM re-ranking (listwise)
-- [x] Document filtering by collection and doc IDs
-
-### v0.3 - PostgreSQL & Multi-User
-- [x] PostgreSQL database (SQLAlchemy 2.0 async, Alembic migrations)
-- [x] Persistent chat memory (survives server restarts)
-- [x] Multi-user support with configurable isolation
-- [x] React frontend with sidebar, collections, source citations
-- [x] Multi-collection documents with inline editing and AI reclassify
-
-### v0.4 - Chat & Web Search
-- [x] New Chat button (multiple sessions per user)
-- [x] Web search fallback (DuckDuckGo, auto-triggers when no docs match)
-- [x] Page numbers in source citations
-- [x] Expandable source chunks with file download
-
-### v0.5 - Frontend Redesign & Smart Search
-- [x] Complete frontend redesign with 15+ React components
-- [x] Smart web search: LLM query rewriting, multi-query, full-page fetching
-- [x] Score threshold auto-fallback to web search
-- [x] Manual web search button
-- [x] Chunk interaction: ask about, copy, quote source chunks
-- [x] Chat history sidebar with session management
-
-### v0.6 - Dual-Answer Mode
-- [x] Enhanced RAG prompt: supplements with general knowledge when docs insufficient
-- [x] On-demand "Ask AI" button for pure general knowledge answers
-- [x] Collapsible "AI Knowledge" section with purple theme
-- [x] POST /query/ask-ai endpoint with validation
-
-### v0.7 - Streaming, Markdown & Production (current)
-- [x] Streaming responses (SSE) — real-time token display for both RAG and Ask AI
-- [x] Markdown rendering — bold, lists, code blocks, tables, syntax highlighting
-- [x] Deep health checks — `/health/deep` tests DB, vector store, LLM
-- [x] Docker deployment — Dockerfile + docker-compose for full-stack deployment
-- [x] 125 tests passing
-
-### Future
-- [ ] Advanced retrieval (parent-document retriever, metadata filtering)
-- [ ] User authentication (login/password with JWT)
-- [ ] Document versioning
-- [ ] Conversation export (PDF/Markdown)
-- [ ] Analytics dashboard
-- [ ] Dark mode / theme support
-- [ ] Multi-language UI (i18n)
+- All vector store implementations must implement `VectorStoreManager` ABC (including `similarity_search_with_filter` and `get_all_documents`).
+- Document chunks always get `doc_id` in metadata — used for filtering and deletion.
+- FAISS lacks native metadata filtering — use over-fetch + post-filter pattern.
+- Repository methods are all `async`. Tests use in-memory SQLite (aiosqlite); TestClient tests override `get_db` with a SQLite session factory.
+- Schema changes require an Alembic migration: `alembic revision --autogenerate -m "description"`.
+- LLM and embeddings are separate — embeddings always use OpenAI `text-embedding-3-small` regardless of chat-model provider.
 
 ---
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+PRs welcome. The flow:
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+1. Fork and branch (`git checkout -b feature/your-thing`).
+2. Make changes, add tests where the logic is non-trivial.
+3. Run `uv run pytest tests/` — 94 should still pass.
+4. Run `cd frontend && npm run build` — should be clean.
+5. Open a PR.
+
+If you're touching retrieval or prompting, also run `scripts/test_dev_credibility.py` against the same corpus before and after, and include the diff in the PR description.
 
 ---
 
 ## License
 
-This project is licensed under the MIT License.
+MIT — see [LICENSE](LICENSE).
 
 ---
 
 ## Acknowledgments
 
-- Built with [LangChain](https://www.langchain.com/)
-- Vector stores: [ChromaDB](https://www.trychroma.com/), [FAISS](https://github.com/facebookresearch/faiss)
-- LLM providers: [OpenAI](https://openai.com/), [OpenRouter](https://openrouter.ai/)
-- Frontend: [React](https://react.dev/), [Vite](https://vitejs.dev/)
+- [LangChain](https://www.langchain.com/) — chain primitives
+- [ChromaDB](https://www.trychroma.com/), [FAISS](https://github.com/facebookresearch/faiss) — vector stores
+- [Docling](https://github.com/DS4SD/docling) — PDF parsing with figure extraction
+- [react-force-graph-2d](https://github.com/vasturiano/react-force-graph) — graph viz
+- [react-d3-tree](https://github.com/bkrem/react-d3-tree) — mind map renderer
+- [shadcn/ui](https://ui.shadcn.com/) — UI primitives
+- [OpenAI](https://openai.com/), [OpenRouter](https://openrouter.ai/) — LLM providers
 
 ---
 
-## Support
-
-For questions or issues, please open an issue on GitHub.
-
-**Repository**: https://github.com/stars1210JasonHe/Meinrag
+**Repository**: <https://github.com/stars1210JasonHe/Meinrag>
