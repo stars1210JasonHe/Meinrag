@@ -415,6 +415,119 @@ class TestMindmapTreeSchemas:
         assert resp.tree.central == "test"
 
 
+class TestRecursiveMindmapParser:
+    """G3: pin behaviour of the recursive _parse_tree_response.
+
+    Covers: backward-compat 3-layer parsing, conditional 4th layer, depth cap.
+    """
+
+    def _valid_indices(self, n: int = 12) -> set[int]:
+        return set(range(n))
+
+    def test_three_layer_backward_compat(self):
+        """Old 3-layer LLM output still parses (forward compatibility for caches)."""
+        from app.services.mindmap import _parse_tree_response
+        import json
+        payload = json.dumps({
+            "central": "Attention paper",
+            "branches": [
+                {"name": "Architecture", "children": [
+                    {"name": "QKV", "chunk_indices": [0, 1]},
+                    {"name": "Encoder", "chunk_indices": [2]},
+                ]},
+                {"name": "Results", "children": [
+                    {"name": "Translation", "chunk_indices": [3, 4]},
+                ]},
+            ],
+        })
+        tree = _parse_tree_response(payload, self._valid_indices())
+        assert tree.central == "Attention paper"
+        assert len(tree.branches) == 2
+        assert tree.branches[0].name == "Architecture"
+        assert tree.branches[0].children is not None
+        assert len(tree.branches[0].children) == 2
+        # Old leaves now resolve to MindmapNode with children=None.
+        leaf = tree.branches[0].children[0]
+        assert leaf.name == "QKV"
+        assert leaf.chunk_indices == [0, 1]
+        assert leaf.children is None
+
+    def test_four_layer_with_inner_node(self):
+        """A child with its own children (4th layer) is preserved."""
+        from app.services.mindmap import _parse_tree_response
+        import json
+        payload = json.dumps({
+            "central": "Survey",
+            "branches": [
+                {"name": "Methods", "children": [
+                    {"name": "Statistical methods", "children": [
+                        {"name": "Frequentist", "chunk_indices": [0]},
+                        {"name": "Bayesian", "chunk_indices": [1]},
+                        {"name": "Bootstrap", "chunk_indices": [2]},
+                    ]},
+                    {"name": "Numeric methods", "chunk_indices": [3, 4]},
+                ]},
+            ],
+        })
+        tree = _parse_tree_response(payload, self._valid_indices())
+        assert len(tree.branches) == 1
+        children = tree.branches[0].children
+        assert children is not None and len(children) == 2
+        # Inner node — children populated, no chunk_indices.
+        stat = children[0]
+        assert stat.name == "Statistical methods"
+        assert stat.children is not None and len(stat.children) == 3
+        assert stat.chunk_indices is None
+        # Leaf next to it — chunk_indices populated, no children.
+        num = children[1]
+        assert num.name == "Numeric methods"
+        assert num.children is None
+        assert num.chunk_indices == [3, 4]
+
+    def test_depth_cap_drops_runaway_levels(self):
+        """A 5-level structure collapses to a leaf at MINDMAP_MAX_DEPTH."""
+        from app.services.mindmap import _parse_tree_response, MINDMAP_MAX_DEPTH
+        import json
+        # Build a deeply nested chain: depth 5 (central + branch + child + grand + great)
+        payload = json.dumps({
+            "central": "Deep",
+            "branches": [
+                {"name": "L1", "children": [
+                    {"name": "L2", "children": [
+                        {"name": "L3 — should be a leaf", "children": [
+                            {"name": "L4 — should be dropped", "chunk_indices": [0]},
+                        ], "chunk_indices": [5]},
+                    ]},
+                ]},
+            ],
+        })
+        tree = _parse_tree_response(payload, self._valid_indices())
+        # Walk down and assert depth never exceeds MINDMAP_MAX_DEPTH
+        def max_depth(node, d=1):
+            if not node.children:
+                return d
+            return max(max_depth(c, d + 1) for c in node.children)
+        assert tree.branches
+        deepest = max(max_depth(b) for b in tree.branches)
+        assert deepest <= MINDMAP_MAX_DEPTH
+
+    def test_invalid_chunk_indices_dropped(self):
+        """Indices outside valid_indices are silently filtered."""
+        from app.services.mindmap import _parse_tree_response
+        import json
+        payload = json.dumps({
+            "central": "X",
+            "branches": [
+                {"name": "B", "children": [
+                    {"name": "L", "chunk_indices": [0, 999, 2, "bad"]},
+                ]},
+            ],
+        })
+        tree = _parse_tree_response(payload, self._valid_indices(n=5))
+        leaf = tree.branches[0].children[0]
+        assert leaf.chunk_indices == [0, 2]
+
+
 from pathlib import Path
 import json as json_lib
 

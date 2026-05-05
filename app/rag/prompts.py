@@ -191,22 +191,34 @@ captures what the document is about.
 
 Rules:
 1. Return ONLY a JSON object. No prose, no markdown fences.
-2. Schema:
+2. Schema (recursive — a child is EITHER a leaf with chunk_indices OR an
+   inner node with its own children, never both):
 {{
   "central": "<one-line theme capturing the document's essence>",
   "branches": [
     {{
       "name": "<top-level theme, 1-5 words>",
       "children": [
-        {{"name": "<sub-concept, 1-8 words>", "chunk_indices": [<int>, ...]}}
+        // Either a LEAF:
+        {{"name": "<sub-concept, 1-8 words>", "chunk_indices": [<int>, ...]}},
+        // OR an INNER node (only when the rule below applies):
+        {{"name": "<sub-concept, 1-8 words>", "children": [
+          {{"name": "<sub-sub-concept, 1-8 words>", "chunk_indices": [<int>, ...]}}
+        ]}}
       ]
     }}
   ]
 }}
-3. 3-6 top-level branches. Each branch has 2-5 sub-concept leaves.
-4. Each leaf's chunk_indices lists 1-5 chunks that support that concept.
-5. A chunk index may appear in multiple leaves (ideas cross-cut).
-6. Output language: match the document's predominant language.
+3. 3-6 top-level branches. Each branch has 2-5 children.
+4. A child is normally a LEAF (chunk_indices, no children). Use leaves by default.
+5. A child MAY be an INNER node (children, no chunk_indices) ONLY IF:
+   - There are at least 3 distinct sub-sub-concepts that genuinely cluster within it, AND
+   - Each sub-sub-concept maps to its own subset of chunks.
+   When in doubt, prefer leaves — depth is a cost, not a virtue.
+6. Maximum depth is 4 (central → branch → child → optional grandchild). No deeper.
+7. Each leaf's chunk_indices lists 1-5 chunks that support that concept.
+8. A chunk index may appear in multiple leaves (ideas cross-cut).
+9. Output language: match the document's predominant language.
 
 Chunks:
 {chunks}

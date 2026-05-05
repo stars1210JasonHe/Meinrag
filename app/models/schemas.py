@@ -259,22 +259,31 @@ class DocGraphResponse(BaseModel):
     stats: DocGraphStats
 
 
-class MindmapLeaf(BaseModel):
-    """Leaf node in the hierarchical mind map — a concept backed by chunks."""
+class MindmapNode(BaseModel):
+    """A recursive node in the hierarchical mind map.
+
+    A node is either a LEAF (chunk_indices populated, children=None) or an
+    INNER node (children populated, chunk_indices=None). The LLM may produce
+    up to four levels: central → branch → child → optional grandchild. Depth
+    beyond 4 is collapsed by the parser. Old 3-layer caches load here unchanged
+    because both fields are optional with sensible defaults.
+    """
     name: str
-    chunk_indices: list[int]  # indices of chunks that support this concept
+    chunk_indices: list[int] | None = None
+    children: list["MindmapNode"] | None = None
 
 
-class MindmapBranch(BaseModel):
-    """Main branch in the mind map: a top-level theme with sub-concept leaves."""
-    name: str
-    children: list[MindmapLeaf]
+# Backward-compat aliases — older code (and tests) still construct
+# MindmapLeaf(name=..., chunk_indices=[...]) and MindmapBranch(name=..., children=[...]).
+# Both shapes validate against MindmapNode now, so the alias is enough.
+MindmapLeaf = MindmapNode
+MindmapBranch = MindmapNode
 
 
 class MindmapTree(BaseModel):
     """The LLM-derived hierarchical structure for one document."""
     central: str              # central theme (1-line)
-    branches: list[MindmapBranch]
+    branches: list[MindmapNode]
 
 
 class MindmapTreeResponse(BaseModel):

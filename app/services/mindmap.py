@@ -26,8 +26,11 @@ from pathlib import Path
 from langchain_core.language_models import BaseChatModel
 
 from app.models.schemas import (
-    MindmapLeaf, MindmapBranch, MindmapTree, MindmapTreeResponse,
+    MindmapNode, MindmapTree, MindmapTreeResponse,
 )
+
+
+MINDMAP_MAX_DEPTH = 4  # central=0, branches=1, children=2, grandchildren=3
 from app.rag.prompts import MINDMAP_TREE_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -162,10 +165,44 @@ def _format_chunks_for_prompt(chunks: list[Document]) -> str:
     return "\n".join(lines)
 
 
+def _parse_node(node, valid_indices: set[int], depth: int) -> MindmapNode | None:
+    """Recursively parse one mind-map node. Returns None if the node is
+    malformed (no name, etc.) so the caller can drop it.
+
+    Depth contract: central=0, branches=1, leaves typically at 2 or 3.
+    At depth >= MINDMAP_MAX_DEPTH - 1 the node is forced to be a leaf
+    (its children are dropped) so a runaway LLM can't produce 5+ levels.
+    """
+    if not isinstance(node, dict):
+        return None
+    name = str(node.get("name", "")).strip()
+    if not name:
+        return None
+
+    raw_children = node.get("children")
+    can_recurse = depth < MINDMAP_MAX_DEPTH - 1
+    if can_recurse and isinstance(raw_children, list) and raw_children:
+        parsed_children = [
+            _parse_node(c, valid_indices, depth + 1)
+            for c in raw_children
+        ]
+        parsed_children = [p for p in parsed_children if p is not None]
+        if parsed_children:
+            return MindmapNode(name=name, chunk_indices=None, children=parsed_children)
+
+    raw_indices = node.get("chunk_indices", []) or []
+    validated = [
+        i for i in raw_indices
+        if isinstance(i, int) and i in valid_indices
+    ]
+    return MindmapNode(name=name, chunk_indices=validated, children=None)
+
+
 def _parse_tree_response(text: str, valid_indices: set[int]) -> MindmapTree:
     """Parse LLM output into a MindmapTree. Strips markdown fences,
-    validates chunk_indices against the known set. Returns an empty
-    tree if parsing fails — caller decides whether to cache."""
+    validates chunk_indices against the known set, recursively descends
+    children (capped at MINDMAP_MAX_DEPTH). Returns an empty tree if
+    parsing fails — caller decides whether to cache."""
     import json as _json
 
     text = text.strip()
@@ -182,27 +219,11 @@ def _parse_tree_response(text: str, valid_indices: set[int]) -> MindmapTree:
     if not isinstance(central, str):
         return MindmapTree(central="", branches=[])
 
-    branches = []
+    branches: list[MindmapNode] = []
     for b in parsed.get("branches", []):
-        if not isinstance(b, dict):
-            continue
-        children = []
-        for c in b.get("children", []):
-            if not isinstance(c, dict):
-                continue
-            raw_indices = c.get("chunk_indices", [])
-            validated = [
-                i for i in raw_indices
-                if isinstance(i, int) and i in valid_indices
-            ]
-            children.append(MindmapLeaf(
-                name=str(c.get("name", "")),
-                chunk_indices=validated,
-            ))
-        branches.append(MindmapBranch(
-            name=str(b.get("name", "")),
-            children=children,
-        ))
+        node = _parse_node(b, valid_indices, depth=1)
+        if node is not None:
+            branches.append(node)
 
     return MindmapTree(central=central, branches=branches)
 
