@@ -7,7 +7,7 @@ import logging
 from datetime import datetime, timezone
 
 from langchain_core.messages import AIMessage, HumanMessage, BaseMessage
-from sqlalchemy import select, delete, func, update
+from sqlalchemy import select, delete, func, update, or_, cast, String
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -96,6 +96,74 @@ class DocumentRepository:
             stmt = stmt.where(DocumentModel.user_id == user_id)
         result = await self._session.execute(stmt)
         return [doc.to_dict() for doc in result.unique().scalars().all()]
+
+    async def search_by_text(
+        self,
+        query: str,
+        user_id: str | None = None,
+        collection: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """Case-insensitive substring search across filename, primary_category,
+        subtags (cast to text), and summary. Optionally restrict to a collection.
+
+        Returns (rows, total_match_count). Used by the short-query branch of
+        GET /documents?search= — long queries fall back to semantic search via
+        the chunk-summary FAISS index in the router layer.
+        """
+        pattern = f"%{query.lower()}%"
+        base = (
+            select(DocumentModel)
+            .options(selectinload(DocumentModel.collections))
+        )
+        if collection:
+            base = base.join(DocumentCollectionModel).where(
+                DocumentCollectionModel.collection == collection
+            )
+        if user_id:
+            base = base.where(DocumentModel.user_id == user_id)
+        base = base.where(
+            or_(
+                func.lower(DocumentModel.filename).like(pattern),
+                func.lower(func.coalesce(DocumentModel.primary_category, "")).like(pattern),
+                func.lower(cast(DocumentModel.subtags, String)).like(pattern),
+                func.lower(func.coalesce(DocumentModel.summary, "")).like(pattern),
+            )
+        )
+
+        count_stmt = select(func.count()).select_from(base.subquery())
+        total = (await self._session.execute(count_stmt)).scalar_one()
+
+        page_stmt = (
+            base.order_by(DocumentModel.uploaded_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self._session.execute(page_stmt)
+        rows = [doc.to_dict() for doc in result.unique().scalars().all()]
+        return rows, total
+
+    async def get_many_by_ids(
+        self, doc_ids: list[str], user_id: str | None = None
+    ) -> list[dict]:
+        """Bulk fetch by doc_id list, preserving the input order.
+
+        Used by the semantic-search branch of GET /documents?search= where the
+        ranking order is determined upstream (chunk-summary FAISS aggregation).
+        """
+        if not doc_ids:
+            return []
+        stmt = (
+            select(DocumentModel)
+            .options(selectinload(DocumentModel.collections))
+            .where(DocumentModel.doc_id.in_(doc_ids))
+        )
+        if user_id:
+            stmt = stmt.where(DocumentModel.user_id == user_id)
+        result = await self._session.execute(stmt)
+        by_id = {doc.doc_id: doc.to_dict() for doc in result.unique().scalars().all()}
+        return [by_id[d] for d in doc_ids if d in by_id]
 
     async def update_collections(self, doc_id: str, collections: list[str]) -> bool:
         result = await self._session.execute(

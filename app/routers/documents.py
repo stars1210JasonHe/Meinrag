@@ -203,21 +203,104 @@ async def upload_document(
         raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
 
 
+SEMANTIC_QUERY_MIN_WORDS = 4
+SEMANTIC_QUERY_MIN_CHARS = 20
+SEMANTIC_FETCH_K = 50
+
+
 @router.get("", response_model=DocumentListResponse)
 async def list_documents(
     collection: str | None = None,
+    search: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
     settings: Settings = Depends(get_settings),
     registry: DocumentRepository = Depends(get_registry),
+    summary_store: VectorStoreManager | None = Depends(get_summary_store),
     current_user: str = Depends(get_current_user),
 ):
+    """List documents with optional collection filter and smart search.
+
+    Search dispatch (when ?search= is non-empty):
+      - Short queries (<= 3 words AND <= 20 chars) → SQL ILIKE on filename,
+        primary_category, subtags, summary. Cheap, predictable.
+      - Long queries → semantic: query the chunk-summary FAISS index, group
+        hits by doc_id, rank docs by mean chunk-score. Falls back to ILIKE
+        if summary_store is unavailable or returns nothing.
+
+    Pagination via ?limit= and ?offset=. Default page size is 50; clamps to
+    [1, 200] to keep payloads bounded.
+    """
     user_filter = _get_user_filter(settings, current_user)
-    if collection:
-        docs = await registry.list_by_collection(collection, user_id=user_filter)
-    else:
-        docs = await registry.list_all(user_id=user_filter)
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+
+    q = (search or "").strip()
+    if not q:
+        if collection:
+            docs = await registry.list_by_collection(collection, user_id=user_filter)
+        else:
+            docs = await registry.list_all(user_id=user_filter)
+        total = len(docs)
+        page = docs[offset:offset + limit]
+        return DocumentListResponse(
+            documents=[DocumentInfo(**d) for d in page],
+            total=total,
+        )
+
+    # Decide ILIKE vs semantic by query length / word count.
+    word_count = len([w for w in q.split() if w])
+    use_semantic = (
+        word_count >= SEMANTIC_QUERY_MIN_WORDS
+        or len(q) >= SEMANTIC_QUERY_MIN_CHARS
+    )
+
+    if use_semantic and summary_store is not None:
+        try:
+            hits = summary_store.similarity_search_with_scores(q, k=SEMANTIC_FETCH_K)
+        except Exception as e:
+            logger.warning("Semantic doc search failed, falling back to ILIKE: %s", e)
+            hits = []
+        if hits:
+            # Aggregate chunk hits per doc_id. Score = mean of normalized scores;
+            # ties broken by hit count (more hits per doc → more confident match).
+            by_doc: dict[str, list[float]] = {}
+            for doc, score in hits:
+                did = (doc.metadata or {}).get("doc_id")
+                if not did:
+                    continue
+                by_doc.setdefault(did, []).append(float(score))
+            ranked = sorted(
+                by_doc.items(),
+                key=lambda kv: (sum(kv[1]) / len(kv[1]), len(kv[1])),
+                reverse=True,
+            )
+            ranked_ids = [did for did, _ in ranked]
+            rows = await registry.get_many_by_ids(ranked_ids, user_id=user_filter)
+            # If a collection filter is applied, intersect.
+            if collection:
+                allowed = {d["doc_id"] for d in await registry.list_by_collection(
+                    collection, user_id=user_filter,
+                )}
+                rows = [r for r in rows if r["doc_id"] in allowed]
+            total = len(rows)
+            page = rows[offset:offset + limit]
+            return DocumentListResponse(
+                documents=[DocumentInfo(**d) for d in page],
+                total=total,
+            )
+        # Fall through to ILIKE if semantic returned nothing.
+
+    rows, total = await registry.search_by_text(
+        query=q,
+        user_id=user_filter,
+        collection=collection,
+        limit=limit,
+        offset=offset,
+    )
     return DocumentListResponse(
-        documents=[DocumentInfo(**d) for d in docs],
-        total=len(docs),
+        documents=[DocumentInfo(**d) for d in rows],
+        total=total,
     )
 
 

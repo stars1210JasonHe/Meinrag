@@ -165,9 +165,19 @@ export default function DashboardPage() {
     return () => window.removeEventListener('keydown', onKey)
   }, [selection, t])
 
+  // Server-side smart search via /documents?search= (G4a). Short queries hit
+  // SQL ILIKE; long queries route through the chunk-summary FAISS index.
+  // Sidebar scope of type=collection is also pushed down to the server so
+  // pagination + search compose with collection filter; type=category and
+  // type=uncategorized stay client-side (server doesn't know categories).
+  const collectionForServer = selectedScope?.type === 'collection' ? selectedScope.value : null
   const { data: documentsData, isLoading } = useQuery({
-    queryKey: ['documents', USER_ID],
-    queryFn: () => fetchDocuments(USER_ID),
+    queryKey: ['documents', USER_ID, search, collectionForServer],
+    queryFn: () => fetchDocuments(USER_ID, {
+      search: search || undefined,
+      collection: collectionForServer || undefined,
+      limit: 200,
+    }),
   })
   const documents = documentsData?.documents || (Array.isArray(documentsData) ? documentsData : [])
 
@@ -223,30 +233,25 @@ export default function DashboardPage() {
 
   const filtered = useMemo(() => {
     let docs = Array.isArray(documents) ? documents : []
-    // Sidebar scope: primary category OR user collection
+    // Sidebar scope: primary_category and uncategorized are client-side
+    // (server's ?collection= only knows user-curated collections, not the
+    // 4-primary-category taxonomy). Collection scope is already applied
+    // server-side via the useQuery call above, so we don't re-filter here.
     if (selectedScope) {
       if (selectedScope.type === 'category') {
         docs = docs.filter(d => d.primary_category === selectedScope.value)
       } else if (selectedScope.type === 'uncategorized') {
         docs = docs.filter(d => !d.primary_category)
-      } else if (selectedScope.type === 'collection') {
-        docs = docs.filter(d => d.collections?.includes(selectedScope.value))
       }
+      // type==='collection' was pushed to the server.
     }
-    if (search) {
-      const q = search.toLowerCase()
-      docs = docs.filter(d =>
-        d.filename?.toLowerCase().includes(q) ||
-        d.collections?.some(c => c.toLowerCase().includes(q)) ||
-        d.subtags?.some(s => s.toLowerCase().includes(q))
-      )
-    }
+    // search is now server-side (G4a) — no client substring filter here.
     if (activeFilters.length > 0) {
-      // Multi-tag chip filter — narrow within the current scope by required subtags
+      // Multi-tag chip filter — narrow within the current scope by required subtags.
       docs = docs.filter(d => activeFilters.every(f => d.subtags?.includes(f)))
     }
     return docs
-  }, [documents, search, selectedScope, activeFilters])
+  }, [documents, selectedScope, activeFilters])
 
   // D-sprint: hierarchical data for the Sunburst hero.
   const taxonomyTree = useTaxonomyHierarchy(documents, taxonomyData)

@@ -31,9 +31,23 @@ async function apiFetch(path, options = {}) {
   return resp.json()
 }
 
-// Documents
-export const fetchDocuments = (userId) =>
-  apiFetch('/documents', { headers: headers(userId) })
+// Documents.
+//
+// `opts` (all optional):
+//   - search: string — server-side smart search. Short queries (<= 3 words /
+//     <= 20 chars) hit SQL ILIKE; longer queries are routed through the
+//     chunk-summary FAISS index for semantic matching.
+//   - collection: string — restrict to a saved collection.
+//   - limit, offset: pagination. Server clamps limit to <= 200.
+export const fetchDocuments = (userId, opts = {}) => {
+  const params = new URLSearchParams()
+  if (opts.search) params.set('search', opts.search)
+  if (opts.collection) params.set('collection', opts.collection)
+  if (opts.limit != null) params.set('limit', String(opts.limit))
+  if (opts.offset != null) params.set('offset', String(opts.offset))
+  const qs = params.toString()
+  return apiFetch(`/documents${qs ? '?' + qs : ''}`, { headers: headers(userId) })
+}
 
 // Three-layer taxonomy: primary_categories + domain_options + user_collections.
 // Sole replacement for the now-removed GET /documents/collections endpoint.
