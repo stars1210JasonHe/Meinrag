@@ -136,6 +136,8 @@
     "viewAsMindmap": "View as Mind Map",
     "viewNeighbors": "View neighbors",
     "askAboutThis": "Ask about this",
+    "openChunk": "Open chunk",
+    "openChunkSuggestion": "Click to use this question",
     "page": "Page {{num}}",
     "modeGraph": "Graph",
     "modeMindmap": "Mind Map",

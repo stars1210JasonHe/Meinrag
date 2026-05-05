@@ -80,6 +80,25 @@ function supportingPairsToWidth(pairs) {
   return 1 + Math.min(pairs, 6) * 0.5
 }
 
+// Build the chat URL for "Open chunk" — single-button replacement for the old
+// (Open in PDF / Ask about this) pair. The `suggest` param is rendered as a
+// ghost-text the user can dismiss; `chunk` triggers PDF jump + bbox highlight.
+function buildOpenChunkHref(nodeData) {
+  const docId = nodeData.doc_id
+  const name = nodeData.source_file || ''
+  const chunkIdx = nodeData.chunk_index
+  const label = nodeData.label || nodeData.content_preview?.slice(0, 40) || ''
+  const ct = nodeData.chunk_type
+  const suggestion = ct === 'image' ? `What does ${label || 'this figure'} show?`
+    : ct === 'table' ? `Explain the data in ${label || 'this table'}`
+    : ct === 'formula' ? `Explain ${label || 'this equation'}`
+    : label ? `Tell me about: ${label}` : ''
+  const params = [`doc=${encodeURIComponent(docId)}`, `name=${encodeURIComponent(name)}`]
+  if (chunkIdx != null) params.push(`chunk=${chunkIdx}`)
+  if (suggestion) params.push(`suggest=${encodeURIComponent(suggestion)}`)
+  return `/chat?${params.join('&')}`
+}
+
 export default function GraphPage() {
   const { docId } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -324,13 +343,7 @@ export default function GraphPage() {
         clearTimeout(clickTimerRef.current)
         clickTimerRef.current = null
         if (node._data?.doc_id) {
-          const label = node._data.label || node._data.content_preview?.slice(0, 40) || ''
-          const ct = node._data.chunk_type
-          const q = ct === 'image' ? `What does ${label || 'this figure'} show?`
-                  : ct === 'table' ? `Explain the data in ${label || 'this table'}`
-                  : ct === 'formula' ? `Explain ${label || 'this equation'}`
-                  : label ? `Tell me about: ${label}` : ''
-          navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.source_file || '')}${q ? `&q=${encodeURIComponent(q)}` : ''}`)
+          navigate(buildOpenChunkHref(node._data))
         }
       } else {
         // Single click on pinned node: unpin after delay (to allow double-click)
@@ -762,26 +775,11 @@ export default function GraphPage() {
           </p>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => navigate(`/pdf/${selectedNode.doc_id}`)}
+              onClick={() => navigate(buildOpenChunkHref(selectedNode))}
               className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs"
               style={{ backgroundColor: 'var(--border-strong, rgba(255,255,255,0.14))', color: 'var(--fg, #f4f2ee)' }}
             >
-              <ExternalLink size={12} /> {t('dashboard.openInPdf')}
-            </button>
-            <button
-              onClick={() => {
-                const label = selectedNode.label || selectedNode.content_preview?.slice(0, 40) || ''
-                const ct = selectedNode.chunk_type
-                const q = ct === 'image' ? `What does ${label || 'this figure'} show?`
-                        : ct === 'table' ? `Explain the data in ${label || 'this table'}`
-                        : ct === 'formula' ? `Explain ${label || 'this equation'}`
-                        : label ? `Tell me about: ${label}` : ''
-                navigate(`/chat?doc=${selectedNode.doc_id}&name=${encodeURIComponent(selectedNode.source_file || '')}${q ? `&q=${encodeURIComponent(q)}` : ''}`)
-              }}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs"
-              style={{ backgroundColor: 'var(--border-strong, rgba(255,255,255,0.14))', color: 'var(--fg, #f4f2ee)' }}
-            >
-              <MessageSquare size={12} /> {t('graph.askAboutThis')}
+              <ExternalLink size={12} /> {t('graph.openChunk')}
             </button>
             {selectedNode.page != null && (
               <span className="text-xs opacity-40" style={{ color: 'var(--fg, #f4f2ee)' }}>

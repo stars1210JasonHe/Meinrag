@@ -136,6 +136,8 @@
     "viewAsMindmap": "查看思维导图",
     "viewNeighbors": "查看邻居",
     "askAboutThis": "就此提问",
+    "openChunk": "打开片段",
+    "openChunkSuggestion": "点击使用此问题",
     "page": "第 {{num}} 页",
     "modeGraph": "图谱",
     "modeMindmap": "思维导图",

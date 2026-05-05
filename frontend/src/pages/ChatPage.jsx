@@ -7,7 +7,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
-import { fetchSessionMessages } from '@/lib/api'
+import { fetchSessionMessages, fetchDocumentChunks } from '@/lib/api'
 import CitationBadge from '@/components/CitationBadge'
 import QueryTypeBadges from '@/components/QueryTypeBadges'
 import ConfidenceBadge from '@/components/ConfidenceBadge'
@@ -96,6 +96,12 @@ export default function ChatPage() {
     [scopeDocIdsParam]
   )
   const prefillQuestion = searchParams.get('q')
+  // G2: ?suggest= renders a *soft* ghost-text suggestion the user can dismiss
+  // (whereas ?q= still hard-prefills for legacy callers like Dashboard's Ask).
+  // ?chunk= opens that chunk's PDF tab + bbox highlight on mount.
+  const suggestion = searchParams.get('suggest')
+  const urlChunkParam = searchParams.get('chunk')
+  const urlChunkIndex = urlChunkParam != null ? parseInt(urlChunkParam, 10) : null
   const urlSessionId = searchParams.get('session')
 
   const [sessionId, setSessionId] = useState(null)
@@ -179,6 +185,44 @@ export default function ChatPage() {
     setSelectedSource(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopeDocId, scopeCollection, scopeDocIdsParam])
+
+  // G2: when arriving with ?chunk=N, fetch the chunk metadata and seed sources
+  // with a synthetic entry so PdfViewer/TextDocViewer jumps + bbox-highlights
+  // before the user sends their first query. The first real query response
+  // will replace this with actual citation sources.
+  useEffect(() => {
+    if (!scopeDocId || urlChunkIndex == null || Number.isNaN(urlChunkIndex)) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const data = await fetchDocumentChunks(scopeDocId, undefined, USER_ID)
+        if (cancelled) return
+        const match = (data?.chunks || []).find(c => c.chunk_index === urlChunkIndex)
+        if (!match) return
+        const synthetic = {
+          doc_id: scopeDocId,
+          chunk_index: match.chunk_index,
+          page: match.page,
+          bbox: match.bbox,
+          source_file: match.source_file || scopeDocName,
+          content: match.content || '',
+        }
+        setSources([synthetic])
+        setSelectedSource(0)
+        openTab({
+          doc_id: scopeDocId,
+          filename: synthetic.source_file,
+          file_type: null,
+        })
+        activateTab(scopeDocId)
+      } catch (err) {
+        // Non-fatal — user just won't get the auto-jump. Don't disrupt.
+        console.warn('chunk-jump: failed to fetch chunks', err)
+      }
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeDocId, urlChunkIndex])
 
   const clearScope = () => {
     setSearchParams({})
@@ -871,21 +915,45 @@ export default function ChatPage() {
                 </button>
               </div>
             )}
-            <input
-              ref={inputRef}
-              type="text"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={t('chat.askPlaceholder')}
-              disabled={loading}
-              className="flex-1 min-w-0 px-3 py-2 rounded-lg text-sm outline-none disabled:opacity-50"
-              style={{
-                backgroundColor: 'var(--border-strong, rgba(255,255,255,0.14))',
-                color: 'var(--fg, #f4f2ee)',
-                border: '1px solid var(--border-strong, rgba(255,255,255,0.18))',
-              }}
-            />
+            <div className="flex-1 min-w-0 relative">
+              <input
+                ref={inputRef}
+                type="text"
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={t('chat.askPlaceholder')}
+                disabled={loading}
+                className="w-full px-3 py-2 rounded-lg text-sm outline-none disabled:opacity-50"
+                style={{
+                  backgroundColor: 'var(--border-strong, rgba(255,255,255,0.14))',
+                  color: 'var(--fg, #f4f2ee)',
+                  border: '1px solid var(--border-strong, rgba(255,255,255,0.18))',
+                }}
+              />
+              {/* G2: soft ghost-text suggestion. Visible only when the input is
+                  empty AND a ?suggest= param is set. Click → fill input, focus.
+                  Typing dismisses it implicitly (input no longer empty). */}
+              {suggestion && !input && !loading && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInput(suggestion)
+                    inputRef.current?.focus()
+                  }}
+                  title={t('graph.openChunkSuggestion')}
+                  className="absolute inset-0 flex items-center px-3 text-sm text-left truncate cursor-pointer"
+                  style={{
+                    color: 'var(--fg-dim, #9a9690)',
+                    opacity: 0.6,
+                    background: 'transparent',
+                    pointerEvents: 'auto',
+                  }}
+                >
+                  <span className="truncate">{suggestion}</span>
+                </button>
+              )}
+            </div>
             {loading ? (
               <button
                 onClick={handleStop}
