@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import ForceGraph2D from 'react-force-graph-2d'
 import { FileText, Table2, Image, Calculator, ExternalLink, MessageSquare, X, Network, GitBranch } from 'lucide-react'
 import { fetchGraphDocuments, fetchGraphNodes, fetchDocuments, fetchTaxonomy, fetchDocumentChunks } from '@/lib/api'
+import DocCombobox from '@/components/DocCombobox'
 import { cn } from '@/lib/utils'
 import ContextMenu from '@/components/ContextMenu'
 import MindmapTree from '@/components/MindmapTree'
@@ -611,26 +612,25 @@ export default function GraphPage() {
 
         <span className="opacity-20" style={{ color: 'var(--fg, #f4f2ee)' }}>|</span>
 
-        <select
+        <DocCombobox
           value={scopeType === 'collection' ? `col:${scopeLabel}` : scope}
-          onChange={e => handleScopeChange(e.target.value)}
-          className="text-xs rounded px-2 py-1 outline-none"
-          style={{ backgroundColor: 'var(--border-strong, rgba(255,255,255,0.14))', color: 'var(--fg, #f4f2ee)', border: 'none' }}
-        >
-          <option value="">{t('graph.allDocuments')}</option>
-          {collections.length > 0 && (
-            <optgroup label={t('graph.collections')}>
-              {collections.map(c => (
-                <option key={`col:${c}`} value={`col:${c}`}>{c}</option>
-              ))}
-            </optgroup>
-          )}
-          <optgroup label={t('graph.documents')}>
-            {(Array.isArray(docList) ? docList : []).map(d => (
-              <option key={d.doc_id} value={d.doc_id}>{d.filename}</option>
-            ))}
-          </optgroup>
-        </select>
+          onChange={handleScopeChange}
+          collections={collections}
+          userId={USER_ID}
+          currentLabel={
+            scope && scopeType !== 'collection'
+              ? (Array.isArray(docList) ? docList : []).find(d => d.doc_id === scope)?.filename
+              : null
+          }
+          labels={{
+            allLabel: t('graph.allDocuments'),
+            collections: t('graph.collections'),
+            documents: t('graph.documents'),
+            placeholder: t('graph.searchDocsPlaceholder', { defaultValue: 'Search documents…' }),
+            recent: t('graph.recentDocs', { defaultValue: 'Recent' }),
+            noResults: t('graph.noResults', { defaultValue: 'No matches' }),
+          }}
+        />
 
         {scopeType !== 'all' && (
           <button onClick={() => handleScopeChange('')}
