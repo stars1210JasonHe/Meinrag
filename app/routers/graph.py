@@ -48,14 +48,19 @@ async def get_document_graph(
             node_type="document",
         ))
 
-    # Get cross-doc similar_to edges (deduplicated to doc pairs)
-    cross_edges = await edge_repo.get_cross_doc_edges(relation="similar_to")
+    # Get cross-doc similar_to edges, aggregated and gated by min_pairs.
+    cross_edges = await edge_repo.get_cross_doc_edges(
+        relation="similar_to",
+        min_pairs=settings.graph_similar_min_pairs,
+    )
     edges = [
         GraphEdge(
             source_doc_id=e["source_doc_id"],
             target_doc_id=e["target_doc_id"],
             relation=e["relation"],
             score=e.get("score"),
+            supporting_pairs=e.get("supporting_pairs"),
+            mean_score=e.get("mean_score"),
         )
         for e in cross_edges
     ]

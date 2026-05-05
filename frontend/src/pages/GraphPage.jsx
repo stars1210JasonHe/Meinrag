@@ -42,6 +42,44 @@ function cssVar(name, fallback = '#08080a') {
   }
 }
 
+// Convert a hex color (#rrggbb / #rgb) or rgba()/rgb() string to rgba(...) with the given alpha.
+// Used to modulate similar_to edge opacity by mean_score so stronger relationships read denser.
+function applyAlpha(color, alpha) {
+  const a = Math.max(0, Math.min(1, alpha))
+  if (!color) return `rgba(154,150,144,${a})`
+  const hex = color.match(/^#([0-9a-f]{3,8})$/i)
+  if (hex) {
+    let h = hex[1]
+    if (h.length === 3) h = h.split('').map(c => c + c).join('')
+    if (h.length === 8) h = h.slice(0, 6)
+    const r = parseInt(h.slice(0, 2), 16)
+    const g = parseInt(h.slice(2, 4), 16)
+    const b = parseInt(h.slice(4, 6), 16)
+    return `rgba(${r},${g},${b},${a})`
+  }
+  const rgb = color.match(/rgba?\(\s*([0-9]+)\s*,\s*([0-9]+)\s*,\s*([0-9]+)/i)
+  if (rgb) return `rgba(${rgb[1]},${rgb[2]},${rgb[3]},${a})`
+  return color
+}
+
+// Map mean_score in [min_score, 1.0] to a visible opacity range. Below the floor
+// (which is server-gated) we still show a faint edge so single-pair relationships
+// don't disappear entirely.
+function meanScoreToAlpha(meanScore) {
+  if (meanScore == null) return 0.6
+  const lo = 0.7
+  const t = Math.max(0, Math.min(1, (meanScore - lo) / (1.0 - lo)))
+  return 0.35 + t * 0.6  // 0.35 at lo, 0.95 at 1.0
+}
+
+// supporting_pairs: 1 → thinnest, 6+ → thickest. Below 1 (chunk-level edges
+// without aggregation) falls back to the relation default so per-chunk views
+// keep their look.
+function supportingPairsToWidth(pairs) {
+  if (pairs == null) return null
+  return 1 + Math.min(pairs, 6) * 0.5
+}
+
 export default function GraphPage() {
   const { docId } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -227,6 +265,9 @@ export default function GraphPage() {
         target: e.target_chunk_index != null ? `${e.target_doc_id}:${e.target_chunk_index}` : `doc:${e.target_doc_id}`,
         relation: e.relation,
         color: '#334155',
+        // Doc-level aggregation: only present on /graph/documents responses.
+        supporting_pairs: e.supporting_pairs ?? null,
+        mean_score: e.mean_score ?? null,
       }))
       .filter(l => nodeIds.has(l.source) && nodeIds.has(l.target))
 
@@ -615,10 +656,20 @@ export default function GraphPage() {
             onNodeRightClick={handleNodeRightClick}
             linkColor={l => {
               if (activeNode && !highlightLinks.has(l)) return '#1e293b'
-              return EDGE_COLORS[l.relation] || '#64748b'
+              const base = EDGE_COLORS[l.relation] || '#64748b'
+              // Doc-level similar_to edges modulate alpha by mean_score so strong
+              // relationships read denser than weak ones. Other edge types keep
+              // their token color verbatim.
+              if (l.relation === 'similar_to' && l.mean_score != null) {
+                return applyAlpha(base, meanScoreToAlpha(l.mean_score))
+              }
+              return base
             }}
             linkWidth={l => {
               if (activeNode && highlightLinks.has(l)) return 3
+              // Doc-level edges: thickness scales with supporting_pairs.
+              const w = supportingPairsToWidth(l.supporting_pairs)
+              if (w != null) return w
               return l.relation === 'follows' ? 0.5 : 1.5
             }}
             linkLineDash={l => l.relation === 'similar_to' ? [4, 4] : null}

@@ -128,3 +128,119 @@ class TestGraphNeighbors:
     def test_missing_params(self, client):
         resp = client.get("/graph/neighbors", headers={"X-User-Id": "testuser"})
         assert resp.status_code == 422
+
+
+class TestCrossDocEdgeAggregation:
+    """Unit-level tests for EdgeRepository.get_cross_doc_edges aggregation.
+
+    These pin G1 behavior: per-doc-pair grouping, supporting_pairs/mean_score
+    fields, and the min_pairs gate that prevents the doc-graph hairball.
+    """
+
+    @pytest.mark.asyncio
+    async def test_aggregates_supporting_pairs_and_mean_score(self):
+        from app.db.models import ChunkEdgeModel
+        from app.db.repositories import EdgeRepository
+
+        engine = create_async_engine(
+            "sqlite+aiosqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        async with Session() as session:
+            # 3 supporting pairs between (A, B); 1 between (A, C); plus a same-doc
+            # edge that must be ignored.
+            session.add_all([
+                ChunkEdgeModel(source_doc_id="A", source_chunk_index=0,
+                               target_doc_id="B", target_chunk_index=0,
+                               relation="similar_to", score=0.80),
+                ChunkEdgeModel(source_doc_id="A", source_chunk_index=1,
+                               target_doc_id="B", target_chunk_index=2,
+                               relation="similar_to", score=0.90),
+                # B->A direction — must group with A->B (unordered pair).
+                ChunkEdgeModel(source_doc_id="B", source_chunk_index=4,
+                               target_doc_id="A", target_chunk_index=3,
+                               relation="similar_to", score=0.70),
+                ChunkEdgeModel(source_doc_id="A", source_chunk_index=0,
+                               target_doc_id="C", target_chunk_index=0,
+                               relation="similar_to", score=0.85),
+                # Same-doc edge — must NOT show up in cross-doc results.
+                ChunkEdgeModel(source_doc_id="A", source_chunk_index=0,
+                               target_doc_id="A", target_chunk_index=1,
+                               relation="similar_to", score=0.99),
+            ])
+            await session.commit()
+
+            repo = EdgeRepository(session)
+            edges = await repo.get_cross_doc_edges(min_pairs=1)
+
+            by_pair = {tuple(sorted([e["source_doc_id"], e["target_doc_id"]])): e
+                       for e in edges}
+            assert ("A", "B") in by_pair
+            assert ("A", "C") in by_pair
+            ab = by_pair[("A", "B")]
+            assert ab["supporting_pairs"] == 3
+            assert abs(ab["mean_score"] - 0.80) < 1e-3
+            assert ab["score"] == ab["mean_score"]  # backward-compat alias
+            ac = by_pair[("A", "C")]
+            assert ac["supporting_pairs"] == 1
+            assert abs(ac["mean_score"] - 0.85) < 1e-3
+
+        await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_min_pairs_filter_drops_under_threshold(self):
+        from app.db.models import ChunkEdgeModel
+        from app.db.repositories import EdgeRepository
+
+        engine = create_async_engine(
+            "sqlite+aiosqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        async with Session() as session:
+            # (A, B) = 1 pair, (A, C) = 2 pairs, (B, C) = 3 pairs.
+            session.add_all([
+                ChunkEdgeModel(source_doc_id="A", source_chunk_index=0,
+                               target_doc_id="B", target_chunk_index=0,
+                               relation="similar_to", score=0.80),
+                ChunkEdgeModel(source_doc_id="A", source_chunk_index=0,
+                               target_doc_id="C", target_chunk_index=0,
+                               relation="similar_to", score=0.80),
+                ChunkEdgeModel(source_doc_id="A", source_chunk_index=1,
+                               target_doc_id="C", target_chunk_index=2,
+                               relation="similar_to", score=0.85),
+                ChunkEdgeModel(source_doc_id="B", source_chunk_index=0,
+                               target_doc_id="C", target_chunk_index=0,
+                               relation="similar_to", score=0.75),
+                ChunkEdgeModel(source_doc_id="B", source_chunk_index=1,
+                               target_doc_id="C", target_chunk_index=1,
+                               relation="similar_to", score=0.85),
+                ChunkEdgeModel(source_doc_id="B", source_chunk_index=2,
+                               target_doc_id="C", target_chunk_index=2,
+                               relation="similar_to", score=0.90),
+            ])
+            await session.commit()
+
+            repo = EdgeRepository(session)
+
+            # min_pairs=2: drops (A,B); keeps (A,C) and (B,C).
+            edges = await repo.get_cross_doc_edges(min_pairs=2)
+            pairs = {tuple(sorted([e["source_doc_id"], e["target_doc_id"]]))
+                     for e in edges}
+            assert pairs == {("A", "C"), ("B", "C")}
+
+            # min_pairs=3: only (B,C) survives.
+            edges = await repo.get_cross_doc_edges(min_pairs=3)
+            assert len(edges) == 1
+            assert {edges[0]["source_doc_id"], edges[0]["target_doc_id"]} == {"B", "C"}
+
+        await engine.dispose()

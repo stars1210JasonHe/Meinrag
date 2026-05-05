@@ -141,11 +141,15 @@ class Settings(BaseSettings):
     router_top_k: int = 8           # how many docs router picks
     router_model: str = "gpt-4o-mini"
 
-    # Graph edge building — minimum cosine similarity to keep a cross-doc similar_to edge.
-    # Chunk-to-chunk similarity distribution (observed on live corpus): p10=0.61, p50=0.76,
-    # p90=1.0. Threshold 0.6 cuts the bottom ~10% (barely-related matches) without losing
-    # real signal. Affects BOTH visualization AND retrieval (composite graph_score + graph expansion).
-    graph_similar_min_score: float = 0.6
+    # Graph edge building — controls when two docs get a similar_to edge in the document-level
+    # graph view. Two knobs work together:
+    #   - graph_similar_min_score: per chunk-pair cosine similarity floor.
+    #   - graph_similar_min_pairs: how many such pairs are required before a doc-pair is rendered.
+    # Defaults (0.7 / 2 pairs) keep the graph readable on dense corpora; lower the score to surface
+    # weak relationships, lower min_pairs to surface single-shot matches. Affects BOTH the
+    # visualization AND retrieval (composite graph_score + graph expansion).
+    graph_similar_min_score: float = 0.7
+    graph_similar_min_pairs: int = 2
 
     # Context window management — protects against overflow when passing chunks to LLM.
     # Effective budget = min(max_context_tokens or inf, model_window * context_budget_ratio).

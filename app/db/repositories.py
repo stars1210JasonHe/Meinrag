@@ -564,25 +564,53 @@ class EdgeRepository:
             for e in result.scalars().all()
         ]
 
-    async def get_cross_doc_edges(self, relation: str = "similar_to") -> list[dict]:
-        """Get all cross-document edges (source_doc != target_doc), deduplicated by doc pair."""
+    async def get_cross_doc_edges(
+        self,
+        relation: str = "similar_to",
+        min_pairs: int = 1,
+    ) -> list[dict]:
+        """Get cross-document edges aggregated by unordered doc pair.
+
+        Returns one entry per (doc_a, doc_b) pair containing:
+          - source_doc_id, target_doc_id, relation
+          - supporting_pairs: count of distinct chunk pairs in this group
+          - mean_score: arithmetic mean of supporting pair scores
+          - score: alias for mean_score (backward-compat for older clients)
+        Pairs with fewer than ``min_pairs`` supporting chunk pairs are dropped —
+        this is what stops the doc-level graph from collapsing into a hairball.
+        """
         stmt = select(ChunkEdgeModel).where(
             ChunkEdgeModel.relation == relation,
             ChunkEdgeModel.source_doc_id != ChunkEdgeModel.target_doc_id,
         )
         result = await self._db.execute(stmt)
-        seen_pairs = set()
-        edges = []
+
+        groups: dict[tuple[str, str], dict] = {}
         for e in result.scalars().all():
-            pair = tuple(sorted([e.source_doc_id, e.target_doc_id]))
-            if pair not in seen_pairs:
-                seen_pairs.add(pair)
-                edges.append({
-                    "source_doc_id": e.source_doc_id,
-                    "target_doc_id": e.target_doc_id,
-                    "relation": e.relation,
-                    "score": e.score,
-                })
+            pair_key = tuple(sorted([e.source_doc_id, e.target_doc_id]))
+            entry = groups.setdefault(pair_key, {
+                "source_doc_id": e.source_doc_id,
+                "target_doc_id": e.target_doc_id,
+                "relation": e.relation,
+                "scores": [],
+            })
+            if e.score is not None:
+                entry["scores"].append(float(e.score))
+
+        edges: list[dict] = []
+        for entry in groups.values():
+            scores = entry["scores"]
+            if len(scores) < min_pairs:
+                continue
+            mean = sum(scores) / len(scores) if scores else None
+            edges.append({
+                "source_doc_id": entry["source_doc_id"],
+                "target_doc_id": entry["target_doc_id"],
+                "relation": entry["relation"],
+                "supporting_pairs": len(scores),
+                "mean_score": round(mean, 4) if mean is not None else None,
+                "score": round(mean, 4) if mean is not None else None,
+            })
         return edges
 
     async def get_edge_counts_batch(

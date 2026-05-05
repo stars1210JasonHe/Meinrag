@@ -190,6 +190,12 @@ class GraphEdge(BaseModel):
     target_chunk_index: int | None = None
     relation: str
     score: float | None = None
+    # Cross-doc edge aggregation (only populated for the doc-level graph view).
+    # supporting_pairs: how many distinct chunk pairs sit above the similarity floor.
+    # mean_score: arithmetic mean of those pair scores. Frontend uses these for
+    # link thickness/opacity so dense, high-confidence relationships read as such.
+    supporting_pairs: int | None = None
+    mean_score: float | None = None
 
 
 class GraphResponse(BaseModel):
