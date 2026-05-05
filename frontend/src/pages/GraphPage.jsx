@@ -62,14 +62,14 @@ function applyAlpha(color, alpha) {
   return color
 }
 
-// Map mean_score in [min_score, 1.0] to a visible opacity range. Below the floor
-// (which is server-gated) we still show a faint edge so single-pair relationships
-// don't disappear entirely.
+// Map mean_score in [min_score, 1.0] to a visible opacity range. The floor
+// is set high enough that even weak relationships stay legible in light mode
+// where the base colour (--fg-faint) is already a soft beige.
 function meanScoreToAlpha(meanScore) {
-  if (meanScore == null) return 0.6
+  if (meanScore == null) return 0.7
   const lo = 0.7
   const t = Math.max(0, Math.min(1, (meanScore - lo) / (1.0 - lo)))
-  return 0.35 + t * 0.6  // 0.35 at lo, 0.95 at 1.0
+  return 0.55 + t * 0.45  // 0.55 at lo, 1.0 at 1.0
 }
 
 // supporting_pairs: 1 → thinnest, 6+ → thickest. Below 1 (chunk-level edges

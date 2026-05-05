@@ -922,7 +922,9 @@ export default function ChatPage() {
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={t('chat.askPlaceholder')}
+                /* G2: when a soft suggestion is showing, blank the placeholder
+                   so the two texts don't visually overlap. */
+                placeholder={suggestion && !input && !loading ? '' : t('chat.askPlaceholder')}
                 disabled={loading}
                 className="w-full px-3 py-2 rounded-lg text-sm outline-none disabled:opacity-50"
                 style={{
@@ -933,7 +935,8 @@ export default function ChatPage() {
               />
               {/* G2: soft ghost-text suggestion. Visible only when the input is
                   empty AND a ?suggest= param is set. Click → fill input, focus.
-                  Typing dismisses it implicitly (input no longer empty). */}
+                  Typing dismisses it implicitly (input no longer empty).
+                  Italic + --fg-1 (full opacity) keeps contrast in BOTH themes. */}
               {suggestion && !input && !loading && (
                 <button
                   type="button"
@@ -942,10 +945,9 @@ export default function ChatPage() {
                     inputRef.current?.focus()
                   }}
                   title={t('graph.openChunkSuggestion')}
-                  className="absolute inset-0 flex items-center px-3 text-sm text-left truncate cursor-pointer"
+                  className="absolute inset-0 flex items-center px-3 text-sm text-left italic cursor-pointer rounded-lg"
                   style={{
-                    color: 'var(--fg-dim, #9a9690)',
-                    opacity: 0.6,
+                    color: 'var(--fg-1)',
                     background: 'transparent',
                     pointerEvents: 'auto',
                   }}
