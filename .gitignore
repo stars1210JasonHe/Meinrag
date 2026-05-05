@@ -1,10 +1,56 @@
+# --- Secrets / venv / build ---
 .env
 .venv/
 __pycache__/
 *.pyc
-data/uploads/
-data/vectorstore/
-data/metadata.json
 *.egg-info/
 dist/
 build/
+
+# --- Editor / OS noise ---
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# --- Runtime data (regenerated on demand) ---
+data/uploads/
+data/vectorstore/
+data/vectorstore_summary/
+data/mindmaps/
+data/metadata.json
+data/users.json
+data/meinrag.db
+
+# --- Tracked config (explicit allowlist for data/ since it's mostly ignored) ---
+# data/taxonomy.json, data/query_types.json, data/scoring_profiles/*.json
+# stay tracked — they drive classification, query routing, and ranking weights.
+
+# --- Test artifacts (large, regenerable) ---
+data/test_queries/
+data/test_classification/
+data/test_collections/
+data/eval_docling/
+data/eval_retrieval/
+
+# --- Demo + reference corpora (large, reproducible from scripts/) ---
+data/demo/
+data/frontend_V1/
+data/*.pdf
+
+# --- Test PDFs at repo root (legacy fixtures, large) ---
+test cases/
+test cases1/
+
+# --- Local-only working notes (plans, mockups, research, vendor binaries) ---
+docs/
+
+# --- Frontend build / dev artifacts ---
+frontend/node_modules/
+frontend/dist/
+frontend/screenshots/
+screenshots/
+
+# --- Local Claude Code settings ---
+.claude/settings.local.json
