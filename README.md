@@ -13,9 +13,9 @@ Upload a corpus, browse it visually, ask questions in natural language, and get 
 ## What's in the box
 
 ### Four pages, one app
-- **Dashboard** — sunburst over a 3-layer taxonomy (primary category → sub-tags → user collections). Hover a wedge to see the docs in it; click to scope queries.
-- **Chat** — streaming answers with `[N]` citations that open the right doc, scroll to the chunk, and bbox-highlight. Multi-doc selection, saved collections, persistent sessions.
-- **Graph** — cross-doc similarity graph with weighted edges (thickness = supporting chunk pairs, opacity = mean similarity). Drill into a chunk → "Open chunk" lands you in chat with the PDF highlighted and a primed question.
+- **Dashboard** — sunburst over a 3-layer taxonomy (primary category → sub-tags → user collections). Hover a wedge to see the docs in it; click to scope queries. Smart server-side search (filename / category / subtags / summary for short queries; semantic FAISS for long).
+- **Chat** — streaming answers with `[N]` citations that open the right doc, scroll to the chunk, and bbox-highlight. Multi-doc selection, saved collections, persistent sessions, **pinnable doc tabs** (refuses to close until unpinned).
+- **Graph** — cross-doc similarity graph with weighted edges (thickness = supporting chunk pairs, opacity = mean similarity). Typeahead doc picker with Recent / Collections / Documents sections. Drill into a chunk → "Open chunk" lands you in chat with the PDF highlighted and a primed question.
 - **Mind map** — LLM-derived concept tree per document. 3 layers by default; auto-deepens to 4 where content earns it.
 
 ### Retrieval
@@ -224,9 +224,13 @@ RERANK_TOP_N=4
 
 ## API endpoints
 
+> Building an external agent or MCP integration? See **[`API.md`](API.md)** for the
+> full reference — auth, request/response shapes, curl + Python examples, SSE streaming
+> format, error model, pagination, and best-practice notes for agent integrations.
+
 ### Documents
 - `POST /documents/upload` — upload + index
-- `GET /documents` — list (filter by `?collection=`, `?primary_category=`, `?subtags=`)
+- `GET /documents` — list. Optional `?search=` (smart: ILIKE on filename/category/subtags/summary for short queries, semantic FAISS for long), `?collection=`, `?limit=` (max 200), `?offset=`
 - `GET /documents/taxonomy` — taxonomy categories + user collection counts (replaces the legacy `/documents/collections`)
 - `GET /documents/{id}/download` — original file
 - `GET /documents/{id}/chunks` — chunks with bbox + page + summary metadata
