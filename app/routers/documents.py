@@ -208,6 +208,17 @@ SEMANTIC_QUERY_MIN_CHARS = 20
 SEMANTIC_FETCH_K = 50
 
 
+def _query_has_cjk(q: str) -> bool:
+    """Any CJK character (Chinese / Japanese / Korean) → route to semantic.
+
+    Word/char heuristics are tuned for English: split on whitespace + 20 chars
+    handles "long English query." But Chinese carries no spaces and packs much
+    more meaning per character — a 6-char query like 幻数与氧同位素 is a full
+    technical phrase that should hit the semantic path, not ILIKE.
+    """
+    return any("一" <= c <= "鿿" for c in q)
+
+
 @router.get("", response_model=DocumentListResponse)
 async def list_documents(
     collection: str | None = None,
@@ -248,11 +259,12 @@ async def list_documents(
             total=total,
         )
 
-    # Decide ILIKE vs semantic by query length / word count.
+    # Decide ILIKE vs semantic by query length / word count / language.
     word_count = len([w for w in q.split() if w])
     use_semantic = (
         word_count >= SEMANTIC_QUERY_MIN_WORDS
         or len(q) >= SEMANTIC_QUERY_MIN_CHARS
+        or _query_has_cjk(q)
     )
 
     if use_semantic and summary_store is not None:
