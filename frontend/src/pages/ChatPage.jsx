@@ -22,9 +22,22 @@ import PdfViewer from '@/components/PdfViewer'
 import ChatEmptyState from '@/components/ChatEmptyState'
 import { ParagraphSkeleton, SourceCardSkeleton } from '@/components/skeletons'
 
-// Substring that identifies a corpus-refusal answer. Anchored to the exact
-// phrase the RAG_SYSTEM_PROMPT instructs the LLM to emit.
-const REFUSAL_MARKER = 'do not contain information'
+// Substrings that identify a corpus-refusal answer. The English marker is
+// anchored to the exact phrase the RAG_SYSTEM_PROMPT instructs the LLM to
+// emit; the Chinese markers cover the localised refusal output. We match
+// any of them. (Long-term fix: have the backend set an explicit
+// `is_refusal: bool` flag in the response so this isn't substring-based.)
+const REFUSAL_MARKERS = [
+  'do not contain information',  // EN canonical
+  '不包含',                       // ZH "do not contain"
+  '没有相关',                      // ZH "no relevant"
+  '无法回答',                      // ZH "cannot answer"
+]
+function _isRefusal(text) {
+  if (typeof text !== 'string') return false
+  const lower = text.toLowerCase()
+  return REFUSAL_MARKERS.some(m => lower.includes(m.toLowerCase()))
+}
 import { splitCitations } from '@/lib/citations'
 
 const API_BASE = import.meta.env.VITE_API_URL
@@ -273,7 +286,7 @@ export default function ChatPage() {
         } else {
           // Re-derive refusal flag from text (not persisted in DB). Carry the
           // preceding user question so the supplement buttons can resend it.
-          if (typeof m.content === 'string' && m.content.toLowerCase().includes(REFUSAL_MARKER)) {
+          if (_isRefusal(m.content)) {
             entry.refusal = true
             entry.originalQuestion = lastUserQuestion
           }
@@ -443,7 +456,7 @@ export default function ChatPage() {
 
       // Flag the AI message as a refusal if the LLM said it couldn't answer
       // from the corpus. UI will render SupplementActions below it.
-      if (fullAnswer.toLowerCase().includes(REFUSAL_MARKER)) {
+      if (_isRefusal(fullAnswer)) {
         updateAi(msg => ({ ...msg, refusal: true, originalQuestion: question }))
       }
     } catch (err) {
