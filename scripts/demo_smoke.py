@@ -98,8 +98,11 @@ def find_doc(corpus: dict[str, str], substring: str) -> str | None:
 
 def scene_1_smart_search(corpus: dict[str, str]) -> None:
     header("Scene 1", "Smart search returns the right doc by content")
-    query = "幻数与氧同位素"
-    expected_substr = "otsuka"  # otsuka_oxygen_drip_2010.pdf
+    # Mixed Chinese + English query — none of these tokens appear in the
+    # filename `attention_is_all_you_need.pdf`, so an ILIKE-only search
+    # would miss this. The semantic dispatch finds it via summary embeddings.
+    query = "注意力机制 transformer 架构"
+    expected_substr = "attention_is_all_you_need"
 
     try:
         resp = http_get("/documents", params={"search": query, "limit": 5})
