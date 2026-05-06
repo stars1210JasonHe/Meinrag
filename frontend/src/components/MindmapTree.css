@@ -32,6 +32,13 @@
 .mm-leaf-label.branch { font-size: 15px; font-weight: 600; }
 .mm-leaf-label.central { font-size: 17px; font-weight: 700; }
 
+/* Labels are now HTML inside <foreignObject> (see MindmapTree.jsx),
+   which sidesteps a Chromium SVG-text-fill bug where the rasteriser
+   silently dropped fill on <text> inside react-d3-tree's transformed
+   groups. The label colour is set inline on the <div> via the
+   themedFg state in MindmapTree.jsx (read from --fg via getComputedStyle
+   so theme switches still work). */
+
 .mm-badge {
   fill: var(--signature, #5b7ec9);
   opacity: 0.85;

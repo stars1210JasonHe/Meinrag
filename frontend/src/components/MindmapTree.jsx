@@ -30,9 +30,14 @@ const DEPTH_STYLES = [
     fill: 'var(--bg-2)', stroke: 'var(--border-strong)',
     labelColor: 'var(--fg)', font: { size: 15, weight: 400 }, showBadge: false },
   // depth 2 — leaves (clickable, has chunks)
+  // labelColor was --fg-1 (#d4d0ca dark / #3a372e light) but on the dark
+  // theme it ends up looking too dim against the deeper bg. Promote to
+  // --fg (#f4f2ee dark / #1a1915 light) for legibility — the size/weight
+  // distinction (13px / 400) still keeps it visually subordinate to
+  // depth-1 branches (15px / 400).
   { shape: 'underline', width: 240, height: 36, maxChars: 30,
     fill: 'transparent', stroke: 'var(--border)',
-    labelColor: 'var(--fg-1)', font: { size: 13, weight: 400 }, showBadge: true },
+    labelColor: 'var(--fg)', font: { size: 13, weight: 400 }, showBadge: true },
   // depth 3+ — fallback (last row repeats for any deeper depth)
   // To add real layer 4 styling: append a row above this comment.
 ]
@@ -68,6 +73,24 @@ export default function MindmapTree({ tree, selectedChunkIds = [], onLeafClick }
   const containerRef = useRef(null)
   const [translate, setTranslate] = useState({ x: 120, y: 240 })
 
+  // Resolved hex value of --fg (theme-aware). Read from :root once on mount,
+  // and re-read whenever the theme changes (data-theme attr on <html>).
+  // We pass this directly as the SVG fill attribute on text elements,
+  // bypassing the CSS-class path that Chromium intermittently fails to
+  // apply when the SVG sits inside react-d3-tree's transformed tree.
+  const [themedFg, setThemedFg] = useState('#f4f2ee')
+  useEffect(() => {
+    const read = () => {
+      const v = getComputedStyle(document.documentElement)
+        .getPropertyValue('--fg').trim()
+      if (v) setThemedFg(v)
+    }
+    read()
+    const obs = new MutationObserver(read)
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+    return () => obs.disconnect()
+  }, [])
+
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
@@ -96,19 +119,43 @@ export default function MindmapTree({ tree, selectedChunkIds = [], onLeafClick }
           style={{ cursor: 'pointer' }}
         >
           {renderShape(style, isSelected, nodeDatum.__hue)}
-          <text
-            x={0} y={0}
-            textAnchor="middle" dominantBaseline="central"
-            style={{
-              fill: style.labelColor,
-              fontSize: `${style.font.size}px`,
-              fontWeight: style.font.weight,
-              pointerEvents: 'none',
-              userSelect: 'none',
-            }}
+          {/*
+            Labels rendered as HTML inside <foreignObject>. SVG <text>
+            looked correct in the computed-style panel (fill = light beige)
+            but Chromium's rasteriser painted it pure black inside this
+            transformed tree — confirmed by sampling pixels with PIL.
+            HTML rendering goes through the normal compositor and respects
+            CSS like every other element on the page.
+          */}
+          <foreignObject
+            x={-style.width / 2}
+            y={-style.height / 2}
+            width={style.width}
+            height={style.height}
+            style={{ pointerEvents: 'none' }}
           >
-            {clampLabel(nodeDatum.name, style.maxChars)}
-          </text>
+            <div
+              xmlns="http://www.w3.org/1999/xhtml"
+              className={`mm-node-label-html mm-node-label-d${nodeDatum.__depth}`}
+              style={{
+                width: '100%',
+                height: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: `${style.font.size}px`,
+                fontWeight: style.font.weight,
+                color: style.labelColor === 'var(--fg)' ? themedFg : style.labelColor,
+                userSelect: 'none',
+                lineHeight: 1.2,
+                padding: '0 8px',
+                boxSizing: 'border-box',
+                textAlign: 'center',
+              }}
+            >
+              {clampLabel(nodeDatum.name, style.maxChars)}
+            </div>
+          </foreignObject>
           <title>{nodeDatum.name}</title>
           {style.showBadge && chunkCount > 0 && (
             <g transform={`translate(${style.width / 2 - 10}, ${-style.height / 2 + 10})`}>
