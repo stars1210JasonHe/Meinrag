@@ -186,6 +186,22 @@ export default function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopeDocId, scopeCollection, scopeDocIdsParam])
 
+  // When arriving at /chat?doc=<id>, open + activate that doc's PDF tab
+  // immediately, even if there's no ?chunk= param. Without this the chat
+  // panel renders but the doc area stays empty until the user runs a query.
+  // The G2 chunk-jump effect below still adds the bbox highlight on top
+  // when ?chunk= is also present.
+  useEffect(() => {
+    if (!scopeDocId) return
+    openTab({
+      doc_id: scopeDocId,
+      filename: scopeDocName,
+      file_type: null,
+    })
+    activateTab(scopeDocId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeDocId])
+
   // G2: when arriving with ?chunk=N, fetch the chunk metadata and seed sources
   // with a synthetic entry so PdfViewer/TextDocViewer jumps + bbox-highlights
   // before the user sends their first query. The first real query response
