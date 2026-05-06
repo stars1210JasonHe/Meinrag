@@ -135,6 +135,7 @@ export default function ChatPage() {
     activateTab,
     resetTabs,
     openTabsForSources,
+    togglePin,
   } = useDocTabs()
 
   // Sources are sent in "lost in the middle" U-shape order for the LLM
@@ -657,6 +658,7 @@ export default function ChatPage() {
               activeDocId={activeDocId}
               onActivate={activateTab}
               onClose={closeTab}
+              onTogglePin={togglePin}
             />
             <div className="flex-1 overflow-hidden">
               {/* Mount EVERY open tab; hide inactive ones with display:none.

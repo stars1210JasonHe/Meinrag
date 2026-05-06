@@ -6,9 +6,14 @@ import { useState, useCallback, useMemo } from 'react'
  * Tabs persist across chat turns within a session. Sources from each answer
  * trigger auto-open + activation. User can close via X.
  *
- * Tab shape: { doc_id: string, filename: string, file_type: string }
+ * Tab shape: { doc_id: string, filename: string, file_type: string, pinned: boolean }
  *   - file_type: the raw type string from backend (e.g. "pdf", "docx")
- *   - Renderer decides which component to use based on file_type
+ *   - pinned: when true, the tab refuses to close until unpinned (matches
+ *     browser tab pin semantics — protects against accidental close).
+ *   - Renderer decides which component to use based on file_type.
+ *
+ * Sort invariant: pinned tabs come first (in insertion order), then
+ * unpinned tabs (in insertion order). Pin/unpin re-sorts in place.
  */
 export function useDocTabs() {
   const [tabs, setTabs] = useState([])           // ordered list of tabs
@@ -17,36 +22,41 @@ export function useDocTabs() {
   /**
    * Open (or activate existing) tab for this doc.
    * If a tab for doc_id already exists, just activate it.
-   * Otherwise, push a new tab to the end and activate it.
+   * Otherwise, push a new tab to the end (after any pinned tabs) and activate it.
    */
   const openTab = useCallback((doc) => {
     if (!doc || !doc.doc_id) return
     setTabs(prev => {
       const exists = prev.some(t => t.doc_id === doc.doc_id)
       if (exists) return prev
-      return [...prev, {
+      const newTab = {
         doc_id: doc.doc_id,
         filename: doc.filename || doc.source_file || doc.doc_id,
         file_type: doc.file_type || _inferTypeFromFilename(doc.filename || doc.source_file),
-      }]
+        pinned: false,
+      }
+      // Insert after the last pinned tab so pinned stays first.
+      const lastPinned = prev.findLastIndex(t => t.pinned)
+      const insertAt = lastPinned >= 0 ? lastPinned + 1 : prev.length
+      return [...prev.slice(0, insertAt), newTab, ...prev.slice(insertAt)]
     })
     setActiveDocId(doc.doc_id)
   }, [])
 
   /**
-   * Close a tab. If it was active, fall back to the tab to its left
-   * (or null if none left).
+   * Close a tab. Refuses if pinned. If it was active, fall back to the
+   * tab to its left (or null if none left).
    */
   const closeTab = useCallback((doc_id) => {
+    const target = tabs.find(t => t.doc_id === doc_id)
+    if (!target || target.pinned) return  // pinned tabs refuse to close
     setTabs(prev => {
       const idx = prev.findIndex(t => t.doc_id === doc_id)
       if (idx === -1) return prev
-      const next = prev.filter(t => t.doc_id !== doc_id)
-      return next
+      return prev.filter(t => t.doc_id !== doc_id)
     })
     setActiveDocId(current => {
       if (current !== doc_id) return current
-      // Pick the tab that would remain to the left of the closed one
       const remaining = tabs.filter(t => t.doc_id !== doc_id)
       if (remaining.length === 0) return null
       const idx = tabs.findIndex(t => t.doc_id === doc_id)
@@ -54,6 +64,29 @@ export function useDocTabs() {
       return nextActive?.doc_id ?? null
     })
   }, [tabs])
+
+  /**
+   * Toggle pinned state on a tab. Re-sorts so pinned-first invariant holds.
+   */
+  const togglePin = useCallback((doc_id) => {
+    setTabs(prev => {
+      const idx = prev.findIndex(t => t.doc_id === doc_id)
+      if (idx === -1) return prev
+      const target = { ...prev[idx], pinned: !prev[idx].pinned }
+      const others = prev.filter((_, i) => i !== idx)
+      // Re-insert at the boundary between pinned and unpinned.
+      if (target.pinned) {
+        const lastPinned = others.findLastIndex(t => t.pinned)
+        const insertAt = lastPinned >= 0 ? lastPinned + 1 : 0
+        return [...others.slice(0, insertAt), target, ...others.slice(insertAt)]
+      } else {
+        // Becoming unpinned — slot in just after the last pinned tab.
+        const lastPinned = others.findLastIndex(t => t.pinned)
+        const insertAt = lastPinned >= 0 ? lastPinned + 1 : 0
+        return [...others.slice(0, insertAt), target, ...others.slice(insertAt)]
+      }
+    })
+  }, [])
 
   /**
    * Switch to tab by doc_id. No-op if not open.
@@ -92,13 +125,17 @@ export function useDocTabs() {
         doc_id: s.doc_id,
         filename: s.source_file || s.doc_id,
         file_type: _inferTypeFromFilename(s.source_file),
+        pinned: false,
       })
     }
     if (newTabs.length === 0) return null
     setTabs(prev => {
       const existingIds = new Set(prev.map(t => t.doc_id))
       const toAdd = newTabs.filter(t => !existingIds.has(t.doc_id))
-      return [...prev, ...toAdd]
+      // Slot new tabs after the last pinned tab so pinned-first holds.
+      const lastPinned = prev.findLastIndex(t => t.pinned)
+      const insertAt = lastPinned >= 0 ? lastPinned + 1 : prev.length
+      return [...prev.slice(0, insertAt), ...toAdd, ...prev.slice(insertAt)]
     })
     return newTabs[0].doc_id
   }, [])
@@ -117,6 +154,7 @@ export function useDocTabs() {
     activateTab,
     resetTabs,
     openTabsForSources,
+    togglePin,
   }
 }
 
