@@ -21,7 +21,7 @@ from _common import (
 )
 
 
-DEMO_QUESTION = "中国 2024 年的 GDP 是多少？"
+DEMO_QUESTION = "2006 年世界杯冠军是谁？"
 
 
 def run(page) -> None:
