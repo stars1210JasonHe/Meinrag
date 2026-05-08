@@ -29,9 +29,18 @@ import { ParagraphSkeleton, SourceCardSkeleton } from '@/components/skeletons'
 // `is_refusal: bool` flag in the response so this isn't substring-based.)
 const REFUSAL_MARKERS = [
   'do not contain information',  // EN canonical
+  'does not contain',             // EN variant
+  'no information about',         // EN variant
+  'cannot find',                  // EN variant
   '不包含',                       // ZH "do not contain"
   '没有相关',                      // ZH "no relevant"
   '无法回答',                      // ZH "cannot answer"
+  '没有提到',                      // ZH "not mentioned"
+  '未提及',                       // ZH "not mentioned" (formal)
+  '没有涉及',                      // ZH "does not cover"
+  '找不到',                       // ZH "cannot find"
+  '未涵盖',                       // ZH "not covered"
+  '没有提供',                      // ZH "not provided"
 ]
 function _isRefusal(text) {
   if (typeof text !== 'string') return false
@@ -789,7 +798,10 @@ export default function ChatPage() {
                           msg.role === 'user'
                             ? 'var(--signature, #5b7ec9)'
                             : 'var(--bg-2, #111115)',
-                        color: 'var(--fg, #f4f2ee)',
+                        color:
+                          msg.role === 'user'
+                            ? '#ffffff'
+                            : 'var(--fg, #f4f2ee)',
                       }}
                     >
                       {msg.loading ? (
