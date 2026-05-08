@@ -102,27 +102,27 @@ class TestUserWorkflow:
         """Create a new user."""
         client = api_env["client"]
         resp = client.post("/users", json={
-            "user_id": "jason",
-            "display_name": "Jason",
+            "user_id": "alice",
+            "display_name": "Alice",
         })
         assert resp.status_code == 201
-        assert resp.json()["user_id"] == "jason"
+        assert resp.json()["user_id"] == "alice"
 
     def test_create_duplicate_user(self, api_env):
         """Duplicate user_id returns 409."""
         client = api_env["client"]
         resp = client.post("/users", json={
-            "user_id": "jason",
-            "display_name": "Jason Again",
+            "user_id": "alice",
+            "display_name": "Alice Again",
         })
         assert resp.status_code == 409
 
     def test_get_current_user(self, api_env):
         """Get current user from X-User-Id header."""
         client = api_env["client"]
-        resp = client.get("/users/current", headers={"X-User-Id": "jason"})
+        resp = client.get("/users/current", headers={"X-User-Id": "alice"})
         assert resp.status_code == 200
-        assert resp.json()["user_id"] == "jason"
+        assert resp.json()["user_id"] == "alice"
 
     def test_get_current_user_default(self, api_env):
         """Missing X-User-Id falls back to default user."""
@@ -222,34 +222,34 @@ class TestUserIsolation:
     """User isolation tests."""
 
     def test_user_isolation_upload(self, api_env):
-        """Upload as jason -- admin cannot see it."""
+        """Upload as alice -- admin cannot see it."""
         client = api_env["client"]
         with open(PDF_AI_SAFETY, "rb") as f:
             resp = client.post(
                 "/documents/upload?collections=research-scientific",
-                files={"file": ("jason_doc.pdf", f, "application/pdf")},
-                headers={"X-User-Id": "jason"},
+                files={"file": ("alice_doc.pdf", f, "application/pdf")},
+                headers={"X-User-Id": "alice"},
             )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["user_id"] == "jason"
-        api_env["jason_doc_id"] = data["doc_id"]
+        assert data["user_id"] == "alice"
+        api_env["alice_doc_id"] = data["doc_id"]
 
-    def test_admin_cannot_see_jason_docs(self, api_env):
-        """Admin listing doesn't include Jason's documents."""
+    def test_admin_cannot_see_alice_docs(self, api_env):
+        """Admin listing doesn't include Alice's documents."""
         client = api_env["client"]
         resp = client.get("/documents", headers={"X-User-Id": "admin"})
         doc_ids = [d["doc_id"] for d in resp.json()["documents"]]
-        assert api_env.get("jason_doc_id") not in doc_ids
+        assert api_env.get("alice_doc_id") not in doc_ids
 
-    def test_jason_sees_own_docs(self, api_env):
-        """Jason listing includes only his documents."""
+    def test_alice_sees_own_docs(self, api_env):
+        """Alice listing includes only his documents."""
         client = api_env["client"]
-        resp = client.get("/documents", headers={"X-User-Id": "jason"})
+        resp = client.get("/documents", headers={"X-User-Id": "alice"})
         data = resp.json()
         assert data["total"] >= 1
         for doc in data["documents"]:
-            assert doc["user_id"] == "jason"
+            assert doc["user_id"] == "alice"
 
 
 @online

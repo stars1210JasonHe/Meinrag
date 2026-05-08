@@ -15,6 +15,9 @@ services:
     ports:
       - "5432:5432"
     environment:
+      # Dev-only credentials — DO NOT use this compose file for production.
+      # The prod stack (docker-compose.prod.yml) reads POSTGRES_PASSWORD
+      # from .env so you can set a strong one there.
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: meinrag

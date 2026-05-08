@@ -134,8 +134,8 @@ class Settings(BaseSettings):
     # Runs one gpt-4o-mini call before vector search to pick the top-K docs
     # most likely to contain the answer. Cuts downstream rerank/budget cost.
     # Fail-safe: malformed output or LLM error falls back to the full scope.
-    # On by default as of 2026-04-22 (eval cleared ship gates with
-    # retrieval_top_k=10). See docs/plans/2026-04-22-router-default-on.md.
+    # On by default once the eval suite cleared ship gates with
+    # retrieval_top_k=10.
     router_enabled: bool = True
     router_min_scope: int = 15      # below this many docs, router is bypassed
     router_top_k: int = 8           # how many docs router picks

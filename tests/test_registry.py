@@ -26,13 +26,13 @@ class TestRegistryAdd:
 
     async def test_add_with_user_id(self, registry, db_session):
         """Document stored with custom user_id."""
-        db_session.add(UserModel(user_id="jason", display_name="Jason"))
+        db_session.add(UserModel(user_id="alice", display_name="Alice"))
         await db_session.flush()
 
-        await registry.add("doc3", "note.md", ".md", 2, user_id="jason")
+        await registry.add("doc3", "note.md", ".md", 2, user_id="alice")
         doc = await registry.get("doc3")
         assert doc is not None
-        assert doc["user_id"] == "jason"
+        assert doc["user_id"] == "alice"
 
 
 class TestRegistryList:
@@ -49,19 +49,19 @@ class TestRegistryList:
 
     async def test_list_all_with_user_filter(self, registry, db_session):
         """list_all with user_id filter."""
-        db_session.add(UserModel(user_id="jason", display_name="Jason"))
+        db_session.add(UserModel(user_id="alice", display_name="Alice"))
         await db_session.flush()
 
         await registry.add("d1", "a.pdf", ".pdf", 5, user_id="admin")
-        await registry.add("d2", "b.pdf", ".pdf", 8, user_id="jason")
+        await registry.add("d2", "b.pdf", ".pdf", 8, user_id="alice")
 
         admin_docs = await registry.list_all(user_id="admin")
         assert len(admin_docs) == 1
         assert admin_docs[0]["doc_id"] == "d1"
 
-        jason_docs = await registry.list_all(user_id="jason")
-        assert len(jason_docs) == 1
-        assert jason_docs[0]["doc_id"] == "d2"
+        alice_docs = await registry.list_all(user_id="alice")
+        assert len(alice_docs) == 1
+        assert alice_docs[0]["doc_id"] == "d2"
 
     async def test_list_by_collection(self, registry):
         """A3.4: Filter by collection name (multi-collection membership)."""
@@ -77,11 +77,11 @@ class TestRegistryList:
 
     async def test_list_by_collection_with_user_filter(self, registry, db_session):
         """Filter by collection + user_id."""
-        db_session.add(UserModel(user_id="jason", display_name="Jason"))
+        db_session.add(UserModel(user_id="alice", display_name="Alice"))
         await db_session.flush()
 
         await registry.add("d1", "a.pdf", ".pdf", 5, collections=["legal-compliance"], user_id="admin")
-        await registry.add("d2", "b.pdf", ".pdf", 8, collections=["legal-compliance"], user_id="jason")
+        await registry.add("d2", "b.pdf", ".pdf", 8, collections=["legal-compliance"], user_id="alice")
 
         admin_legal = await registry.list_by_collection("legal-compliance", user_id="admin")
         assert len(admin_legal) == 1
@@ -145,17 +145,17 @@ class TestRegistryGetAllCollections:
         assert len(all_cols) == 3
 
     async def test_get_all_collections_with_user_filter(self, registry, db_session):
-        db_session.add(UserModel(user_id="jason", display_name="Jason"))
+        db_session.add(UserModel(user_id="alice", display_name="Alice"))
         await db_session.flush()
 
         await registry.add("d1", "a.pdf", ".pdf", 5, collections=["legal-compliance"], user_id="admin")
-        await registry.add("d2", "b.pdf", ".pdf", 8, collections=["medical-healthcare"], user_id="jason")
+        await registry.add("d2", "b.pdf", ".pdf", 8, collections=["medical-healthcare"], user_id="alice")
 
         admin_cols = await registry.get_all_collections(user_id="admin")
         assert admin_cols == ["legal-compliance"]
 
-        jason_cols = await registry.get_all_collections(user_id="jason")
-        assert jason_cols == ["medical-healthcare"]
+        alice_cols = await registry.get_all_collections(user_id="alice")
+        assert alice_cols == ["medical-healthcare"]
 
 
 class TestRegistryRemove:
@@ -200,17 +200,17 @@ class TestUserRegistry:
         assert user["display_name"] == "Admin"
 
     async def test_add_user(self, user_registry):
-        user = await user_registry.add("jason", "Jason")
-        assert user["user_id"] == "jason"
-        assert user["display_name"] == "Jason"
-        assert await user_registry.exists("jason")
+        user = await user_registry.add("alice", "Alice")
+        assert user["user_id"] == "alice"
+        assert user["display_name"] == "Alice"
+        assert await user_registry.exists("alice")
 
     async def test_list_users(self, user_registry):
-        await user_registry.add("jason", "Jason")
+        await user_registry.add("alice", "Alice")
         await user_registry.add("guest", "Guest")
 
         users = await user_registry.list_all()
-        assert len(users) == 3  # admin + jason + guest
+        assert len(users) == 3  # admin + alice + guest
 
     async def test_get_nonexistent_user(self, user_registry):
         assert await user_registry.get("nonexistent") is None
