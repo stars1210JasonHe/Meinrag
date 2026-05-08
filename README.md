@@ -4,6 +4,7 @@
 
 Upload a corpus, browse it visually, ask questions in natural language, and get answers with clickable source citations that jump straight into the PDF at the right page and bounding box. Every claim is traceable.
 
+![Tests](https://github.com/stars1210JasonHe/Meinrag/actions/workflows/test.yml/badge.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.13+-blue.svg)
 ![React](https://img.shields.io/badge/react-19+-blue.svg)
