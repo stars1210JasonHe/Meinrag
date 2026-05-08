@@ -3,6 +3,11 @@
 # hot-reload during development.
 #
 # For the full prod stack, use docker-compose.prod.yml instead.
+#
+# Note: Redis is only required when TASK_BACKEND=arq. The default
+# TASK_BACKEND=background uses FastAPI's in-process queue, so this
+# dev compose intentionally omits Redis. Add a redis service back if
+# you switch to arq.
 
 services:
   postgres:
@@ -21,13 +26,5 @@ services:
       timeout: 5s
       retries: 5
 
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-
 volumes:
   pgdata:
-  redis_data:

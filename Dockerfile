@@ -18,7 +18,10 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 COPY pyproject.toml uv.lock ./
 
 # Install only runtime deps into a venv at /app/.venv
-RUN uv sync --no-dev --frozen --no-editable
+# Include the docling extra so PARSE_MODE=docling (the default) works on
+# first PDF upload — without it the background ingest task throws
+# ModuleNotFoundError silently.
+RUN uv sync --no-dev --frozen --no-editable --extra docling
 
 # ── Stage 2: runtime — slim, no uv, no build tooling ─────────
 FROM python:3.13-slim

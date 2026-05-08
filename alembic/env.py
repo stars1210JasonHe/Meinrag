@@ -2,6 +2,7 @@
 import asyncio
 import os
 from logging.config import fileConfig
+from pathlib import Path
 
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
@@ -9,6 +10,16 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 
 from app.db.models import Base
+
+# Load .env so DATABASE_URL set there is honoured even when the user
+# hasn't exported it into the shell (the app reads .env via pydantic-
+# settings, but alembic runs as a plain CLI).
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+except ImportError:
+    pass
 
 config = context.config
 

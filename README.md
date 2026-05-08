@@ -70,6 +70,11 @@ docker compose -f docker-compose.prod.yml up --build
 
 Open <http://localhost:5173>.
 
+**First steps in the UI** (the corpus starts empty):
+1. Click the **Upload** button (top-right) and add a PDF or two. Auto-classification runs in the background — for PDFs the docling pipeline downloads ~2 GB of layout models on the first upload, so allow a few minutes.
+2. When the doc card appears with a category badge, head to **Chat**, pick the doc, and ask anything about it.
+3. To curate a subset, multi-select doc cards on the dashboard → "Save as collection" in the bottom action bar.
+
 **First-boot timings** (one-time):
 - Postgres ready: ~5 s
 - Backend image build (`uv sync`): ~2 min
@@ -90,8 +95,7 @@ Persistent state lives in named volumes: `pgdata`, `app_data`, `docling_cache`.
 For day-to-day work. Backend reloads on save (`uvicorn --reload`); frontend HMR via Vite. Docker only runs Postgres.
 
 ```bash
-# Backend
-pip install uv
+# Backend (install uv first — see https://docs.astral.sh/uv/getting-started/installation/)
 uv sync
 cp .env.example .env  # set OPENAI_API_KEY
 docker compose up -d  # starts Postgres on :5432
@@ -228,6 +232,8 @@ RERANK_TOP_N=4
 > full reference — auth, request/response shapes, curl + Python examples, SSE streaming
 > format, error model, pagination, and best-practice notes for agent integrations.
 
+**Multi-user note**: requests with no `X-User-Id` header default to the configured `DEFAULT_USER` (`admin`). To scope documents and chat sessions per user, send `X-User-Id: <any-string>` — the backend auto-creates the user on first request. There is no built-in authentication; treat the user header as advisory, not a security boundary.
+
 ### Documents
 - `POST /documents/upload` — upload + index
 - `GET /documents` — list. Optional `?search=` (smart: ILIKE on filename/category/subtags/summary for short queries, semantic FAISS for long), `?collection=`, `?limit=` (max 200), `?offset=`
@@ -280,6 +286,39 @@ Common request body fields:
 
 ---
 
+## Limitations & costs
+
+Honesty up front before you deploy this anywhere.
+
+### Costs (you will burn LLM credits)
+
+- **OpenAI key is required** — embeddings always go through OpenAI even if `LLM_PROVIDER=openrouter`.
+- **Per-chunk summaries are on by default** (`SUMMARY_ENABLED=true`). Uploading a 20-page PDF produces ~40-80 `gpt-4o-mini` summary calls plus embedding calls. Building a 20-doc corpus typically costs **$0.10-$0.50**.
+- **Each query** costs roughly **$0.01-$0.05** depending on context length and whether the router fires.
+- The credibility benchmark (`scripts/test_dev_credibility.py`) makes ~14 query calls + ~42 LLM-judge calls per run — budget ~$0.10 per benchmark run.
+
+If you want to keep costs minimal during exploration: set `SUMMARY_ENABLED=false`, lower `RETRIEVAL_TOP_K`, and disable the router with `ROUTER_ENABLED=false`.
+
+### Hardware
+
+- **Docling models are ~2 GB** and download on first PDF upload. The `docling_cache` volume in the prod compose persists them; subsequent boots are fast.
+- **FAISS is in-process** — the index lives in the backend's memory and persists to a local file. Implication: you cannot horizontally scale the backend, and large corpora (>10k chunks) will slow startup. Switch to `VECTOR_STORE=chroma` for production.
+- **No GPU required.** All LLM + embedding work happens via OpenAI's API. The cross-encoder re-ranker (`RERANK_PROVIDER=cross-encoder`) runs on CPU; expect ~200ms latency per query.
+
+### Security
+
+- **No authentication.** The default deployment is single-user. The `X-User-Id` header is advisory — it scopes data per user but does not prevent anyone from impersonating another user. **Do not expose ports 5173 / 8000 publicly without putting an auth proxy in front.**
+- **No rate limiting.** A misbehaving client can drain your OpenAI key. Add a reverse-proxy-level rate limit if the backend is reachable from untrusted networks.
+- The default Postgres password in `docker-compose.yml` is `postgres` (dev only). The prod compose uses `${POSTGRES_PASSWORD}` from `.env` — set a strong one.
+
+### Scope
+
+- **Single-process, single-machine** by design today. There's no Celery / arq queue running by default (`TASK_BACKEND=background` uses FastAPI's in-process queue).
+- **English + 中文 UI** only. Adding a third locale is straightforward (`frontend/src/i18n/locales/`) but not done.
+- **No mobile-first UI.** Layouts target desktop / wide tablet.
+
+---
+
 ## Development
 
 ### Tests
@@ -325,15 +364,7 @@ Useful before changing prompts, swapping models, or shipping retrieval changes �
 
 ## Contributing
 
-PRs welcome. The flow:
-
-1. Fork and branch (`git checkout -b feature/your-thing`).
-2. Make changes, add tests where the logic is non-trivial.
-3. Run `uv run pytest tests/` — 94 should still pass.
-4. Run `cd frontend && npm run build` — should be clean.
-5. Open a PR.
-
-If you're touching retrieval or prompting, also run `scripts/test_dev_credibility.py` against the same corpus before and after, and include the diff in the PR description.
+PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide. TL;DR: fork → branch → run the offline test suite → open a PR. For anything bigger than a typo, please open an issue first so we can align on direction.
 
 ---
 
