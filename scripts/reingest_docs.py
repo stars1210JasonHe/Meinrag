@@ -9,15 +9,18 @@ Run from repo root with backend live on :8000.
 """
 from __future__ import annotations
 
+import os
 import sys
 import time
 from pathlib import Path
 
 import requests
 
-BACKEND = "http://localhost:8000"
-USER_ID = "admin"
-STAGE = Path(r"C:\Users\Server1.0\AppData\Local\Temp\reingest")
+BACKEND = os.getenv("MEINRAG_BACKEND", "http://localhost:8000")
+USER_ID = os.getenv("MEINRAG_USER_ID", "admin")
+# Directory where the source PDFs live. Override with REINGEST_STAGING_DIR
+# if your local copies live elsewhere.
+STAGE = Path(os.getenv("REINGEST_STAGING_DIR", "data/reingest_staging"))
 
 DOCS_TO_REINGEST = [
     ("6a8e78d5afa6", "ai_tool_verification_ttrl.pdf"),
