@@ -141,6 +141,7 @@ class TestBuildRagChainWithReranker:
 
     def test_chain_builds_with_rerank_enabled(self):
         """build_rag_chain should not crash when reranking is enabled."""
+        pytest.importorskip("langchain.retrievers")
         from app.rag.chain import build_rag_chain
 
         mock_store = MagicMock()

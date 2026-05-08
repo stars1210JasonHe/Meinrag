@@ -12,7 +12,8 @@ class TestHasDocling:
         assert isinstance(has_docling(), bool)
 
     def test_returns_true_when_installed(self):
-        """Docling is installed as optional dep in this project."""
+        """Docling reports installed when the optional extra is present."""
+        pytest.importorskip("docling")
         from app.services.docling_processor import has_docling
         assert has_docling() is True
 

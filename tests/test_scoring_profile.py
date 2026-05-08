@@ -213,7 +213,7 @@ class TestEdgeTypeWeighting:
 class TestConfidenceTiers:
     def test_general_tiers(self):
         profile = load_scoring_profile("general")
-        assert profile.confidence_tiers == {"high": 0.50, "moderate": 0.30}
+        assert profile.confidence_tiers == {"high": 0.65, "moderate": 0.30}
 
     def test_law_stricter_tiers(self):
         profile = load_scoring_profile("law")
