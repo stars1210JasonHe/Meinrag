@@ -200,17 +200,24 @@ export default function AppLayout() {
         </div>
 
         <div
-          className="border-t flex items-center justify-between px-2 py-1.5"
+          className={cn(
+            'border-t px-2 py-1.5 gap-1',
+            // Collapsed sidebar (w-14 = 56px) can't fit three icon buttons in
+            // a row. Stack them vertically so each gets a full-width slot.
+            collapsed
+              ? 'flex flex-col items-stretch'
+              : 'flex items-center justify-between',
+          )}
           style={{ borderColor: 'var(--border)' }}
         >
-          <div className="flex items-center gap-1">
+          <div className={cn('flex gap-1', collapsed ? 'flex-col' : 'items-center')}>
             <ThemeToggle />
             <LanguageSwitcher />
           </div>
           <button
             type="button"
             onClick={() => setCollapsed(c => !c)}
-            className="p-1.5 rounded transition-colors hover:bg-white/5"
+            className="p-1.5 rounded transition-colors hover:bg-white/5 self-center"
             title={collapsed ? t('nav.expandSidebar') : t('nav.collapseSidebar')}
             aria-label={collapsed ? t('nav.expandSidebar') : t('nav.collapseSidebar')}
             style={{ color: 'var(--fg-faint)' }}
