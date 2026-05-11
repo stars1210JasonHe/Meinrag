@@ -2,6 +2,7 @@ import { useMemo, useRef, useEffect, useState, useCallback } from 'react'
 import ForceGraph2D from 'react-force-graph-2d'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import { X } from 'lucide-react'
 
 import { useMultiDocGraph } from '@/hooks/useMultiDocGraph'
 import { buildDocColorMap } from '@/lib/docPalette'
@@ -30,12 +31,28 @@ export default function MultiDocChunkBody({
   docIds,
   documents,
   includeIntraDoc = false,
+  filter = '',
+  onFilterChange,
   width,
   height,
 }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const graphRef = useRef(null)
+
+  // Local typing state — debounced into the URL via onFilterChange so the
+  // address bar doesn't update on every keystroke (which would also retrigger
+  // any parent rerenders). 250 ms felt right in the G4 dashboard search.
+  const [filterDraft, setFilterDraft] = useState(filter)
+  useEffect(() => {
+    if (filterDraft === filter) return  // already in sync (URL pushed the change)
+    const id = setTimeout(() => {
+      onFilterChange?.(filterDraft)
+    }, 250)
+    return () => clearTimeout(id)
+  }, [filterDraft, filter, onFilterChange])
+  // Sync the draft when the parent (URL / back button) changes the filter.
+  useEffect(() => { setFilterDraft(filter) }, [filter])
 
   const { graphData, isLoading, paletteByDocId, palettesLoading } = useMultiDocGraph(
     docIds,
@@ -109,6 +126,27 @@ export default function MultiDocChunkBody({
     return { nodes, links }
   }, [graphData])
 
+  // Filter match set — keys are node ids that match the filter substring.
+  // Matching falls back through summary → content preview → label so the
+  // user finds chunks by either the LLM-derived summary or the raw text.
+  // Empty filter → null (no dimming).
+  const matchingIds = useMemo(() => {
+    const q = filter.trim().toLowerCase()
+    if (!q) return null
+    const set = new Set()
+    for (const n of graphFormatted.nodes) {
+      const hay = [
+        n.summary_preview || '',
+        n.content_preview || '',
+        n.label || '',
+      ].join(' ').toLowerCase()
+      if (hay.includes(q)) set.add(n.id)
+    }
+    return set
+  }, [filter, graphFormatted.nodes])
+
+  const matchCount = matchingIds?.size ?? null
+
   const handleNodeClick = useCallback(
     (node) => {
       // Reuse the existing Open chunk flow but scope to ALL selected docs.
@@ -137,6 +175,48 @@ export default function MultiDocChunkBody({
 
   return (
     <div className="relative w-full h-full">
+      {/* Filter input — solves the central use case "are all 3 papers
+          talking about X?". Highlights matching chunks; dims the rest.
+          Coloured by doc, so the user reads three colours = three papers
+          all mention X. Two colours = one paper missed it. */}
+      <div className="absolute top-3 left-3 z-10 flex items-center gap-1.5 rounded-md border px-2 py-1.5"
+           style={{
+             background: 'var(--bg-1, #0c0c0f)',
+             borderColor: 'var(--border, rgba(255,255,255,0.08))',
+             minWidth: 220,
+           }}>
+        <input
+          type="text"
+          value={filterDraft}
+          onChange={e => setFilterDraft(e.target.value)}
+          placeholder={t('multiDoc.filterPlaceholder', {
+            defaultValue: 'Filter chunks (e.g., "attention")',
+          })}
+          className="flex-1 bg-transparent text-xs focus:outline-none"
+          style={{ color: 'var(--fg, #f4f2ee)' }}
+        />
+        {filterDraft && (
+          <button
+            type="button"
+            onClick={() => setFilterDraft('')}
+            className="opacity-60 hover:opacity-100"
+            title={t('multiDoc.filterClear', { defaultValue: 'Clear' })}
+            style={{ color: 'var(--fg-dim, #9a9690)' }}
+          >
+            <X size={12} />
+          </button>
+        )}
+        {matchCount != null && (
+          <span className="text-xs whitespace-nowrap"
+                style={{ color: 'var(--fg-dim, #9a9690)' }}>
+            {t('multiDoc.matchCount', {
+              count: matchCount,
+              defaultValue: `${matchCount} match${matchCount === 1 ? '' : 'es'}`,
+            })}
+          </span>
+        )}
+      </div>
+
       {isLoading && (
         <div
           className="absolute inset-0 flex items-center justify-center z-20"
@@ -164,6 +244,28 @@ export default function MultiDocChunkBody({
         </div>
       )}
 
+      {/* Chunks but no edges — the 'these docs are unrelated' moment.
+          Only fires when intra-doc is OFF, because turning it on usually
+          surfaces structural edges that the cross-doc filter hides. */}
+      {!isLoading
+        && graphData
+        && graphData.nodes.length > 0
+        && graphData.edges.length === 0
+        && !includeIntraDoc && (
+        <div
+          className="absolute inset-x-0 top-4 mx-auto z-10 max-w-lg rounded-md border px-4 py-3 text-sm text-center"
+          style={{
+            background: 'var(--bg-1)',
+            borderColor: 'var(--border)',
+            color: 'var(--fg-dim)',
+          }}
+        >
+          {t('multiDoc.noCrossDocEdges', {
+            defaultValue: 'No cross-doc similarities found between these documents. Try toggling "Show intra-doc edges" to see each doc\'s internal structure.',
+          })}
+        </div>
+      )}
+
       <ForceGraph2D
         ref={graphRef}
         graphData={graphFormatted}
@@ -174,11 +276,12 @@ export default function MultiDocChunkBody({
         nodeCanvasObject={(node, ctx, globalScale) => {
           const radius = baseRadius
           const docColor = docColorMap[node.doc_id] || '#888'
-          const dimmed = focusedDocId && node.doc_id !== focusedDocId
-          const fill = dimmed ? hexWithAlpha(docColor, 0.25) : docColor
-          const stroke = dimmed
-            ? hexWithAlpha(docColor, 0.4)
-            : 'var(--bg, #08080a)'
+          // Three layers of dimming, applied with multiplication so they
+          // compose cleanly: focus filter, then keyword filter.
+          const focusDimmed = focusedDocId && node.doc_id !== focusedDocId
+          const keywordDimmed = matchingIds && !matchingIds.has(node.id)
+          const alpha = (focusDimmed ? 0.25 : 1) * (keywordDimmed ? 0.3 : 1)
+          const fill = alpha < 1 ? hexWithAlpha(docColor, alpha) : docColor
           // Canvas2D doesn't resolve CSS vars — read once.
           const strokeResolved = cssVar('--bg', '#08080a')
           drawChunkShape(ctx, node, radius, fill, strokeResolved, 1)

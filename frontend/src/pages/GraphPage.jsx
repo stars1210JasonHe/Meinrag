@@ -82,6 +82,38 @@ function supportingPairsToWidth(pairs) {
   return 1 + Math.min(pairs, 6) * 0.5
 }
 
+// Doc-level similar_to edges are rendered as three discrete tiers — eye is
+// far more sensitive to colour + dash transitions than to opacity gradients,
+// so tiered styling reads way clearer than the old "all faint dashed" look.
+// Pre-2026-05-11 every cross-doc edge looked identical in both themes.
+//
+//   strong  (mean_score >= 0.9)  → signature blue, solid, thick
+//   medium  (0.8-0.9)            → muted blue,     solid, medium
+//   weak    (0.7-0.8 / unknown)  → faint gray,     dashed, thin
+function edgeStrengthTier(meanScore) {
+  if (meanScore == null) return 'weak'
+  if (meanScore >= 0.9) return 'strong'
+  if (meanScore >= 0.8) return 'medium'
+  return 'weak'
+}
+
+function similarToTieredColor(tier) {
+  if (tier === 'strong') return cssVar('--signature', '#5b7ec9')
+  if (tier === 'medium') return cssVar('--signature-dim', '#4a6cb4')
+  return cssVar('--fg-faint', 'rgba(154,150,144,0.6)')
+}
+
+function similarToTieredWidth(tier, supportingPairs) {
+  // supporting_pairs still adds a small width bump within each tier so a
+  // 10-pair "strong" edge reads heavier than a 2-pair one.
+  const pairsBump = supportingPairs != null
+    ? Math.min(supportingPairs, 6) * 0.25
+    : 0
+  if (tier === 'strong') return 3 + pairsBump
+  if (tier === 'medium') return 2 + pairsBump
+  return 1 + pairsBump
+}
+
 // Build the chat URL for "Open chunk" — single-button replacement for the old
 // (Open in PDF / Ask about this) pair. The `suggest` param is rendered as a
 // ghost-text the user can dismiss; `chunk` triggers PDF jump + bbox highlight.
@@ -117,6 +149,13 @@ export default function GraphPage() {
   // chunk-level view (MultiDocChunkBody); 'doc' (default) keeps the legacy
   // doc-level filtered view that was already shipping pre-2026-05-11.
   const view = (multiDocIds && searchParams.get('view') === 'chunk') ? 'chunk' : 'doc'
+  // 'intra' toggles whether the chunk view shows doc-internal edges in
+  // addition to cross-doc similar_to. Persisted in the URL so deep links
+  // and back-button preserve the toggle state.
+  const includeIntraDoc = searchParams.get('intra') === '1'
+  // 'filter' is the keyword the user typed to narrow visible chunks. Kept
+  // in the URL so demos / shared links restore exactly what the sender saw.
+  const urlFilter = searchParams.get('filter') || ''
 
   const setMode = useCallback((next) => {
     setSearchParams(prev => {
@@ -134,6 +173,24 @@ export default function GraphPage() {
       else params.set('view', next)
       return params
     })
+  }, [setSearchParams])
+
+  const setIncludeIntraDoc = useCallback((next) => {
+    setSearchParams(prev => {
+      const params = new URLSearchParams(prev)
+      if (next) params.set('intra', '1')
+      else params.delete('intra')
+      return params
+    })
+  }, [setSearchParams])
+
+  const setUrlFilter = useCallback((next) => {
+    setSearchParams(prev => {
+      const params = new URLSearchParams(prev)
+      if (next) params.set('filter', next)
+      else params.delete('filter')
+      return params
+    }, { replace: true })  // typing shouldn't pollute browser history
   }, [setSearchParams])
 
   const navigate = useNavigate()
@@ -638,6 +695,30 @@ export default function GraphPage() {
           </div>
         )}
 
+        {/* Intra-doc edge toggle — only meaningful in chunk view, where it
+            additionally renders the 4 doc-internal edge types alongside the
+            default cross-doc similar_to edges. */}
+        {view === 'chunk' && multiDocIds && multiDocIds.length >= 2 && (
+          <label
+            className="flex items-center gap-1.5 text-xs cursor-pointer select-none px-2 py-1 rounded-md border"
+            style={{
+              borderColor: 'var(--border-strong, rgba(255,255,255,0.14))',
+              color: 'var(--fg, #f4f2ee)',
+            }}
+            title={t('graph.intraDocToggleHelp', {
+              defaultValue: 'Also show edges within each document (follows, references, …)',
+            })}
+          >
+            <input
+              type="checkbox"
+              checked={includeIntraDoc}
+              onChange={(e) => setIncludeIntraDoc(e.target.checked)}
+              className="cursor-pointer"
+            />
+            {t('graph.intraDocToggleLabel', { defaultValue: 'Show intra-doc edges' })}
+          </label>
+        )}
+
         <span className="opacity-30 text-xs">|</span>
 
         {Object.entries(NODE_COLORS).filter(([k]) => k !== 'document').map(([type, color]) => (
@@ -721,7 +802,9 @@ export default function GraphPage() {
           <MultiDocChunkBody
             docIds={multiDocIds}
             documents={docList}
-            includeIntraDoc={false}
+            includeIntraDoc={includeIntraDoc}
+            filter={urlFilter}
+            onFilterChange={setUrlFilter}
             width={dimensions.width}
             height={dimensions.height - (selectedNode ? 140 : 0)}
           />
@@ -747,23 +830,38 @@ export default function GraphPage() {
             onNodeRightClick={handleNodeRightClick}
             linkColor={l => {
               if (activeNode && !highlightLinks.has(l)) return '#1e293b'
-              const base = EDGE_COLORS[l.relation] || '#64748b'
-              // Doc-level similar_to edges modulate alpha by mean_score so strong
-              // relationships read denser than weak ones. Other edge types keep
-              // their token color verbatim.
+              // Doc-level similar_to edges get tiered colour: signature for
+              // strong (mean_score >= 0.9), signature-dim for medium, faint
+              // for weak. Makes "which pairs are most similar" jump out
+              // instead of all reading as the same dashed line.
               if (l.relation === 'similar_to' && l.mean_score != null) {
-                return applyAlpha(base, meanScoreToAlpha(l.mean_score))
+                return similarToTieredColor(edgeStrengthTier(l.mean_score))
               }
-              return base
+              return EDGE_COLORS[l.relation] || '#64748b'
             }}
             linkWidth={l => {
               if (activeNode && highlightLinks.has(l)) return 3
-              // Doc-level edges: thickness scales with supporting_pairs.
+              // Doc-level similar_to: tiered width (strong > medium > weak)
+              // with a small per-pair bump within tier.
+              if (l.relation === 'similar_to' && l.mean_score != null) {
+                return similarToTieredWidth(
+                  edgeStrengthTier(l.mean_score),
+                  l.supporting_pairs,
+                )
+              }
+              // Chunk-level: fall back to the existing supporting_pairs
+              // scaler for backward compat.
               const w = supportingPairsToWidth(l.supporting_pairs)
               if (w != null) return w
               return l.relation === 'follows' ? 0.5 : 1.5
             }}
-            linkLineDash={l => l.relation === 'similar_to' ? [4, 4] : null}
+            linkLineDash={l => {
+              // Dash ONLY weak similar_to edges so they read as "tentative"
+              // while strong + medium are confidently solid. Other relations
+              // are always solid.
+              if (l.relation !== 'similar_to') return null
+              return edgeStrengthTier(l.mean_score) === 'weak' ? [4, 4] : null
+            }}
             linkDirectionalArrowLength={l => l.relation === 'follows' ? 3 : 0}
             linkDirectionalArrowRelPos={1}
             cooldownTicks={30}
