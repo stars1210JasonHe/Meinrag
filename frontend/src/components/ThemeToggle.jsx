@@ -27,12 +27,14 @@ export default function ThemeToggle() {
   return (
     <button
       onClick={toggle}
-      className="flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs rounded transition-colors opacity-60 hover:opacity-100"
+      className="flex items-center gap-3 px-4 py-2.5 text-sm transition-colors opacity-60 hover:opacity-100 w-full"
       style={{ color: 'var(--fg-dim)' }}
       title={theme === 'light' ? 'Switch to dark' : 'Switch to light'}
-      aria-label={theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
     >
-      <Icon size={16} className="shrink-0" />
+      <Icon size={18} className="shrink-0" />
+      <span className="whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
+        {theme === 'light' ? 'Dark' : 'Light'}
+      </span>
     </button>
   )
 }
