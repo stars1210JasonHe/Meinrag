@@ -244,3 +244,168 @@ class TestCrossDocEdgeAggregation:
             assert {edges[0]["source_doc_id"], edges[0]["target_doc_id"]} == {"B", "C"}
 
         await engine.dispose()
+
+
+class TestEdgesAmongDocs:
+    """Unit tests for EdgeRepository.get_edges_among_docs — the helper
+    backing /graph/nodes-multi. Pins: single-SQL roundtrip behaviour,
+    relation filter, intra-doc toggle, empty-input safety."""
+
+    @pytest.mark.asyncio
+    async def test_returns_edges_only_within_doc_set(self):
+        from app.db.models import ChunkEdgeModel
+        from app.db.repositories import EdgeRepository
+
+        engine = create_async_engine(
+            "sqlite+aiosqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        async with Session() as session:
+            session.add_all([
+                # In-set cross-doc edge — keep.
+                ChunkEdgeModel(source_doc_id="A", source_chunk_index=0,
+                               target_doc_id="B", target_chunk_index=0,
+                               relation="similar_to", score=0.80),
+                # Out-of-set edge (D not requested) — drop.
+                ChunkEdgeModel(source_doc_id="A", source_chunk_index=1,
+                               target_doc_id="D", target_chunk_index=0,
+                               relation="similar_to", score=0.85),
+                # Intra-doc edge — default: drop.
+                ChunkEdgeModel(source_doc_id="A", source_chunk_index=0,
+                               target_doc_id="A", target_chunk_index=1,
+                               relation="follows", score=1.0),
+            ])
+            await session.commit()
+            repo = EdgeRepository(session)
+            edges = await repo.get_edges_among_docs(doc_ids=["A", "B"])
+            assert len(edges) == 1
+            assert edges[0]["source_doc_id"] == "A"
+            assert edges[0]["target_doc_id"] == "B"
+
+        await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_include_intra_doc_keeps_same_doc_edges(self):
+        from app.db.models import ChunkEdgeModel
+        from app.db.repositories import EdgeRepository
+
+        engine = create_async_engine(
+            "sqlite+aiosqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        async with Session() as session:
+            session.add_all([
+                ChunkEdgeModel(source_doc_id="A", source_chunk_index=0,
+                               target_doc_id="A", target_chunk_index=1,
+                               relation="follows", score=1.0),
+                ChunkEdgeModel(source_doc_id="A", source_chunk_index=0,
+                               target_doc_id="B", target_chunk_index=0,
+                               relation="similar_to", score=0.80),
+            ])
+            await session.commit()
+            repo = EdgeRepository(session)
+            edges = await repo.get_edges_among_docs(
+                doc_ids=["A", "B"], include_intra_doc=True,
+            )
+            assert len(edges) == 2
+
+        await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_relation_filter(self):
+        from app.db.models import ChunkEdgeModel
+        from app.db.repositories import EdgeRepository
+
+        engine = create_async_engine(
+            "sqlite+aiosqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        async with Session() as session:
+            session.add_all([
+                ChunkEdgeModel(source_doc_id="A", source_chunk_index=0,
+                               target_doc_id="B", target_chunk_index=0,
+                               relation="similar_to", score=0.80),
+                ChunkEdgeModel(source_doc_id="A", source_chunk_index=1,
+                               target_doc_id="B", target_chunk_index=1,
+                               relation="references", score=1.0),
+            ])
+            await session.commit()
+            repo = EdgeRepository(session)
+            edges = await repo.get_edges_among_docs(
+                doc_ids=["A", "B"], relations=["similar_to"],
+            )
+            assert len(edges) == 1
+            assert edges[0]["relation"] == "similar_to"
+
+        await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_empty_doc_ids_returns_empty(self):
+        from app.db.repositories import EdgeRepository
+
+        engine = create_async_engine(
+            "sqlite+aiosqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        async with Session() as session:
+            repo = EdgeRepository(session)
+            assert await repo.get_edges_among_docs(doc_ids=[]) == []
+
+        await engine.dispose()
+
+
+class TestGraphNodesMulti:
+    """Endpoint tests for GET /graph/nodes-multi. Covers the entry-point
+    behaviour: empty input, the MULTI_DOC_MAX cap, and the cross-user-skip
+    authorisation pattern."""
+
+    def test_empty_doc_ids_returns_empty_graph(self, client):
+        resp = client.get(
+            "/graph/nodes-multi?doc_ids=",
+            headers={"X-User-Id": "testuser"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["nodes"] == []
+        assert data["edges"] == []
+
+    def test_over_cap_returns_400(self, client):
+        # 11 ids — over MULTI_DOC_MAX=10.
+        doc_ids = ",".join(f"doc{i}" for i in range(11))
+        resp = client.get(
+            f"/graph/nodes-multi?doc_ids={doc_ids}",
+            headers={"X-User-Id": "testuser"},
+        )
+        assert resp.status_code == 400
+        assert "max" in resp.json()["detail"].lower()
+
+    def test_unauthorised_docs_dropped_silently(self, client):
+        # No docs in the test DB → user owns nothing → empty graph (not 403).
+        resp = client.get(
+            "/graph/nodes-multi?doc_ids=foo,bar,baz",
+            headers={"X-User-Id": "testuser"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["nodes"] == []
+        assert data["edges"] == []

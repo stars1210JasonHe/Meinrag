@@ -1,7 +1,7 @@
 """Graph visualization endpoints."""
 import logging
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.config import Settings
 from app.dependencies import (
@@ -14,6 +14,11 @@ from app.vectorstore.base import VectorStoreManager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/graph", tags=["graph"])
+
+# Hard cap on number of docs that can be visualised at once in the chunk-
+# level multi-doc view. 10 docs × ~50 chunks each ≈ 500 nodes, which
+# force-graph-2d handles smoothly. Above that the layout starts to crawl.
+MULTI_DOC_MAX = 10
 
 
 def _smart_truncate(text: str, max_len: int = 100) -> str:
@@ -116,6 +121,92 @@ async def get_chunk_graph(
                 relation=e["relation"],
                 score=e.get("score"),
             ))
+
+    return GraphResponse(nodes=nodes, edges=edges)
+
+
+@router.get("/nodes-multi", response_model=GraphResponse)
+async def get_chunk_graph_multi(
+    doc_ids: str = Query(..., description="Comma-separated document IDs (max 10)"),
+    edge_types: str = Query(
+        default="similar_to",
+        description="Comma-separated edge types to include",
+    ),
+    include_intra_doc: bool = Query(
+        default=False,
+        description="Include edges where source and target are in the same doc",
+    ),
+    settings: Settings = Depends(get_settings),
+    registry: DocumentRepository = Depends(get_registry),
+    vector_store: VectorStoreManager = Depends(get_vector_store),
+    edge_repo: EdgeRepository = Depends(get_edge_repository),
+    current_user: str = Depends(get_current_user),
+):
+    """Multi-doc chunk-level graph: chunks from N docs + edges among them.
+
+    Backs the dashboard multi-select → graph "chunk view" experience. Each
+    chunk becomes a graph node tagged with its doc_id; the client maps
+    doc_id → colour (typically pulled from the doc's mindmap palette).
+
+    Authorization: docs the current user doesn't own are silently dropped.
+    If the user owns none of the requested docs, returns an empty graph
+    rather than 403 — the caller can render an empty-state banner.
+
+    Performance: enforces MULTI_DOC_MAX=10 to keep force-graph-2d happy.
+    """
+    doc_id_list = [d.strip() for d in doc_ids.split(",") if d.strip()]
+    if not doc_id_list:
+        return GraphResponse(nodes=[], edges=[])
+    if len(doc_id_list) > MULTI_DOC_MAX:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many documents — max {MULTI_DOC_MAX} per request",
+        )
+
+    user_filter = current_user if settings.user_isolation != "none" else None
+    owned_docs = await registry.get_many_by_ids(doc_id_list, user_id=user_filter)
+    allowed_doc_ids = [d["doc_id"] for d in owned_docs]
+
+    if not allowed_doc_ids:
+        return GraphResponse(nodes=[], edges=[])
+
+    # Build nodes — chunks from each authorised doc. Each node carries its
+    # doc_id so the client can colour and filter without a separate lookup.
+    nodes: list[GraphNode] = []
+    for doc_id in allowed_doc_ids:
+        chunks = vector_store.get_chunks_by_doc(doc_id)
+        for chunk in chunks:
+            m = chunk.metadata or {}
+            nodes.append(GraphNode(
+                doc_id=doc_id,
+                chunk_index=m.get("chunk_index"),
+                chunk_type=m.get("chunk_type"),
+                label=m.get("label"),
+                page=m.get("page"),
+                content_preview=_smart_truncate(chunk.page_content),
+                summary_preview=m.get("summary"),
+                source_file=m.get("source_file", ""),
+                node_type="chunk",
+            ))
+
+    # One SQL roundtrip for all edges among the requested doc set.
+    types = [t.strip() for t in edge_types.split(",") if t.strip()]
+    edge_rows = await edge_repo.get_edges_among_docs(
+        doc_ids=allowed_doc_ids,
+        relations=types or None,
+        include_intra_doc=include_intra_doc,
+    )
+    edges = [
+        GraphEdge(
+            source_doc_id=e["source_doc_id"],
+            source_chunk_index=e["source_chunk_index"],
+            target_doc_id=e["target_doc_id"],
+            target_chunk_index=e["target_chunk_index"],
+            relation=e["relation"],
+            score=e.get("score"),
+        )
+        for e in edge_rows
+    ]
 
     return GraphResponse(nodes=nodes, edges=edges)
 

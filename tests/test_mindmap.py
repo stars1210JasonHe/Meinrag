@@ -528,6 +528,90 @@ class TestRecursiveMindmapParser:
         assert leaf.chunk_indices == [0, 2]
 
 
+class TestMindmapPalette:
+    """LLM-suggested palette parsing — pins the validator behaviour for the
+    multi-doc graph use case (where the central hex doubles as the doc colour)."""
+
+    def _payload(self, palette):
+        import json
+        return json.dumps({
+            "central": "Doc theme",
+            "palette": palette,
+            "branches": [
+                {"name": "Branch1", "children": [
+                    {"name": "L1", "chunk_indices": [0]},
+                ]},
+                {"name": "Branch2", "children": [
+                    {"name": "L2", "chunk_indices": [1]},
+                ]},
+            ],
+        })
+
+    def test_valid_palette_parsed(self):
+        from app.services.mindmap import _parse_tree_response
+        tree = _parse_tree_response(
+            self._payload({
+                "central": "#5b7ec9",
+                "branches": ["#5b7ec9", "#d4a64a"],
+            }),
+            valid_indices={0, 1},
+        )
+        assert tree.palette is not None
+        assert tree.palette.central == "#5b7ec9"
+        assert tree.palette.branches == ["#5b7ec9", "#d4a64a"]
+
+    def test_missing_palette_yields_none(self):
+        """No palette key in LLM output → tree.palette is None, not a crash."""
+        from app.services.mindmap import _parse_tree_response
+        import json
+        payload = json.dumps({
+            "central": "Doc theme",
+            "branches": [
+                {"name": "B", "children": [
+                    {"name": "L", "chunk_indices": [0]},
+                ]},
+            ],
+        })
+        tree = _parse_tree_response(payload, valid_indices={0})
+        assert tree.palette is None
+
+    def test_malformed_hex_yields_none(self):
+        """Central hex must be a 6-char #rrggbb. Anything else → palette dropped."""
+        from app.services.mindmap import _parse_tree_response
+        tree = _parse_tree_response(
+            self._payload({"central": "blue", "branches": []}),
+            valid_indices={0, 1},
+        )
+        assert tree.palette is None
+
+    def test_branch_count_padded_when_short(self):
+        """If LLM gives fewer branch colours than branches, pad with central."""
+        from app.services.mindmap import _parse_tree_response
+        tree = _parse_tree_response(
+            self._payload({
+                "central": "#5b7ec9",
+                "branches": ["#5b7ec9"],  # 1 colour, 2 branches
+            }),
+            valid_indices={0, 1},
+        )
+        assert tree.palette is not None
+        assert len(tree.palette.branches) == 2  # padded
+        assert tree.palette.branches[1] == "#5b7ec9"  # padded value = central
+
+    def test_branch_count_truncated_when_long(self):
+        """Extra branch colours are dropped to match the actual branch count."""
+        from app.services.mindmap import _parse_tree_response
+        tree = _parse_tree_response(
+            self._payload({
+                "central": "#5b7ec9",
+                "branches": ["#5b7ec9", "#d4a64a", "#4ade80", "#f472b6"],  # 4 > 2
+            }),
+            valid_indices={0, 1},
+        )
+        assert tree.palette is not None
+        assert len(tree.palette.branches) == 2
+
+
 from pathlib import Path
 import json as json_lib
 

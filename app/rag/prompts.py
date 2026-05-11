@@ -195,6 +195,10 @@ Rules:
    inner node with its own children, never both):
 {{
   "central": "<one-line theme capturing the document's essence>",
+  "palette": {{
+    "central": "#<6-char hex>",
+    "branches": ["#<6-char hex>", "..."]
+  }},
   "branches": [
     {{
       "name": "<top-level theme, 1-5 words>",
@@ -219,6 +223,12 @@ Rules:
 7. Each leaf's chunk_indices lists 1-5 chunks that support that concept.
 8. A chunk index may appear in multiple leaves (ideas cross-cut).
 9. Output language: match the document's predominant language.
+10. Palette: pick colors that fit the document's subject matter (cool tones
+    for technical / ML; warm tones for history / law; greens for biology;
+    etc.). `palette.central` is the doc's identity colour — readable on a
+    dark and light background. `palette.branches` must contain exactly the
+    same number of entries as top-level branches, each visually distinct.
+    Use 6-character hex like "#5b7ec9". Avoid pure black/white.
 
 Chunks:
 {chunks}

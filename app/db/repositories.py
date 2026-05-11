@@ -609,6 +609,47 @@ class EdgeRepository:
             for e in result.scalars().all()
         ]
 
+    async def get_edges_among_docs(
+        self,
+        doc_ids: list[str],
+        relations: list[str] | None = None,
+        include_intra_doc: bool = False,
+    ) -> list[dict]:
+        """Return every edge whose source AND target both fall within ``doc_ids``.
+
+        Single SQL roundtrip — avoids the N+1 pattern from calling
+        ``get_edges_from`` once per chunk. Used by the multi-doc chunk graph
+        endpoint.
+
+        - ``relations``: optional whitelist (e.g. ``["similar_to"]``)
+        - ``include_intra_doc``: when False, drop edges where source_doc_id ==
+          target_doc_id so callers see cross-doc relationships only
+        """
+        if not doc_ids:
+            return []
+        stmt = select(ChunkEdgeModel).where(
+            ChunkEdgeModel.source_doc_id.in_(doc_ids),
+            ChunkEdgeModel.target_doc_id.in_(doc_ids),
+        )
+        if relations:
+            stmt = stmt.where(ChunkEdgeModel.relation.in_(relations))
+        if not include_intra_doc:
+            stmt = stmt.where(
+                ChunkEdgeModel.source_doc_id != ChunkEdgeModel.target_doc_id,
+            )
+        result = await self._db.execute(stmt)
+        return [
+            {
+                "source_doc_id": e.source_doc_id,
+                "source_chunk_index": e.source_chunk_index,
+                "target_doc_id": e.target_doc_id,
+                "target_chunk_index": e.target_chunk_index,
+                "relation": e.relation,
+                "score": float(e.score) if e.score is not None else 1.0,
+            }
+            for e in result.scalars().all()
+        ]
+
     async def get_edges_to(
         self, doc_id: str, chunk_index: int, relations: list[str] | None = None,
     ) -> list[dict]:

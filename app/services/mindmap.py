@@ -12,6 +12,7 @@ Design: see docs/plans/2026-04-22-mindmap-v0.md
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 
 from langchain_core.documents import Document
@@ -26,7 +27,7 @@ from pathlib import Path
 from langchain_core.language_models import BaseChatModel
 
 from app.models.schemas import (
-    MindmapNode, MindmapTree, MindmapTreeResponse,
+    MindmapNode, MindmapPalette, MindmapTree, MindmapTreeResponse,
 )
 
 
@@ -198,6 +199,31 @@ def _parse_node(node, valid_indices: set[int], depth: int) -> MindmapNode | None
     return MindmapNode(name=name, chunk_indices=validated, children=None)
 
 
+_HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def _validate_palette(raw, branch_count: int) -> MindmapPalette | None:
+    """Validate the LLM's palette block. Returns None if missing or malformed
+    so the renderer can fall back to its default palette. Requires every hex
+    value to be a 6-character #rrggbb string and the branches list to match
+    the actual branch count (truncate or pad as needed)."""
+    if not isinstance(raw, dict):
+        return None
+    central = raw.get("central")
+    if not isinstance(central, str) or not _HEX_RE.match(central):
+        return None
+    raw_branches = raw.get("branches", [])
+    if not isinstance(raw_branches, list):
+        raw_branches = []
+    branches = [b for b in raw_branches if isinstance(b, str) and _HEX_RE.match(b)]
+    # Align branch palette length to actual branch count: if LLM gave fewer,
+    # pad by repeating central; if more, truncate.
+    if len(branches) < branch_count:
+        branches = branches + [central] * (branch_count - len(branches))
+    branches = branches[:branch_count]
+    return MindmapPalette(central=central, branches=branches)
+
+
 def _parse_tree_response(text: str, valid_indices: set[int]) -> MindmapTree:
     """Parse LLM output into a MindmapTree. Strips markdown fences,
     validates chunk_indices against the known set, recursively descends
@@ -225,7 +251,9 @@ def _parse_tree_response(text: str, valid_indices: set[int]) -> MindmapTree:
         if node is not None:
             branches.append(node)
 
-    return MindmapTree(central=central, branches=branches)
+    palette = _validate_palette(parsed.get("palette"), len(branches))
+
+    return MindmapTree(central=central, branches=branches, palette=palette)
 
 
 def _load_cached_tree(doc_id: str) -> MindmapTree | None:

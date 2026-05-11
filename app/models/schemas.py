@@ -280,10 +280,23 @@ MindmapLeaf = MindmapNode
 MindmapBranch = MindmapNode
 
 
+class MindmapPalette(BaseModel):
+    """LLM-suggested colours for one document.
+
+    `central` is the doc's identity colour, also used as the doc colour in
+    the multi-doc chunk graph. `branches` must match the branch count one-
+    for-one; if the LLM returns the wrong count we fall back to a default
+    palette in the renderer.
+    """
+    central: str                       # #rrggbb hex
+    branches: list[str] = []           # parallel to MindmapTree.branches
+
+
 class MindmapTree(BaseModel):
     """The LLM-derived hierarchical structure for one document."""
     central: str              # central theme (1-line)
     branches: list[MindmapNode]
+    palette: MindmapPalette | None = None  # added 2026-05-11; older caches load with None
 
 
 class MindmapTreeResponse(BaseModel):
