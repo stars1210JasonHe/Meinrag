@@ -16,8 +16,8 @@ Upload a corpus, browse it visually, ask questions in natural language, and get 
 ### Four pages, one app
 - **Dashboard** — sunburst over a 3-layer taxonomy (primary category → sub-tags → user collections). Hover a wedge to see the docs in it; click to scope queries. Smart server-side search (filename / category / subtags / summary for short queries; semantic FAISS for long).
 - **Chat** — streaming answers with `[N]` citations that open the right doc, scroll to the chunk, and bbox-highlight. Multi-doc selection, saved collections, persistent sessions, **pinnable doc tabs** (refuses to close until unpinned).
-- **Graph** — cross-doc similarity graph with weighted edges (thickness = supporting chunk pairs, opacity = mean similarity). Typeahead doc picker with Recent / Collections / Documents sections. Drill into a chunk → "Open chunk" lands you in chat with the PDF highlighted and a primed question.
-- **Mind map** — LLM-derived concept tree per document. 3 layers by default; auto-deepens to 4 where content earns it.
+- **Graph** — cross-doc similarity graph with weighted edges, tiered by strength (strong = solid signature-blue, weak = dashed faint gray). Typeahead doc picker with Recent / Collections / Documents sections. Drill into a chunk → "Open chunk" lands you in chat with the PDF highlighted and a primed question. **Multi-doc chunk view** (toggle from the toolbar when 2+ docs are selected): renders every chunk from N docs in one canvas, colour-coded by doc, shape-coded by chunk type (text=circle, table=square, figure=triangle, formula=diamond), with a keyword filter to answer "do all 3 papers mention X?" at a glance.
+- **Mind map** — LLM-derived concept tree per document. 3 layers by default; auto-deepens to 4 where content earns it. The LLM also suggests a per-doc colour palette that the multi-doc chunk graph uses as the doc-identity colour.
 
 ### Retrieval
 - Hybrid search (BM25 + dense vectors via Reciprocal Rank Fusion)
@@ -270,6 +270,7 @@ Common request body fields:
 ### Graph
 - `GET /graph/documents` — corpus-level graph: doc nodes + aggregated cross-doc similarity edges (with `supporting_pairs` + `mean_score`)
 - `GET /graph/nodes?doc_id=...` — chunk-level graph for one doc
+- `GET /graph/nodes-multi?doc_ids=A,B,C&edge_types=&include_intra_doc=` — chunk-level graph across N docs (max 10) in one round-trip; powers the multi-doc Chunk view
 - `GET /graph/neighbors?doc_id=...&chunk_index=...&hops=...` — neighbourhood subgraph
 
 ### Sessions
