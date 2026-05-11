@@ -171,6 +171,44 @@ export default function MultiDocChunkBody({
   // Node sizing: smaller in dense multi-doc views so the canvas isn't a blob.
   const baseRadius = 5
 
+  // doc_id → filename for tooltip rendering (avoid scanning documents prop
+  // on every node).
+  const docNameById = useMemo(() => {
+    const map = {}
+    for (const d of (documents || [])) map[d.doc_id] = d.filename
+    return map
+  }, [documents])
+
+  // Hover tooltip content. force-graph-2d renders this as an HTML
+  // floating panel pinned to the cursor. Without it, nodes were opaque
+  // shapes — user couldn't tell which chunk was which.
+  const nodeLabel = useCallback((node) => {
+    const filename = docNameById[node.doc_id] || node.doc_id
+    const ctype = node.chunk_type || 'text'
+    const preview = (node.summary_preview || node.content_preview || '')
+      .slice(0, 140)
+      .replace(/</g, '&lt;')
+    const safeFilename = String(filename).replace(/</g, '&lt;')
+    return `
+      <div style="
+        max-width: 320px;
+        padding: 8px 10px;
+        background: var(--bg-1, #0c0c0f);
+        color: var(--fg, #f4f2ee);
+        border: 1px solid var(--border-strong, rgba(255,255,255,0.18));
+        border-radius: 6px;
+        font-size: 12px;
+        line-height: 1.35;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+      ">
+        <div style="font-weight: 600; margin-bottom: 4px;">${safeFilename}</div>
+        <div style="opacity: 0.65; margin-bottom: 6px;">chunk #${node.chunk_index} · ${ctype}</div>
+        <div style="opacity: 0.85;">${preview || '<em>(no preview)</em>'}</div>
+        <div style="margin-top: 6px; opacity: 0.55; font-size: 11px;">click → open in chat</div>
+      </div>
+    `
+  }, [docNameById])
+
   if (docIds.length === 0) return null
 
   return (
@@ -273,6 +311,7 @@ export default function MultiDocChunkBody({
         height={height}
         backgroundColor={canvasBg}
         nodeRelSize={baseRadius}
+        nodeLabel={nodeLabel}
         nodeCanvasObject={(node, ctx, globalScale) => {
           const radius = baseRadius
           const docColor = docColorMap[node.doc_id] || '#888'
