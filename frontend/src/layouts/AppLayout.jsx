@@ -199,23 +199,27 @@ export default function AppLayout() {
           ))}
         </div>
 
+        {/* Footer: stack ThemeToggle / LanguageSwitcher / collapse-chevron
+            vertically so each w-full button gets a full sidebar-width row.
+            Pre-2026-04-27 layout did this; the F02 redesign collapsed them
+            into a single horizontal row, which clipped the language icon
+            off-screen when the sidebar was narrow (the buttons each demand
+            ~50 px and competed for ~40 px of usable width). */}
         <div
-          className="border-t flex items-center justify-between px-2 py-1.5"
+          className="border-t"
           style={{ borderColor: 'var(--border)' }}
         >
-          <div className="flex items-center gap-1">
-            <ThemeToggle />
-            <LanguageSwitcher />
-          </div>
+          <ThemeToggle />
+          <LanguageSwitcher />
           <button
             type="button"
             onClick={() => setCollapsed(c => !c)}
-            className="p-1.5 rounded transition-colors hover:bg-white/5"
+            className="flex items-center gap-3 px-4 py-2.5 text-sm transition-colors opacity-60 hover:opacity-100 w-full"
             title={collapsed ? t('nav.expandSidebar') : t('nav.collapseSidebar')}
             aria-label={collapsed ? t('nav.expandSidebar') : t('nav.collapseSidebar')}
             style={{ color: 'var(--fg-faint)' }}
           >
-            {collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+            {collapsed ? <ChevronRight size={18} className="shrink-0" /> : <ChevronLeft size={18} className="shrink-0" />}
           </button>
         </div>
       </nav>
