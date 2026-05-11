@@ -3,12 +3,13 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import ForceGraph2D from 'react-force-graph-2d'
-import { FileText, Table2, Image, Calculator, ExternalLink, MessageSquare, X, Network, GitBranch } from 'lucide-react'
+import { FileText, Table2, Image, Calculator, ExternalLink, MessageSquare, X, Network, GitBranch, Boxes } from 'lucide-react'
 import { fetchGraphDocuments, fetchGraphNodes, fetchDocuments, fetchTaxonomy, fetchDocumentChunks } from '@/lib/api'
 import DocCombobox from '@/components/DocCombobox'
 import { cn } from '@/lib/utils'
 import ContextMenu from '@/components/ContextMenu'
 import MindmapTree from '@/components/MindmapTree'
+import MultiDocChunkBody from '@/components/MultiDocChunkBody'
 import { useDocMindmap } from '@/hooks/useDocMindmap'
 
 const USER_ID = 'admin'
@@ -112,6 +113,11 @@ export default function GraphPage() {
   const urlChunk = searchParams.get('chunk')
   const urlChunkId = urlChunk != null ? Number(urlChunk) : null
 
+  // 'view' is only meaningful in multi-doc mode. 'chunk' renders the new
+  // chunk-level view (MultiDocChunkBody); 'doc' (default) keeps the legacy
+  // doc-level filtered view that was already shipping pre-2026-05-11.
+  const view = (multiDocIds && searchParams.get('view') === 'chunk') ? 'chunk' : 'doc'
+
   const setMode = useCallback((next) => {
     setSearchParams(prev => {
       const params = new URLSearchParams(prev)
@@ -121,7 +127,25 @@ export default function GraphPage() {
     })
   }, [setSearchParams])
 
+  const setView = useCallback((next) => {
+    setSearchParams(prev => {
+      const params = new URLSearchParams(prev)
+      if (next === 'doc') params.delete('view')
+      else params.set('view', next)
+      return params
+    })
+  }, [setSearchParams])
+
   const navigate = useNavigate()
+  // Edge UX detail: arriving with a single-element ?docs=A pre-selection
+  // is functionally the same as /graph/A — bounce to the single-doc URL
+  // so all the single-doc-specific behaviour (mindmap toggle, edge filter)
+  // is enabled.
+  useEffect(() => {
+    if (multiDocIds && multiDocIds.length === 1) {
+      navigate(`/graph/${multiDocIds[0]}`, { replace: true })
+    }
+  }, [multiDocIds, navigate])
   const { t } = useTranslation()
   const graphRef = useRef(null)
   const containerRef = useRef(null)
@@ -575,6 +599,45 @@ export default function GraphPage() {
           </button>
         </div>
 
+        {/* Multi-doc view toggle: only when 2+ docs are selected. Switches
+            between the legacy doc-level filtered view and the new chunk-
+            level cross-doc view. */}
+        {multiDocIds && multiDocIds.length >= 2 && (
+          <div
+            role="tablist"
+            aria-label={t('graph.viewToggleAria', { defaultValue: 'Multi-doc view' })}
+            className="flex items-center border rounded-md overflow-hidden text-xs"
+            style={{ borderColor: 'var(--border-strong, rgba(255,255,255,0.14))' }}
+          >
+            <button
+              role="tab"
+              aria-selected={view === 'doc'}
+              onClick={() => setView('doc')}
+              className={cn(
+                'flex items-center gap-1 px-2.5 py-1 transition-colors',
+                view === 'doc' ? 'bg-white/10' : 'opacity-60 hover:opacity-100',
+              )}
+              style={{ color: 'var(--fg, #f4f2ee)' }}
+            >
+              <Network size={12} />
+              {t('graph.viewDoc', { defaultValue: 'Doc' })}
+            </button>
+            <button
+              role="tab"
+              aria-selected={view === 'chunk'}
+              onClick={() => setView('chunk')}
+              className={cn(
+                'flex items-center gap-1 px-2.5 py-1 transition-colors',
+                view === 'chunk' ? 'bg-white/10' : 'opacity-60 hover:opacity-100',
+              )}
+              style={{ color: 'var(--fg, #f4f2ee)' }}
+            >
+              <Boxes size={12} />
+              {t('graph.viewChunk', { defaultValue: 'Chunk' })}
+            </button>
+          </div>
+        )}
+
         <span className="opacity-30 text-xs">|</span>
 
         {Object.entries(NODE_COLORS).filter(([k]) => k !== 'document').map(([type, color]) => (
@@ -648,7 +711,22 @@ export default function GraphPage() {
             {t('graph.loadingGraph')}
           </div>
         )}
-        {mode === 'graph' && graphFormatted.nodes.length > 0 && (
+        {/* Multi-doc chunk view — drives off the URL ?view=chunk param,
+            uses its own data fetch + renderer. Skipping the parent
+            ForceGraph2D entirely is intentional: the legacy doc-level
+            view has very different visual semantics (colour-by-edge-type,
+            EDGE_TYPES filter) and bolting both onto one canvas got
+            unreadable in the design discussion. */}
+        {mode === 'graph' && view === 'chunk' && multiDocIds && multiDocIds.length >= 2 && (
+          <MultiDocChunkBody
+            docIds={multiDocIds}
+            documents={docList}
+            includeIntraDoc={false}
+            width={dimensions.width}
+            height={dimensions.height - (selectedNode ? 140 : 0)}
+          />
+        )}
+        {mode === 'graph' && view === 'doc' && graphFormatted.nodes.length > 0 && (
           <ForceGraph2D
             ref={graphRef}
             graphData={graphFormatted}

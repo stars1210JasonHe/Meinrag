@@ -118,6 +118,20 @@ export const fetchGraphNodes = (docId, edgeTypes, userId) => {
   return apiFetch(`/graph/nodes${params}`, { headers: headers(userId) })
 }
 
+// Multi-doc chunk-level graph (new in 2026-05-11). Returns chunks + edges
+// from N user-owned docs in one call. The backend silently drops docs the
+// user doesn't own and caps at MULTI_DOC_MAX=10.
+export const fetchGraphNodesMulti = (docIds, opts = {}, userId) => {
+  const { edgeTypes = 'similar_to', includeIntraDoc = false } = opts
+  const ids = Array.isArray(docIds) ? docIds.join(',') : docIds
+  const params = new URLSearchParams({
+    doc_ids: ids,
+    edge_types: edgeTypes,
+    include_intra_doc: includeIntraDoc ? 'true' : 'false',
+  })
+  return apiFetch(`/graph/nodes-multi?${params.toString()}`, { headers: headers(userId) })
+}
+
 export const fetchGraphNeighbors = (docId, chunkIndex, hops, userId) =>
   apiFetch(`/graph/neighbors?doc_id=${docId}&chunk_index=${chunkIndex}&hops=${hops || 1}`, { headers: headers(userId) })
 
