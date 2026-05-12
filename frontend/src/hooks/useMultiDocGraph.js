@@ -18,7 +18,11 @@ const USER_ID = 'admin'
  * yet, the call may take 15-25 s. We don't block graph render on it —
  * docs without a palette fall back to a deterministic --mm-hue hash colour.
  */
-export function useMultiDocGraph(docIds, { includeIntraDoc = false, enabled = true } = {}) {
+export function useMultiDocGraph(docIds, {
+  includeIntraDoc = false,
+  edgeTypes = 'similar_to',
+  enabled = true,
+} = {}) {
   const ids = useMemo(
     () => (Array.isArray(docIds) ? docIds.filter(Boolean) : []),
     [docIds],
@@ -26,8 +30,8 @@ export function useMultiDocGraph(docIds, { includeIntraDoc = false, enabled = tr
   const idsKey = ids.join(',')
 
   const graphQuery = useQuery({
-    queryKey: ['graph-nodes-multi', idsKey, includeIntraDoc],
-    queryFn: () => fetchGraphNodesMulti(ids, { includeIntraDoc }, USER_ID),
+    queryKey: ['graph-nodes-multi', idsKey, includeIntraDoc, edgeTypes],
+    queryFn: () => fetchGraphNodesMulti(ids, { includeIntraDoc, edgeTypes }, USER_ID),
     enabled: enabled && ids.length > 0,
     staleTime: 5 * 60_000,
   })

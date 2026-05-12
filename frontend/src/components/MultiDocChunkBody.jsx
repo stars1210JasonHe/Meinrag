@@ -35,6 +35,7 @@ export default function MultiDocChunkBody({
   docIds,
   documents,
   includeIntraDoc = false,
+  edgeTypes = 'similar_to',
   filter = '',
   onFilterChange,
   width,
@@ -58,7 +59,7 @@ export default function MultiDocChunkBody({
 
   const { graphData, isLoading, paletteByDocId, palettesLoading } = useMultiDocGraph(
     docIds,
-    { includeIntraDoc, enabled: docIds.length > 0 },
+    { includeIntraDoc, edgeTypes, enabled: docIds.length > 0 },
   )
 
   // Theme tick so we re-resolve CSS vars on theme switch.

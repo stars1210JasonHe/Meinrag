@@ -737,22 +737,45 @@ export default function GraphPage() {
 
         <span className="opacity-20" style={{ color: 'var(--fg, #f4f2ee)' }}>|</span>
 
-        {EDGE_TYPES.map(type => (
-          <button
-            key={type}
-            onClick={() => setEdgeFilter(f => ({ ...f, [type]: !f[type] }))}
-            className={cn('flex items-center gap-1 text-xs px-1.5 py-0.5 rounded transition-opacity',
-              edgeFilter[type] ? 'opacity-100' : 'opacity-30'
-            )}
-            style={{
-              backgroundColor: edgeFilter[type] ? 'var(--border-strong, rgba(255,255,255,0.14))' : 'transparent',
-              color: 'var(--fg, #f4f2ee)',
-            }}
-          >
-            <span className="w-3 h-0.5 inline-block rounded" style={{ backgroundColor: EDGE_COLORS[type] }} />
-            {t(`edgeType.${type}`)}
-          </button>
-        ))}
+        {EDGE_TYPES.map(type => {
+          // In multi-doc chunk view, the 4 intra-doc edge types only have
+          // data when the user has explicitly opted into intra-doc edges
+          // (the parent toggle). Visually disable the chips otherwise so
+          // it's obvious why clicking them does nothing.
+          const multiDocChunkView = view === 'chunk' && multiDocIds && multiDocIds.length >= 2
+          const isIntraOnlyType = type !== 'similar_to'
+          const disabled = multiDocChunkView && isIntraOnlyType && !includeIntraDoc
+          return (
+            <button
+              key={type}
+              onClick={() => {
+                if (disabled) return
+                setEdgeFilter(f => ({ ...f, [type]: !f[type] }))
+              }}
+              disabled={disabled}
+              title={disabled
+                ? t('graph.intraEdgeDisabledHint', {
+                    defaultValue: 'Enable "Show intra-doc edges" first',
+                  })
+                : undefined}
+              className={cn(
+                'flex items-center gap-1 text-xs px-1.5 py-0.5 rounded transition-opacity',
+                disabled
+                  ? 'opacity-25 cursor-not-allowed'
+                  : edgeFilter[type] ? 'opacity-100' : 'opacity-30',
+              )}
+              style={{
+                backgroundColor: edgeFilter[type] && !disabled
+                  ? 'var(--border-strong, rgba(255,255,255,0.14))'
+                  : 'transparent',
+                color: 'var(--fg, #f4f2ee)',
+              }}
+            >
+              <span className="w-3 h-0.5 inline-block rounded" style={{ backgroundColor: EDGE_COLORS[type] }} />
+              {t(`edgeType.${type}`)}
+            </button>
+          )
+        })}
 
         <span className="opacity-20" style={{ color: 'var(--fg, #f4f2ee)' }}>|</span>
 
@@ -803,10 +826,23 @@ export default function GraphPage() {
             docIds={multiDocIds}
             documents={docList}
             includeIntraDoc={includeIntraDoc}
+            edgeTypes={(() => {
+              // In multi-doc chunk view, the active edge types are:
+              //   - always similar_to if its chip is on
+              //   - the 4 intra-doc types only if intra-doc is enabled
+              // This matches what the chip-disable rule lets the user
+              // toggle, and saves a wasted backend round-trip.
+              const types = EDGE_TYPES.filter(t => {
+                if (!edgeFilter[t]) return false
+                if (t === 'similar_to') return true
+                return includeIntraDoc
+              })
+              return types.length ? types.join(',') : 'similar_to'
+            })()}
             filter={urlFilter}
             onFilterChange={setUrlFilter}
             width={dimensions.width}
-            height={dimensions.height - (selectedNode ? 140 : 0)}
+            height={dimensions.height}
           />
         )}
         {mode === 'graph' && view === 'doc' && graphFormatted.nodes.length > 0 && (
