@@ -173,7 +173,10 @@
     "matchCount_other": "{{count}} 条匹配",
     "paletteLoading": "正在加载文档配色…",
     "focusOnThisDoc": "聚焦此文档",
-    "filterToSimilar": "过滤到相似块"
+    "filterToSimilar": "过滤到相似块",
+    "mindmapLoading_one": "正在为 {{count}} 篇文档合成概念树…（首次约 15–30 秒）",
+    "mindmapLoading_other": "正在为 {{count}} 篇文档合成概念树…（首次约 15–30 秒）",
+    "mindmapEmpty": "无法为这组文档合成概念树。它们可能没有足够的共同主题。"
   },
   "nodeType": {
     "text": "文本",

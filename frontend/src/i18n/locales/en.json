@@ -173,7 +173,10 @@
     "matchCount_other": "{{count}} matches",
     "paletteLoading": "Loading doc palettes…",
     "focusOnThisDoc": "Focus on this doc",
-    "filterToSimilar": "Filter to similar chunks"
+    "filterToSimilar": "Filter to similar chunks",
+    "mindmapLoading_one": "Synthesizing tree across {{count}} document… (first time, 15–30 s)",
+    "mindmapLoading_other": "Synthesizing tree across {{count}} documents… (first time, 15–30 s)",
+    "mindmapEmpty": "Couldn't synthesise a tree for this set. The documents may not share enough common ground."
   },
   "nodeType": {
     "text": "text",

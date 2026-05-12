@@ -139,6 +139,14 @@ export const fetchGraphNeighbors = (docId, chunkIndex, hops, userId) =>
 export const fetchDocMindmap = (docId, userId) =>
   apiFetch(`/documents/${docId}/mindmap`, { headers: headers(userId) })
 
+// Multi-doc mindmap — synthesised tree across N docs (added 2026-05-12).
+// First call per doc-id set takes 15-30 s (LLM); cache returns instant.
+export const fetchMultiDocMindmap = (docIds, userId) => {
+  const ids = Array.isArray(docIds) ? docIds.join(',') : docIds
+  return apiFetch(`/graph/mindmap-multi?doc_ids=${encodeURIComponent(ids)}`,
+                  { headers: headers(userId) })
+}
+
 // Query
 export const sendQuery = (question, options, userId) =>
   apiFetch('/query', {

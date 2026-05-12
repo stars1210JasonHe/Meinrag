@@ -10,7 +10,9 @@ import { cn } from '@/lib/utils'
 import ContextMenu from '@/components/ContextMenu'
 import MindmapTree from '@/components/MindmapTree'
 import MultiDocChunkBody from '@/components/MultiDocChunkBody'
+import MultiDocMindmapTree from '@/components/MultiDocMindmapTree'
 import { useDocMindmap } from '@/hooks/useDocMindmap'
+import { useMultiDocMindmap } from '@/hooks/useMultiDocMindmap'
 
 const USER_ID = 'admin'
 
@@ -281,6 +283,16 @@ export default function GraphPage() {
     isLoading: mindmapLoading,
     error: mindmapError,
   } = useDocMindmap(docId, { enabled: mode === 'mindmap' && Boolean(docId) })
+
+  // Multi-doc mindmap — only fetched when in mindmap mode AND 2+ docs.
+  // First call per doc-set is slow (LLM); cache makes subsequent instant.
+  const isMultiDocMindmap = mode === 'mindmap' && !docId
+    && Array.isArray(multiDocIds) && multiDocIds.length >= 2
+  const {
+    data: multiMindmapData,
+    isLoading: multiMindmapLoading,
+    error: multiMindmapError,
+  } = useMultiDocMindmap(multiDocIds, { enabled: isMultiDocMindmap })
 
   // All chunks for this doc — needed so a leaf-click can resolve chunk_index
   // to the full chunk shape the existing NodePanel expects.
@@ -648,8 +660,10 @@ export default function GraphPage() {
               mode === 'mindmap' ? 'bg-white/10' : 'opacity-60 hover:opacity-100',
             )}
             style={{ color: 'var(--fg, #f4f2ee)' }}
-            disabled={!docId}
-            title={!docId ? t('graph.modeMindmapNeedsDoc') : ''}
+            disabled={!docId && !(multiDocIds && multiDocIds.length >= 2)}
+            title={!docId && !(multiDocIds && multiDocIds.length >= 2)
+              ? t('graph.modeMindmapNeedsDoc')
+              : ''}
           >
             <GitBranch size={12} />
             {t('graph.modeMindmap')}
@@ -942,7 +956,74 @@ export default function GraphPage() {
             {t('graph.noGraphData')}
           </div>
         )}
-        {mode === 'mindmap' && !docId && (
+        {/* Multi-doc mindmap — synthesised tree across the selected
+            docs. Inherits the same renderer skeleton as single-doc but
+            paints coverage colour blocks on each leaf. */}
+        {isMultiDocMindmap && (() => {
+          const tree = multiMindmapData?.tree
+          if (multiMindmapLoading) {
+            return (
+              <div className="mm-skeleton">
+                <div className="text-sm">
+                  {t('multiDoc.mindmapLoading', {
+                    count: multiDocIds.length,
+                    defaultValue: `Synthesizing tree across ${multiDocIds.length} documents… (first time, 15–30 s)`,
+                  })}
+                </div>
+                <div className="mm-skeleton-lines" />
+                <div className="mm-skeleton-lines" />
+                <div className="mm-skeleton-lines" />
+              </div>
+            )
+          }
+          if (multiMindmapError) {
+            return (
+              <div className="mm-skeleton" role="alert">
+                <div className="text-sm">{t('graph.mindmapErrorTitle')}</div>
+                <div className="text-xs opacity-70">{t('graph.mindmapErrorBody')}</div>
+                <button onClick={() => setMode('graph')}
+                        className="text-xs underline hover:opacity-80"
+                        style={{ color: 'var(--signature, #5b7ec9)' }}>
+                  {t('graph.mindmapErrorFallback')}
+                </button>
+              </div>
+            )
+          }
+          if (!tree || (tree.branches?.length || 0) === 0) {
+            return (
+              <div className="mm-skeleton">
+                <div className="text-sm">{t('multiDoc.mindmapEmpty', {
+                  defaultValue: 'Couldn\'t synthesise a tree for this set. The documents may not share enough common ground.',
+                })}</div>
+              </div>
+            )
+          }
+          // Inject filename lookup so leaf tooltips can show "Covered by:
+          // filename_A, filename_B" instead of opaque doc_ids.
+          const nameByDocId = Object.fromEntries(
+            (docList || []).map(d => [d.doc_id, d.filename]),
+          )
+          const treeWithNames = { ...tree, __nameByDocId: nameByDocId }
+          return (
+            <MultiDocMindmapTree
+              tree={treeWithNames}
+              onLeafClick={(leafNode) => {
+                const chunksByDoc = leafNode.__chunks_by_doc || {}
+                const coverage = Object.keys(chunksByDoc)
+                if (coverage.length === 0) return
+                // Scope chat to all docs covering this leaf.
+                const params = new URLSearchParams({
+                  doc_ids: coverage.join(','),
+                  suggest: `Tell me about: ${leafNode.name}`,
+                })
+                navigate(`/chat?${params.toString()}`)
+              }}
+            />
+          )
+        })()}
+
+        {/* Legacy: mindmap mode but no doc + no multi-doc context */}
+        {mode === 'mindmap' && !docId && !isMultiDocMindmap && (
           <div className="absolute inset-0 flex items-center justify-center opacity-40"
                style={{ color: 'var(--fg, #f4f2ee)' }}>
             {t('graph.modeMindmapNeedsDoc')}
