@@ -239,6 +239,72 @@ MINDMAP_TREE_PROMPT = ChatPromptTemplate.from_messages([
     ("human", "Generate the mind map now."),
 ])
 
+
+# Multi-doc mindmap — same recursive tree shape as the single-doc prompt,
+# but leaves cite chunks via {doc_id: [chunk_indices]} so the renderer can
+# colour-block by which docs cover each concept.
+MULTI_MINDMAP_TREE_SYSTEM_PROMPT = """\
+You are building a hierarchical mind map that SYNTHESISES across multiple
+documents at once. The user is exploring what these documents have in
+common AND where they diverge.
+
+Documents (filename → doc_id):
+{doc_menu}
+
+Below are chunks from all the documents, each prefixed with its origin
+doc_id and chunk index. Your job: produce ONE concept hierarchy that
+captures the shared subject matter of the SET.
+
+Rules:
+1. Return ONLY a JSON object. No prose, no markdown fences.
+2. Schema (recursive — a child is EITHER a leaf with chunks_by_doc OR an
+   inner node with its own children, never both):
+{{
+  "central": "<one-line theme spanning the SET — not just one doc>",
+  "branches": [
+    {{
+      "name": "<top-level theme, 1-5 words>",
+      "children": [
+        // Either a LEAF:
+        {{"name": "<sub-concept, 1-8 words>",
+          "chunks_by_doc": {{"<doc_id>": [<int>, ...], "<doc_id>": [<int>]}}}},
+        // OR an INNER node (only when justified — see rule 5):
+        {{"name": "<sub-concept, 1-8 words>", "children": [
+          {{"name": "<sub-sub-concept, 1-8 words>",
+            "chunks_by_doc": {{"<doc_id>": [<int>, ...]}}}}
+        ]}}
+      ]
+    }}
+  ]
+}}
+3. 3-6 top-level branches. Each branch has 2-5 children.
+4. A child is normally a LEAF (chunks_by_doc, no children). Use leaves by default.
+5. A child MAY be an INNER node (children, no chunks_by_doc) ONLY IF:
+   - There are at least 3 distinct sub-sub-concepts that genuinely cluster within it, AND
+   - Each sub-sub-concept maps to its own subset of chunks.
+   When in doubt, prefer leaves — depth is a cost, not a virtue.
+6. Maximum depth is 4 (central → branch → child → optional grandchild). No deeper.
+7. Each leaf's chunks_by_doc:
+   - Keys are doc_ids from the menu above (NEVER invent doc_ids).
+   - Values are 1-5 chunk indices for that doc that support the concept.
+   - A leaf may cover ONE doc only (concept unique to one paper) or MANY docs
+     (concept shared across the set). Both are legitimate — don't pad coverage.
+   - A chunk index may appear in multiple leaves (ideas cross-cut).
+8. The `central` theme MUST capture what makes this SET cohere as a group,
+   not just one document. If the documents don't share enough common
+   ground, the central can name the broad area + "and related topics".
+9. Output language: match the predominant language of the chunks. If the
+   chunks span multiple languages, use the most common one.
+
+Chunks:
+{chunks}
+"""
+
+MULTI_MINDMAP_TREE_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", MULTI_MINDMAP_TREE_SYSTEM_PROMPT),
+    ("human", "Generate the multi-doc mind map now."),
+])
+
 def make_query_analyze_prompt(system_text: str) -> ChatPromptTemplate:
     """Create query analysis prompt from dynamic system text."""
     return ChatPromptTemplate.from_messages([

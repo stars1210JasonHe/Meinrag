@@ -935,4 +935,13 @@ async def delete_document(
         except Exception as e:
             logger.warning(f"Failed to remove mindmap cache for {doc_id}: {e}")
 
+    # Also sweep any multi-doc mindmap caches that included this doc —
+    # the synthesised tree would otherwise hold references to a deleted
+    # doc forever.
+    try:
+        from app.services.multi_mindmap import invalidate_caches_for_doc
+        invalidate_caches_for_doc(doc_id)
+    except Exception as e:
+        logger.warning(f"Failed to invalidate multi-mindmap caches for {doc_id}: {e}")
+
     return DeleteResponse(doc_id=doc_id, message="Document deleted successfully")

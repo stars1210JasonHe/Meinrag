@@ -299,6 +299,41 @@ class MindmapTree(BaseModel):
     palette: MindmapPalette | None = None  # added 2026-05-11; older caches load with None
 
 
+class MultiMindmapNode(BaseModel):
+    """A recursive node in the multi-doc concept tree.
+
+    Same shape as MindmapNode but the leaf chunk citations are grouped by
+    doc_id so the renderer can derive per-doc coverage in O(1) — needed
+    for the leaf-level colour blocks that visualise "do all N docs cover
+    this concept?".
+
+    LEAF:  chunks_by_doc populated, children None
+    INNER: children populated,    chunks_by_doc None
+    """
+    name: str
+    chunks_by_doc: dict[str, list[int]] | None = None
+    children: list["MultiMindmapNode"] | None = None
+
+
+class MultiMindmapTree(BaseModel):
+    """Synthesised hierarchical mindmap across N documents."""
+    central: str
+    branches: list[MultiMindmapNode]
+    # doc_id → #rrggbb hex. Resolved server-side by reading each doc's
+    # cached single-doc mindmap palette (falls back to a deterministic
+    # default if no mindmap is cached). Frontend renders coverage colour
+    # blocks straight from this map without doing its own palette plumbing.
+    palette: dict[str, str] = {}
+
+
+class MultiMindmapResponse(BaseModel):
+    """Full response for GET /graph/mindmap-multi."""
+    doc_ids: list[str]        # the docs the tree actually covers (may be
+                              # smaller than the request if some were unowned)
+    cached: bool              # served from data/mindmaps_multi/ cache?
+    tree: MultiMindmapTree
+
+
 class MindmapTreeResponse(BaseModel):
     """Full response for GET /documents/{doc_id}/mindmap (tree mode)."""
     doc_id: str
