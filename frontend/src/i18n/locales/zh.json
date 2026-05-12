@@ -153,7 +153,27 @@
     "mindmapErrorTitle": "无法为该文档生成思维导图。",
     "mindmapErrorBody": "图谱视图仍然可用。",
     "mindmapErrorFallback": "切换到图谱视图",
-    "mindmapEmpty": "文档太短，无法生成有意义的思维导图。"
+    "mindmapEmpty": "文档太短，无法生成有意义的思维导图。",
+    "viewToggleAria": "多文档视图",
+    "viewDoc": "文档级",
+    "viewChunk": "块级",
+    "intraDocToggleLabel": "显示文档内边",
+    "intraDocToggleHelp": "同时显示每篇文档内部的边（follows、references 等）",
+    "intraEdgeDisabledHint": "请先开启「显示文档内边」"
+  },
+  "multiDoc": {
+    "legendLabel": "图中的文档",
+    "docsHeader": "文档 ({{count}}) · {{chunks}} 块",
+    "loading": "正在加载 {{count}} 篇文档…",
+    "empty": "选中的文档没有找到任何块。可能正在处理中。",
+    "noCrossDocEdges": "这些文档之间没有发现跨文档相似边。试试开启「显示文档内边」查看各文档内部结构。",
+    "filterPlaceholder": "过滤块（例如「attention」）",
+    "filterClear": "清除",
+    "matchCount_one": "{{count}} 条匹配",
+    "matchCount_other": "{{count}} 条匹配",
+    "paletteLoading": "正在加载文档配色…",
+    "focusOnThisDoc": "聚焦此文档",
+    "filterToSimilar": "过滤到相似块"
   },
   "nodeType": {
     "text": "文本",

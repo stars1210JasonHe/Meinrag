@@ -153,7 +153,27 @@
     "mindmapErrorTitle": "Couldn't build the mind map for this document.",
     "mindmapErrorBody": "The force-graph view is still available.",
     "mindmapErrorFallback": "Switch to Graph view",
-    "mindmapEmpty": "This document is too short to build a useful mind map."
+    "mindmapEmpty": "This document is too short to build a useful mind map.",
+    "viewToggleAria": "Multi-doc view",
+    "viewDoc": "Doc",
+    "viewChunk": "Chunk",
+    "intraDocToggleLabel": "Show intra-doc edges",
+    "intraDocToggleHelp": "Also show edges within each document (follows, references, …)",
+    "intraEdgeDisabledHint": "Enable \"Show intra-doc edges\" first"
+  },
+  "multiDoc": {
+    "legendLabel": "Documents in graph",
+    "docsHeader": "Docs ({{count}}) · {{chunks}} chunks",
+    "loading": "Loading {{count}} documents…",
+    "empty": "No chunks found across the selected documents. They may still be processing.",
+    "noCrossDocEdges": "No cross-doc similarities found between these documents. Try toggling \"Show intra-doc edges\" to see each doc's internal structure.",
+    "filterPlaceholder": "Filter chunks (e.g., \"attention\")",
+    "filterClear": "Clear",
+    "matchCount_one": "{{count}} match",
+    "matchCount_other": "{{count}} matches",
+    "paletteLoading": "Loading doc palettes…",
+    "focusOnThisDoc": "Focus on this doc",
+    "filterToSimilar": "Filter to similar chunks"
   },
   "nodeType": {
     "text": "text",
