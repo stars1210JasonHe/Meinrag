@@ -228,24 +228,6 @@ export default function GraphPage() {
   ) // 'all' | 'collection' | 'doc' | 'docs'
   const [scopeLabel, setScopeLabel] = useState('')
 
-  // Sync scope state when the URL :docId changes — e.g. when the user
-  // clicks a document node in the all-docs view and we navigate(/graph/<id>).
-  // Without this, scope stayed at its initial value and the graph query
-  // never re-fetched.
-  useEffect(() => {
-    if (docId) {
-      setScope(docId)
-      setScopeType('doc')
-    } else if (multiDocIds) {
-      setScopeType('docs')
-      setScope('')
-    } else {
-      setScope('')
-      setScopeType('all')
-      setScopeLabel('')
-    }
-  }, [docId, multiDocsParam])
-
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
   // Track theme so the force-graph canvas background re-renders on toggle
   const [themeTick, setThemeTick] = useState(0)
@@ -261,6 +243,29 @@ export default function GraphPage() {
     queryKey: ['documents', USER_ID],
     queryFn: () => fetchDocuments(USER_ID),
   })
+
+  // Sync scope state when the URL :docId changes — e.g. when the user
+  // clicks a document node in the all-docs view and we navigate(/graph/<id>).
+  // Without this, scope stayed at its initial value and the graph query
+  // never re-fetched. `documents` is in the deps so the breadcrumb filename
+  // fills in once documents finish loading. Must run after the useQuery
+  // above so `documents` isn't in TDZ when read here.
+  useEffect(() => {
+    if (docId) {
+      setScope(docId)
+      setScopeType('doc')
+      const doc = (Array.isArray(documents?.documents) ? documents.documents
+        : Array.isArray(documents) ? documents : []).find(d => d.doc_id === docId)
+      setScopeLabel(doc?.filename || docId)
+    } else if (multiDocIds) {
+      setScopeType('docs')
+      setScope('')
+    } else {
+      setScope('')
+      setScopeType('all')
+      setScopeLabel('')
+    }
+  }, [docId, multiDocsParam, documents])
 
   const { data: taxonomyData } = useQuery({
     queryKey: ['taxonomy', USER_ID],
@@ -600,12 +605,20 @@ export default function GraphPage() {
     setSelectedNode(null)
     if (!value) {
       setScope(''); setScopeType('all'); setScopeLabel('')
+      // If we arrived here via a URL like /graph/<docId>, state alone
+      // isn't enough — the URL needs to clear too, otherwise refreshing
+      // or sharing the link snaps back to the per-doc view.
+      if (docId || multiDocsParam) {
+        navigate('/graph')
+      }
     } else if (value.startsWith('col:')) {
       const col = value.slice(4)
       setScopeType('collection'); setScopeLabel(col); setScope('')
+      if (docId || multiDocsParam) navigate('/graph')
     } else {
       const doc = docList.find(d => d.doc_id === value)
       setScopeType('doc'); setScopeLabel(doc?.filename || value); setScope(value)
+      if (value !== docId) navigate(`/graph/${value}`)
     }
   }
 
