@@ -380,7 +380,7 @@ export default function GraphPage() {
     }))
     queryClient.invalidateQueries({ queryKey: ['taxonomy', USER_ID] })
     queryClient.invalidateQueries({ queryKey: ['documents', USER_ID] })
-  }, [selection, queryClient, t])
+  }, [selection, queryClient, t, setSaveDialogOpen])
 
   // For collection / multi-doc scope, filter document-level graph to matching docs
   const filteredGraphData = useMemo(() => {
@@ -466,6 +466,13 @@ export default function GraphPage() {
     if (node._data?.node_type === 'document') {
       const isModifierClick = !!(event && (event.shiftKey || event.ctrlKey || event.metaKey))
       if (isModifierClick) {
+        // Also clear any chunk-node pin/highlight so the lingering tint
+        // doesn't confuse the user during multi-select.
+        clearTimeout(clickTimerRef.current)
+        setSelectedNode(null)
+        setPinnedNode(null)
+        setHighlightNodes(new Set())
+        setHighlightLinks(new Set())
         selection.toggleDoc(node._data.doc_id)
         return
       }
