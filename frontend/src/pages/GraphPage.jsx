@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import ForceGraph2D from 'react-force-graph-2d'
-import { FileText, Table2, Image, Calculator, ExternalLink, MessageSquare, X, Network, GitBranch, Boxes } from 'lucide-react'
+import { FileText, Table2, Image, Calculator, ExternalLink, MessageSquare, X, Network, GitBranch, Boxes, Plus, Minus } from 'lucide-react'
 import { fetchGraphDocuments, fetchGraphNodes, fetchDocuments, fetchTaxonomy, fetchDocumentChunks } from '@/lib/api'
 import DocCombobox from '@/components/DocCombobox'
 import { cn } from '@/lib/utils'
@@ -11,6 +12,9 @@ import ContextMenu from '@/components/ContextMenu'
 import MindmapTree from '@/components/MindmapTree'
 import MultiDocChunkBody from '@/components/MultiDocChunkBody'
 import MultiDocMindmapTree from '@/components/MultiDocMindmapTree'
+import SelectionActionBar from '@/components/SelectionActionBar'
+import SaveCollectionDialog from '@/components/SaveCollectionDialog'
+import { useSelection } from '@/hooks/useSelection'
 import { useDocMindmap } from '@/hooks/useDocMindmap'
 import { useMultiDocMindmap } from '@/hooks/useMultiDocMindmap'
 
@@ -342,6 +346,42 @@ export default function GraphPage() {
     return groups
   }, [docList])
 
+  // Multi-select state — same global hook the Dashboard uses, so picks
+  // here carry over to /chat or back to /dashboard via localStorage.
+  const selection = useSelection()
+  const queryClient = useQueryClient()
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false)
+
+  const selectedDocIds = useMemo(
+    () => selection.expandedDocIds(docsByCollection),
+    [selection, docsByCollection],
+  )
+
+  const handleSelectionAsk = useCallback(() => {
+    if (selectedDocIds.length === 0) return
+    navigate(`/chat?doc_ids=${selectedDocIds.join(',')}`)
+  }, [selectedDocIds, navigate])
+
+  const handleSelectionVisualize = useCallback(() => {
+    if (selectedDocIds.length === 0) return
+    navigate(`/graph?docs=${selectedDocIds.join(',')}`)
+  }, [selectedDocIds, navigate])
+
+  const handleSelectionSave = useCallback(() => {
+    if (selectedDocIds.length < 2) return
+    setSaveDialogOpen(true)
+  }, [selectedDocIds])
+
+  const handleSavedSuccess = useCallback((name) => {
+    setSaveDialogOpen(false)
+    selection.clear()
+    toast.success(t('selection.saveSuccess', {
+      name, defaultValue: `Saved collection "${name}"`,
+    }))
+    queryClient.invalidateQueries({ queryKey: ['taxonomy', USER_ID] })
+    queryClient.invalidateQueries({ queryKey: ['documents', USER_ID] })
+  }, [selection, queryClient, t])
+
   // For collection / multi-doc scope, filter document-level graph to matching docs
   const filteredGraphData = useMemo(() => {
     if (!graphData) return graphData
@@ -419,12 +459,16 @@ export default function GraphPage() {
     return { neighbors, links }
   }, [graphFormatted.links])
 
-  const handleNodeClick = useCallback((node) => {
-    // Document node: navigate so the URL reflects the per-doc view.
-    // Was setScope(...) which only updated local state, leaving the URL
-    // at /graph and the Mind Map toggle disabled (because that toggle
-    // is gated on useParams().docId).
+  const handleNodeClick = useCallback((node, event) => {
+    // Document node: with shift/ctrl/meta held, toggle the doc in the
+    // global selection instead of drilling in. Plain click stays as the
+    // primary drill-in action so muscle memory isn't broken.
     if (node._data?.node_type === 'document') {
+      const isModifierClick = !!(event && (event.shiftKey || event.ctrlKey || event.metaKey))
+      if (isModifierClick) {
+        selection.toggleDoc(node._data.doc_id)
+        return
+      }
       clearTimeout(clickTimerRef.current)
       setSelectedNode(null)
       setPinnedNode(null)
@@ -464,7 +508,7 @@ export default function GraphPage() {
       setHighlightNodes(neighbors)
       setHighlightLinks(links)
     }
-  }, [graphFormatted.links, pinnedNode, navigate, computeNeighbors])
+  }, [graphFormatted.links, pinnedNode, navigate, computeNeighbors, selection.docs])
 
   const handleBackgroundClick = useCallback(() => {
     setSelectedNode(null)
@@ -481,11 +525,18 @@ export default function GraphPage() {
     const items = []
 
     if (node._data?.node_type === 'document') {
+      const docId = node._data.doc_id
+      const isSelected = selection.hasDoc(docId)
       items.push(
-        { label: t('graph.exploreChunks'), icon: Network, action: () => navigate(`/graph/${node._data.doc_id}`) },
-        { label: t('graph.viewAsMindmap', { defaultValue: 'View as Mind Map' }), icon: GitBranch, action: () => navigate(`/graph/${node._data.doc_id}?mode=mindmap`) },
-        { label: t('dashboard.chatAboutThis'), icon: MessageSquare, action: () => navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.source_file || '')}`) },
-        { label: t('dashboard.openInPdf'), icon: ExternalLink, action: () => navigate(`/pdf/${node._data.doc_id}`) },
+        isSelected
+          ? { label: t('graph.removeFromSelection', { defaultValue: 'Remove from selection' }),
+              icon: Minus, action: () => selection.toggleDoc(docId) }
+          : { label: t('graph.addToSelection', { defaultValue: 'Add to selection' }),
+              icon: Plus, action: () => selection.toggleDoc(docId) },
+        { label: t('graph.exploreChunks'), icon: Network, action: () => navigate(`/graph/${docId}`) },
+        { label: t('graph.viewAsMindmap', { defaultValue: 'View as Mind Map' }), icon: GitBranch, action: () => navigate(`/graph/${docId}?mode=mindmap`) },
+        { label: t('dashboard.chatAboutThis'), icon: MessageSquare, action: () => navigate(`/chat?doc=${docId}&name=${encodeURIComponent(node._data.source_file || '')}`) },
+        { label: t('dashboard.openInPdf'), icon: ExternalLink, action: () => navigate(`/pdf/${docId}`) },
       )
     } else {
       items.push(
@@ -499,7 +550,7 @@ export default function GraphPage() {
     items.push({ label: t('common.cancel'), action: () => {} })
 
     setContextMenu({ x: event.clientX, y: event.clientY, items })
-  }, [navigate, handleNodeClick])
+  }, [navigate, handleNodeClick, selection.docs, t])
 
   const handleNodeHover = useCallback((node) => {
     setHoverNode(node || null)
@@ -555,6 +606,20 @@ export default function GraphPage() {
       ctx.closePath()
       ctx.fillStyle = '#4f52c5'
       ctx.fill()
+      // Multi-select ring — signature-blue stroke around the paper if
+      // this doc is in the global selection.
+      if (selection.hasDoc(node._data.doc_id)) {
+        ctx.beginPath()
+        ctx.moveTo(x - w/2, y - h/2)
+        ctx.lineTo(x + w/2 - fold, y - h/2)
+        ctx.lineTo(x + w/2, y - h/2 + fold)
+        ctx.lineTo(x + w/2, y + h/2)
+        ctx.lineTo(x - w/2, y + h/2)
+        ctx.closePath()
+        ctx.strokeStyle = cssVar('--signature', '#5b7ec9')
+        ctx.lineWidth = 2
+        ctx.stroke()
+      }
     } else {
       ctx.beginPath()
       ctx.arc(node.x, node.y, r, 0, Math.PI * 2)
@@ -582,7 +647,7 @@ export default function GraphPage() {
     }
 
     ctx.globalAlpha = 1.0
-  }, [activeNode, highlightNodes, selectedNode])
+  }, [activeNode, highlightNodes, selectedNode, selection.docs])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -1095,6 +1160,21 @@ export default function GraphPage() {
           </div>
         </div>
       )}
+
+      {/* Multi-select action bar — same global selection state Dashboard uses */}
+      <SelectionActionBar
+        documents={docList}
+        onAsk={handleSelectionAsk}
+        onVisualize={handleSelectionVisualize}
+        onSave={handleSelectionSave}
+      />
+      <SaveCollectionDialog
+        open={saveDialogOpen}
+        count={selectedDocIds.length}
+        docIds={selectedDocIds}
+        onClose={() => setSaveDialogOpen(false)}
+        onSaved={handleSavedSuccess}
+      />
     </div>
   )
 }

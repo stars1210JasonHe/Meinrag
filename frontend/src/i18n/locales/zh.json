@@ -159,7 +159,9 @@
     "viewChunk": "块级",
     "intraDocToggleLabel": "显示文档内边",
     "intraDocToggleHelp": "同时显示每篇文档内部的边（follows、references 等）",
-    "intraEdgeDisabledHint": "请先开启「显示文档内边」"
+    "intraEdgeDisabledHint": "请先开启「显示文档内边」",
+    "addToSelection": "添加到选择",
+    "removeFromSelection": "从选择移除"
   },
   "multiDoc": {
     "legendLabel": "图中的文档",

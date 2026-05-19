@@ -159,7 +159,9 @@
     "viewChunk": "Chunk",
     "intraDocToggleLabel": "Show intra-doc edges",
     "intraDocToggleHelp": "Also show edges within each document (follows, references, …)",
-    "intraEdgeDisabledHint": "Enable \"Show intra-doc edges\" first"
+    "intraEdgeDisabledHint": "Enable \"Show intra-doc edges\" first",
+    "addToSelection": "Add to selection",
+    "removeFromSelection": "Remove from selection"
   },
   "multiDoc": {
     "legendLabel": "Documents in graph",
