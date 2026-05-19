@@ -161,7 +161,11 @@
     "intraDocToggleHelp": "Also show edges within each document (follows, references, …)",
     "intraEdgeDisabledHint": "Enable \"Show intra-doc edges\" first",
     "addToSelection": "Add to selection",
-    "removeFromSelection": "Remove from selection"
+    "removeFromSelection": "Remove from selection",
+    "mindmapLeafCoveredBy": "Covered by",
+    "mindmapLeafAskAi": "Ask AI about this",
+    "mindmapLeafChunks_one": "{{count}} chunk",
+    "mindmapLeafChunks_other": "{{count}} chunks"
   },
   "multiDoc": {
     "legendLabel": "Documents in graph",

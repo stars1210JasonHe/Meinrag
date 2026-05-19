@@ -161,7 +161,11 @@
     "intraDocToggleHelp": "同时显示每篇文档内部的边（follows、references 等）",
     "intraEdgeDisabledHint": "请先开启「显示文档内边」",
     "addToSelection": "添加到选择",
-    "removeFromSelection": "从选择移除"
+    "removeFromSelection": "从选择移除",
+    "mindmapLeafCoveredBy": "覆盖文档",
+    "mindmapLeafAskAi": "向 AI 提问",
+    "mindmapLeafChunks_one": "{{count}} 块",
+    "mindmapLeafChunks_other": "{{count}} 块"
   },
   "multiDoc": {
     "legendLabel": "图中的文档",

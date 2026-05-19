@@ -242,6 +242,11 @@ export default function GraphPage() {
   }, [])
   const canvasBg = useMemo(() => cssVar('--bg', '#08080a'), [themeTick])
   const [contextMenu, setContextMenu] = useState(null) // {x, y, items}
+  // Multi-doc mindmap: leaf click opens this preview panel instead of
+  // auto-navigating to chat. User clicks an explicit "Ask AI" button to
+  // confirm — matches single-doc mindmap's preview-then-commit flow.
+  // Shape: { name: string, chunksByDoc: { [doc_id]: number[] } } | null
+  const [mindmapLeaf, setMindmapLeaf] = useState(null)
 
   const { data: documents = [] } = useQuery({
     queryKey: ['documents', USER_ID],
@@ -656,6 +661,11 @@ export default function GraphPage() {
     ctx.globalAlpha = 1.0
   }, [activeNode, highlightNodes, selectedNode, selection.docs])
 
+  // Ref so the Esc handler can read the latest mindmapLeaf without
+  // forcing the keydown listener to re-register on every leaf toggle.
+  const mindmapLeafRef = useRef(mindmapLeaf)
+  useEffect(() => { mindmapLeafRef.current = mindmapLeaf }, [mindmapLeaf])
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e) => {
@@ -664,12 +674,27 @@ export default function GraphPage() {
         graphRef.current?.zoomToFit(300)
       }
       if (e.key === 'Escape') {
-        setSelectedNode(null)
+        // Tiered close: multi-doc mindmap leaf panel first, then chunk
+        // node preview. Otherwise Esc has nothing to do.
+        if (mindmapLeafRef.current) {
+          setMindmapLeaf(null)
+        } else {
+          setSelectedNode(null)
+        }
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [])
+
+  // Clear the mindmap leaf panel whenever the view is no longer a
+  // multi-doc mindmap — covers mode flip AND multiDocIds shrinking below
+  // 2 (e.g. user removes a doc from selection mid-session).
+  useEffect(() => {
+    if (!isMultiDocMindmap && mindmapLeaf) {
+      setMindmapLeaf(null)
+    }
+  }, [isMultiDocMindmap, mindmapLeaf])
 
   // (docList and collections moved up before filteredGraphData)
 
@@ -1093,15 +1118,13 @@ export default function GraphPage() {
             <MultiDocMindmapTree
               tree={treeWithNames}
               onLeafClick={(leafNode) => {
-                const chunksByDoc = leafNode.__chunks_by_doc || {}
-                const coverage = Object.keys(chunksByDoc)
-                if (coverage.length === 0) return
-                // Scope chat to all docs covering this leaf.
-                const params = new URLSearchParams({
-                  doc_ids: coverage.join(','),
-                  suggest: `Tell me about: ${leafNode.name}`,
+                // Open a preview panel instead of auto-navigating —
+                // user clicks the explicit "Ask AI" button in the panel
+                // to commit. Matches single-doc mindmap's preview flow.
+                setMindmapLeaf({
+                  name: leafNode.name,
+                  chunksByDoc: leafNode.__chunks_by_doc || {},
                 })
-                navigate(`/chat?${params.toString()}`)
               }}
             />
           )
@@ -1123,6 +1146,60 @@ export default function GraphPage() {
           items={contextMenu.items}
           onClose={() => setContextMenu(null)}
         />
+      )}
+
+      {/* Multi-doc mindmap leaf preview panel */}
+      {mindmapLeaf && isMultiDocMindmap && (
+        <div className="border-t px-4 py-3" style={{ borderColor: 'var(--border-strong, rgba(255,255,255,0.14))', backgroundColor: 'var(--bg-1, #0c0c0f)' }}>
+          <div className="flex items-start justify-between mb-2">
+            <span className="text-sm font-medium" style={{ color: 'var(--fg, #f4f2ee)' }}>
+              {mindmapLeaf.name}
+            </span>
+            <button onClick={() => setMindmapLeaf(null)} className="opacity-40 hover:opacity-100"
+                    style={{ color: 'var(--fg, #f4f2ee)' }}
+                    aria-label={t('common.close', { defaultValue: 'Close' })}>
+              <X size={14} />
+            </button>
+          </div>
+          <div className="text-xs mb-2" style={{ color: 'var(--fg-dim, #9a9690)' }}>
+            {t('graph.mindmapLeafCoveredBy', { defaultValue: 'Covered by' })}
+          </div>
+          <ul className="flex flex-col gap-1 mb-3">
+            {Object.entries(mindmapLeaf.chunksByDoc).map(([dId, chunks]) => {
+              const palette = multiMindmapData?.tree?.palette || {}
+              const filename = (docList || []).find(d => d.doc_id === dId)?.filename || dId
+              const count = Array.isArray(chunks) ? chunks.length : 0
+              return (
+                <li key={dId} className="flex items-center gap-2 text-xs">
+                  <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2,
+                                  background: palette[dId] || '#888' }} />
+                  <span style={{ color: 'var(--fg, #f4f2ee)' }}>{filename}</span>
+                  <span className="opacity-50" style={{ color: 'var(--fg, #f4f2ee)' }}>·</span>
+                  <span className="opacity-60" style={{ color: 'var(--fg, #f4f2ee)' }}>
+                    {t('graph.mindmapLeafChunks', { count, defaultValue: `${count} chunks` })}
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                const coverage = Object.keys(mindmapLeaf.chunksByDoc)
+                if (coverage.length === 0) return
+                const params = new URLSearchParams({
+                  doc_ids: coverage.join(','),
+                  suggest: `Tell me about: ${mindmapLeaf.name}`,
+                })
+                navigate(`/chat?${params.toString()}`)
+              }}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs"
+              style={{ backgroundColor: 'var(--signature, #5b7ec9)', color: '#fff' }}
+            >
+              <MessageSquare size={12} /> {t('graph.mindmapLeafAskAi', { defaultValue: 'Ask AI about this' })}
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Node preview panel */}
