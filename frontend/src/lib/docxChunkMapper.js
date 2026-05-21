@@ -14,11 +14,32 @@ export function findFirstUnclaimedTextRange(root, needle, takenRanges) {
   // Collect all text nodes in document order, with their cumulative
   // offsets into the concatenated text. This lets us search the
   // whole rendered string and then map back to (node, offset) pairs.
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null)
+  //
+  // Skip text nodes that live inside an already-claimed chunk-marker span.
+  // Without this filter, a second chunk whose text comes after a previously
+  // wrapped span would get a cross-element range (span → next-p), which
+  // makes surroundContents throw and corrupts the DOM.
+  const chunkMarkerFilter = {
+    acceptNode(node) {
+      let p = node.parentElement
+      while (p && p !== root) {
+        if (p.classList && p.classList.contains('chunk-marker')) {
+          return NodeFilter.FILTER_REJECT
+        }
+        p = p.parentElement
+      }
+      return NodeFilter.FILTER_ACCEPT
+    },
+  }
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, chunkMarkerFilter)
   const nodes = []
   let cumulative = 0
   let n
   while ((n = walker.nextNode())) {
+    // Skip zero-length text nodes (happy-dom creates these as split artifacts
+    // after surroundContents). Including them causes locateNode to return the
+    // wrong node for offset 0, producing cross-element ranges.
+    if (n.length === 0) continue
     nodes.push({ node: n, start: cumulative, end: cumulative + n.length })
     cumulative += n.length
   }
@@ -139,4 +160,60 @@ function nextTextNode(from, root) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null)
   walker.currentNode = from
   return walker.nextNode()
+}
+
+const NEEDLE_LEN = 80
+
+/**
+ * Walk `container`'s DOM and wrap each text chunk's first-occurrence
+ * text in a marker span. Returns a summary object with match counts
+ * and a list of skipped chunk_index values (whose text didn't render
+ * verbatim — usually because docling normalized whitespace differently).
+ *
+ * Image and table chunks are skipped in v1 — handled in a separate
+ * pass over <img> / <table> DOM nodes (v2 follow-up).
+ */
+export function wrapChunkSpans(container, chunks) {
+  const taken = []
+  let matched = 0
+  let skipped = 0
+  const skippedChunks = []
+
+  for (const chunk of chunks) {
+    if (chunk.chunk_type !== 'text') {
+      skipped++
+      skippedChunks.push(chunk.chunk_index)
+      continue
+    }
+
+    const content = (chunk.content || '').trim()
+    if (!content) {
+      skipped++
+      skippedChunks.push(chunk.chunk_index)
+      continue
+    }
+
+    const needle = content.slice(0, Math.min(NEEDLE_LEN, content.length)).trim()
+    const range = findFirstUnclaimedTextRange(container, needle, taken)
+    if (!range) {
+      console.warn(
+        `[docxChunkMapper] chunk ${chunk.chunk_index} text not found in rendered doc; skipping highlight`
+      )
+      skipped++
+      skippedChunks.push(chunk.chunk_index)
+      continue
+    }
+
+    extendRangeForwards(range, Math.max(0, content.length - needle.length))
+    // Clone the range before wrapping: surroundContents() mutates the range's
+    // boundary points from text-node offsets to element offsets, which breaks
+    // compareBoundaryPoints for subsequent taken-set checks in happy-dom /
+    // browsers. The clone preserves the pre-wrap text-node boundaries.
+    const claimedRange = range.cloneRange()
+    wrapRangeInSpan(range, chunk.chunk_index, chunk.chunk_type)
+    taken.push(claimedRange)
+    matched++
+  }
+
+  return { matched, skipped, skippedChunks }
 }

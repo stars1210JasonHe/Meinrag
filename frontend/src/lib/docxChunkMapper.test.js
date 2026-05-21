@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { findFirstUnclaimedTextRange, wrapRangeInSpan, extendRangeForwards } from './docxChunkMapper'
+import { findFirstUnclaimedTextRange, wrapRangeInSpan, extendRangeForwards, wrapChunkSpans } from './docxChunkMapper'
 
 describe('findFirstUnclaimedTextRange', () => {
   it('finds a unique needle in a single text node', () => {
@@ -84,5 +84,60 @@ describe('extendRangeForwards', () => {
 
     // Should cover "First middle last" — extending across all three text nodes.
     expect(range.toString()).toBe('First middle last')
+  })
+})
+
+describe('wrapChunkSpans', () => {
+  it('wraps multiple chunks into the container', () => {
+    const root = document.createElement('div')
+    root.innerHTML =
+      '<p>The plaintiff filed a claim against Acme.</p>' +
+      '<p>The defendant denied all allegations.</p>'
+
+    const chunks = [
+      { chunk_index: 0, chunk_type: 'text', content: 'The plaintiff filed a claim against Acme.' },
+      { chunk_index: 1, chunk_type: 'text', content: 'The defendant denied all allegations.' },
+    ]
+
+    const result = wrapChunkSpans(root, chunks)
+
+    expect(result.matched).toBe(2)
+    expect(result.skipped).toBe(0)
+    const spans = root.querySelectorAll('span.chunk-marker')
+    expect(spans.length).toBe(2)
+    expect(spans[0].getAttribute('data-chunk-index')).toBe('0')
+    expect(spans[1].getAttribute('data-chunk-index')).toBe('1')
+  })
+
+  it('logs and skips chunks whose text does not render verbatim', () => {
+    const root = document.createElement('div')
+    root.innerHTML = '<p>Only this paragraph exists.</p>'
+
+    const chunks = [
+      { chunk_index: 0, chunk_type: 'text', content: 'Only this paragraph exists.' },
+      { chunk_index: 1, chunk_type: 'text', content: 'A chunk that was never rendered.' },
+    ]
+
+    const result = wrapChunkSpans(root, chunks)
+
+    expect(result.matched).toBe(1)
+    expect(result.skipped).toBe(1)
+    expect(result.skippedChunks).toEqual([1])
+  })
+
+  it('skips image and table chunks (handled separately in v2)', () => {
+    const root = document.createElement('div')
+    root.innerHTML = '<p>Body text.</p>'
+
+    const chunks = [
+      { chunk_index: 0, chunk_type: 'text', content: 'Body text.' },
+      { chunk_index: 1, chunk_type: 'image', content: 'Figure 1' },
+      { chunk_index: 2, chunk_type: 'table', content: '| h1 | h2 |' },
+    ]
+
+    const result = wrapChunkSpans(root, chunks)
+
+    expect(result.matched).toBe(1)
+    expect(result.skipped).toBe(2)
   })
 })
