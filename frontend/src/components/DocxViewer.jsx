@@ -2,6 +2,7 @@ import { useRef, useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { fetchDocumentChunks } from '@/lib/api'
+import { wrapChunkSpans } from '@/lib/docxChunkMapper'
 
 const API_BASE = import.meta.env.VITE_API_URL
 const USER_ID = 'admin'
@@ -69,7 +70,15 @@ export default function DocxViewer({ docId, activeChunkIndex }) {
         useBase64URL: true,
       })
     }).then(() => {
-      if (!cancelled) setStatus('ready')
+      if (cancelled) return
+      if (containerRef.current && chunks.length > 0) {
+        const summary = wrapChunkSpans(containerRef.current, chunks)
+        console.log(
+          `[DocxViewer] wrapped ${summary.matched} chunks, skipped ${summary.skipped}`,
+          summary.skippedChunks.length > 0 ? { skippedChunks: summary.skippedChunks } : ''
+        )
+      }
+      setStatus('ready')
     }).catch(err => {
       if (!cancelled) {
         setStatus('error')
@@ -78,7 +87,7 @@ export default function DocxViewer({ docId, activeChunkIndex }) {
     })
 
     return () => { cancelled = true }
-  }, [blob])
+  }, [blob, chunks])
 
   // TODO Task 4.2-4.5: fetch blob + chunks, render via docx-preview, wrap chunks.
 
