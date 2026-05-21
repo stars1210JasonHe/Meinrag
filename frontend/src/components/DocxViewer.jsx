@@ -1,5 +1,7 @@
 import { useRef, useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
+import { fetchDocumentChunks } from '@/lib/api'
 
 const API_BASE = import.meta.env.VITE_API_URL
 const USER_ID = 'admin'
@@ -18,6 +20,14 @@ export default function DocxViewer({ docId, activeChunkIndex }) {
   const [status, setStatus] = useState('loading')  // 'loading' | 'ready' | 'error'
   const [errorMsg, setErrorMsg] = useState('')
   const [blob, setBlob] = useState(null)
+
+  const { data: chunksData } = useQuery({
+    queryKey: ['doc-chunks-all', docId],
+    queryFn: () => fetchDocumentChunks(docId, null, USER_ID),
+    enabled: !!docId,
+    staleTime: 5 * 60_000,
+  })
+  const chunks = chunksData?.chunks || []
 
   useEffect(() => {
     if (!docId) return
