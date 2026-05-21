@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { Document, Page, pdfjs } from 'react-pdf'
@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { fetchDocumentChunks, fetchDocuments } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import DocxViewer from '@/components/DocxViewer'
 
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
 
@@ -55,6 +56,10 @@ export default function PdfViewerPage() {
   const docList = documentsData?.documents || (Array.isArray(documentsData) ? documentsData : [])
   const currentDoc = docList.find(d => d.doc_id === docId)
   const fileType = (currentDoc?.file_type || '').toLowerCase().replace('.', '')
+
+  const [searchParams] = useSearchParams()
+  const urlChunkRaw = searchParams.get('chunk')
+  const urlChunkId = urlChunkRaw != null ? Number(urlChunkRaw) : null
 
   // Fetch chunks for current page (visual chunks only + active text)
   const { data: chunksData } = useQuery({
@@ -192,70 +197,85 @@ export default function PdfViewerPage() {
       )}
 
       {/* Content area */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* PDF */}
-        <div className="flex-1 overflow-auto" ref={containerRef}>
-          <div className="flex justify-center py-4">
-            <Document
-              file={pdfUrl}
-              onLoadSuccess={handleDocLoad}
-              loading={<div className="p-8 opacity-40">{t('pdfViewer.loadingPdf')}</div>}
-              error={<div className="p-8 opacity-40">{t('pdfViewer.failedToLoadPdf')}</div>}
-            >
-              <Page
-                pageNumber={currentPage}
-                width={containerWidth * zoom * 0.9}
-                renderTextLayer={true}
-                renderAnnotationLayer={false}
-                onLoadSuccess={(info) => setPageSize(info)}
-                loading=""
+      {fileType === 'pdf' && (
+        <div className="flex flex-1 overflow-hidden">
+          {/* PDF */}
+          <div className="flex-1 overflow-auto" ref={containerRef}>
+            <div className="flex justify-center py-4">
+              <Document
+                file={pdfUrl}
+                onLoadSuccess={handleDocLoad}
+                loading={<div className="p-8 opacity-40">{t('pdfViewer.loadingPdf')}</div>}
+                error={<div className="p-8 opacity-40">{t('pdfViewer.failedToLoadPdf')}</div>}
               >
-                {renderBbox()}
-              </Page>
-            </Document>
-          </div>
-        </div>
-
-        {/* Page chunks sidebar */}
-        <div className="w-64 border-l overflow-auto shrink-0"
-             style={{ borderColor: 'var(--border-strong)', backgroundColor: 'var(--bg)' }}>
-          <div className="px-3 py-2 border-b text-xs font-medium uppercase tracking-wider opacity-40"
-               style={{ borderColor: 'var(--border-strong)' }}>
-            {t('pdfViewer.pageChunks', { count: pageChunks.length })}
-          </div>
-          {pageChunks.length === 0 ? (
-            <div className="p-4 text-xs opacity-30 text-center">{t('pdfViewer.noChunks')}</div>
-          ) : (
-            <div className="py-1">
-              {pageChunks.map((chunk, i) => {
-                const Icon = TYPE_ICONS[chunk.chunk_type] || FileText
-                const color = TYPE_COLORS[chunk.chunk_type] || TYPE_COLORS.text
-                const isActive = activeChunk?.chunk_index === chunk.chunk_index
-                const label = chunk.label || (chunk.content?.slice(0, 40) + '...')
-
-                return (
-                  <button
-                    key={chunk.chunk_index ?? i}
-                    onClick={() => setActiveChunk(isActive ? null : chunk)}
-                    className={cn(
-                      'flex items-start gap-2 w-full px-3 py-2 text-left text-xs transition-colors',
-                      isActive ? 'bg-white/10' : 'hover:bg-white/5'
-                    )}
-                  >
-                    <Icon size={12} className="mt-0.5 shrink-0" style={{ color }} />
-                    <div className="min-w-0">
-                      <div className="truncate font-medium" style={{ color: 'var(--fg)' }}>
-                        {label}
-                      </div>
-                      <span className="opacity-40">{chunk.chunk_type}</span>
-                    </div>
-                  </button>
-                )
-              })}
+                <Page
+                  pageNumber={currentPage}
+                  width={containerWidth * zoom * 0.9}
+                  renderTextLayer={true}
+                  renderAnnotationLayer={false}
+                  onLoadSuccess={(info) => setPageSize(info)}
+                  loading=""
+                >
+                  {renderBbox()}
+                </Page>
+              </Document>
             </div>
-          )}
+          </div>
+
+          {/* Page chunks sidebar */}
+          <div className="w-64 border-l overflow-auto shrink-0"
+               style={{ borderColor: 'var(--border-strong)', backgroundColor: 'var(--bg)' }}>
+            <div className="px-3 py-2 border-b text-xs font-medium uppercase tracking-wider opacity-40"
+                 style={{ borderColor: 'var(--border-strong)' }}>
+              {t('pdfViewer.pageChunks', { count: pageChunks.length })}
+            </div>
+            {pageChunks.length === 0 ? (
+              <div className="p-4 text-xs opacity-30 text-center">{t('pdfViewer.noChunks')}</div>
+            ) : (
+              <div className="py-1">
+                {pageChunks.map((chunk, i) => {
+                  const Icon = TYPE_ICONS[chunk.chunk_type] || FileText
+                  const color = TYPE_COLORS[chunk.chunk_type] || TYPE_COLORS.text
+                  const isActive = activeChunk?.chunk_index === chunk.chunk_index
+                  const label = chunk.label || (chunk.content?.slice(0, 40) + '...')
+
+                  return (
+                    <button
+                      key={chunk.chunk_index ?? i}
+                      onClick={() => setActiveChunk(isActive ? null : chunk)}
+                      className={cn(
+                        'flex items-start gap-2 w-full px-3 py-2 text-left text-xs transition-colors',
+                        isActive ? 'bg-white/10' : 'hover:bg-white/5'
+                      )}
+                    >
+                      <Icon size={12} className="mt-0.5 shrink-0" style={{ color }} />
+                      <div className="min-w-0">
+                        <div className="truncate font-medium" style={{ color: 'var(--fg)' }}>
+                          {label}
+                        </div>
+                        <span className="opacity-40">{chunk.chunk_type}</span>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
+
+      {fileType === 'docx' && (
+        <DocxViewer docId={docId} activeChunkIndex={urlChunkId} />
+      )}
+
+      {fileType && fileType !== 'pdf' && fileType !== 'docx' && (
+        <div className="flex items-center justify-center h-full opacity-40">
+          <div className="text-center text-sm">
+            <p>{t('pdfViewer.unsupportedFileType', { defaultValue: 'This file type is not supported for in-browser viewing.' })}</p>
+            <p className="text-xs mt-2 opacity-60">{fileType}</p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
