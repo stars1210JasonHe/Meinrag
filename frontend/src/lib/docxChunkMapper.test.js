@@ -25,4 +25,16 @@ describe('findFirstUnclaimedTextRange', () => {
     expect(second.toString()).toBe('本条')
     expect(second.startOffset).toBeGreaterThan(first.endOffset)
   })
+
+  it('finds a needle that spans two adjacent text nodes', () => {
+    const root = document.createElement('div')
+    // docx-preview often splits text across <span> tags for styling.
+    // The visible text is "The plaintiff filed" but it's two text nodes.
+    root.innerHTML = '<p><span>The plaintiff </span><span>filed a claim</span></p>'
+
+    const range = findFirstUnclaimedTextRange(root, 'plaintiff filed', [])
+
+    expect(range).not.toBeNull()
+    expect(range.toString().replace(/\s+/g, ' ')).toBe('plaintiff filed')
+  })
 })
