@@ -17,6 +17,28 @@ export default function DocxViewer({ docId, activeChunkIndex }) {
   const containerRef = useRef(null)
   const [status, setStatus] = useState('loading')  // 'loading' | 'ready' | 'error'
   const [errorMsg, setErrorMsg] = useState('')
+  const [blob, setBlob] = useState(null)
+
+  useEffect(() => {
+    if (!docId) return
+    let cancelled = false
+    setStatus('loading')
+    fetch(`${API_BASE}/documents/${docId}/download`, { headers: { 'X-User-Id': USER_ID } })
+      .then(r => {
+        if (!r.ok) throw new Error(`Backend returned HTTP ${r.status}`)
+        return r.blob()
+      })
+      .then(b => {
+        if (!cancelled) setBlob(b)
+      })
+      .catch(err => {
+        if (!cancelled) {
+          setStatus('error')
+          setErrorMsg(err.message)
+        }
+      })
+    return () => { cancelled = true }
+  }, [docId])
 
   // TODO Task 4.2-4.5: fetch blob + chunks, render via docx-preview, wrap chunks.
 
