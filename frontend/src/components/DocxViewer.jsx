@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { fetchDocumentChunks } from '@/lib/api'
 import { wrapChunkSpans } from '@/lib/docxChunkMapper'
+import './DocxViewer.css'
 
 const API_BASE = import.meta.env.VITE_API_URL
 const USER_ID = 'admin'

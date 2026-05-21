@@ -1,0 +1,33 @@
+/* Chunk-marker spans wrap text that maps to a document chunk. They
+   stay invisible by default — only the active chunk gets the
+   highlight. Background-tint + left-border combination matches the
+   visual weight of the PDF viewer's bbox without needing pixel
+   coordinates. */
+
+.chunk-marker {
+  /* No visual effect by default — just a structural marker. */
+}
+
+.chunk-marker.chunk-active {
+  background-color: color-mix(in srgb, var(--signature) 12%, transparent);
+  border-left: 4px solid var(--signature);
+  padding-left: 6px;
+  margin-left: -10px;
+  border-radius: 2px;
+  transition: background-color 200ms ease, border-color 200ms ease;
+}
+
+/* Type-specific hint borders for active state (subtle differentiation) */
+.chunk-marker.chunk-active[data-chunk-type="table"] {
+  border-left-color: var(--warn);
+}
+.chunk-marker.chunk-active[data-chunk-type="image"] {
+  border-left-color: var(--ok);
+}
+
+/* docx-preview's wrapper sometimes adds a fixed width; let it breathe
+   inside our flex container. */
+.docx-wrapper {
+  max-width: 100%;
+  margin: 0 auto;
+}
