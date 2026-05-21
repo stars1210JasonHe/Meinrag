@@ -4,7 +4,7 @@
 
   "sample_en.txt": {
     "PERSON": ["Alice Johnson", "John Smith", "Mr. Smith", "Bob Wilson"],
-    "EMAIL_ADDRESS": ["alice@example.com", "bob.wilson@acme-legal.example"],
+    "EMAIL_ADDRESS": ["alice@example.com", "bob.wilson@acme-legal.com"],
     "US_SSN": ["555-12-3456"],
     "PHONE_NUMBER": ["+1-415-555-0142"],
     "CREDIT_CARD": ["4242-4242-4242-4242"],

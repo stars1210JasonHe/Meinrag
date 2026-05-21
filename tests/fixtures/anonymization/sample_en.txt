@@ -12,7 +12,7 @@ phone +1-415-555-0142.
 
 His employer's records list a corporate ID badge number 4242-4242-4242-4242
 that was confiscated at the time of termination. Counsel for Acme,
-Bob Wilson, has been notified at bob.wilson@acme-legal.example, and a
+Bob Wilson, has been notified at bob.wilson@acme-legal.com, and a
 follow-up has been scheduled.
 
 The IP address from which the initial complaint was filed (192.168.1.42)

@@ -2321,6 +2321,7 @@ anonymization = [
     { name = "presidio-analyzer" },
     { name = "presidio-anonymizer" },
     { name = "spacy" },
+    { name = "typer" },
 ]
 docling = [
     { name = "docling" },
@@ -2374,6 +2375,7 @@ requires-dist = [
     { name = "sse-starlette", specifier = ">=2.0.0" },
     { name = "torch", marker = "extra == 'docling'", specifier = ">=2.6.0" },
     { name = "torchvision", marker = "extra == 'docling'", specifier = ">=0.21.0" },
+    { name = "typer", marker = "extra == 'anonymization'", specifier = ">=0.21.1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
 ]
 provides-extras = ["docling", "anonymization"]
