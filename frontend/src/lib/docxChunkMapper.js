@@ -65,3 +65,30 @@ function rangeIntersectsAny(range, taken) {
   }
   return false
 }
+
+/**
+ * Wrap the contents of `range` in a new <span> with chunk-marker
+ * classes + data attributes. Returns the inserted span element.
+ *
+ * Caveat: if the range spans multiple parent elements (rare in
+ * docx-preview output but possible with inline styling), the wrap
+ * may not be semantically clean — but visually it still works
+ * because we only add a left border + background.
+ */
+export function wrapRangeInSpan(range, chunkIndex, chunkType) {
+  const span = document.createElement('span')
+  span.classList.add('chunk-marker')
+  span.setAttribute('data-chunk-index', String(chunkIndex))
+  if (chunkType) span.setAttribute('data-chunk-type', chunkType)
+  try {
+    range.surroundContents(span)
+  } catch {
+    // surroundContents throws when the range partially selects a
+    // non-text node. Fallback: extract + append, less clean but
+    // works for our needs (the active highlight still attaches).
+    const contents = range.extractContents()
+    span.appendChild(contents)
+    range.insertNode(span)
+  }
+  return span
+}

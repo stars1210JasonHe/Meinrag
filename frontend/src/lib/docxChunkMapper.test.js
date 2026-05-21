@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { findFirstUnclaimedTextRange } from './docxChunkMapper'
+import { findFirstUnclaimedTextRange, wrapRangeInSpan } from './docxChunkMapper'
 
 describe('findFirstUnclaimedTextRange', () => {
   it('finds a unique needle in a single text node', () => {
@@ -36,5 +36,21 @@ describe('findFirstUnclaimedTextRange', () => {
 
     expect(range).not.toBeNull()
     expect(range.toString().replace(/\s+/g, ' ')).toBe('plaintiff filed')
+  })
+})
+
+describe('wrapRangeInSpan', () => {
+  it('wraps a range in a span with data-chunk-index attribute', () => {
+    const root = document.createElement('div')
+    root.innerHTML = '<p>The plaintiff filed a claim.</p>'
+    const range = findFirstUnclaimedTextRange(root, 'plaintiff filed', [])
+
+    const span = wrapRangeInSpan(range, 5, 'text')
+
+    expect(span.tagName).toBe('SPAN')
+    expect(span.getAttribute('data-chunk-index')).toBe('5')
+    expect(span.getAttribute('data-chunk-type')).toBe('text')
+    expect(span.classList.contains('chunk-marker')).toBe(true)
+    expect(span.textContent).toBe('plaintiff filed')
   })
 })
