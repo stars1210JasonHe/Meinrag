@@ -50,6 +50,36 @@ export default function DocxViewer({ docId, activeChunkIndex }) {
     return () => { cancelled = true }
   }, [docId])
 
+  // Render the docx into the container DOM once the blob is fetched.
+  useEffect(() => {
+    if (!blob || !containerRef.current) return
+    let cancelled = false
+
+    // Lazy-load docx-preview only when we actually need it. Keeps the
+    // initial Vite chunk small for users who never open a .docx.
+    import('docx-preview').then(({ renderAsync }) => {
+      if (cancelled) return
+      // Clear any previous render
+      containerRef.current.innerHTML = ''
+      return renderAsync(blob, containerRef.current, null, {
+        inWrapper: true,
+        breakPages: false,
+        ignoreWidth: false,
+        ignoreHeight: true,
+        useBase64URL: true,
+      })
+    }).then(() => {
+      if (!cancelled) setStatus('ready')
+    }).catch(err => {
+      if (!cancelled) {
+        setStatus('error')
+        setErrorMsg(err.message || 'docx-preview render failed')
+      }
+    })
+
+    return () => { cancelled = true }
+  }, [blob])
+
   // TODO Task 4.2-4.5: fetch blob + chunks, render via docx-preview, wrap chunks.
 
   return (
