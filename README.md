@@ -43,6 +43,7 @@ Upload a corpus, browse it visually, ask questions in natural language, and get 
 - Streaming token-by-token response via Server-Sent Events
 - Markdown rendering with syntax highlighting
 - Multi-language Q&A (ask in English or Chinese)
+- In-browser viewer at `/pdf/<doc_id>` handles both PDF and DOCX (DOCX rendered via `docx-preview` with chunk-level highlighting; citation clicks deep-link via `?chunk=N`)
 
 ### Operations
 - Pydantic Settings with full `.env.example` coverage
