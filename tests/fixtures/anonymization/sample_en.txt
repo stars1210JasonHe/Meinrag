@@ -1,0 +1,22 @@
+SAMPLE LEGAL MEMO (SYNTHETIC — NO REAL PII)
+
+Re: Smith v. Acme Industries
+
+Memorandum prepared by Alice Johnson on behalf of the plaintiff.
+
+The plaintiff, John Smith, born 1987-03-15, residing at 123 Maple Street,
+contacted our office via email at alice@example.com after a workplace
+injury on the manufacturing floor. Mr. Smith provided his Social Security
+Number 555-12-3456 for case intake, and authorized direct contact at
+phone +1-415-555-0142.
+
+His employer's records list a corporate ID badge number 4242-4242-4242-4242
+that was confiscated at the time of termination. Counsel for Acme,
+Bob Wilson, has been notified at bob.wilson@acme-legal.example, and a
+follow-up has been scheduled.
+
+The IP address from which the initial complaint was filed (192.168.1.42)
+suggests the filing originated from the employee break room kiosk, not
+the manager's workstation as claimed.
+
+— End of memo —

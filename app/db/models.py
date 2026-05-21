@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     String, Text, Integer, Float, DateTime, ForeignKey, CheckConstraint, UniqueConstraint, Index, JSON,
+    LargeBinary,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -146,6 +147,71 @@ class ChatMessageModel(Base):
     )
 
     session: Mapped["ChatSessionModel"] = relationship(back_populates="messages")
+
+
+class AnonymizationMappingModel(Base):
+    """Reversible pseudonym ↔ original entity mapping.
+
+    `original_text_encrypted` is Fernet-encrypted ciphertext of the
+    original entity (e.g. "张三", "john.doe@example.com"). Decryption
+    happens at retrieval time for authorized users; the vector store and
+    embedding API never see plaintext.
+
+    Per-doc rows; the same entity in two different documents may have
+    different pseudonyms (intentional — registries are per-document for
+    cross-doc isolation).
+    """
+    __tablename__ = "anonymization_mappings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    document_id: Mapped[str] = mapped_column(
+        String(12),
+        ForeignKey("documents.doc_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    original_text_encrypted: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    pseudonym: Mapped[str] = mapped_column(String(64), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index("ix_anon_mappings_doc", "document_id"),
+        Index("ix_anon_mappings_pseudonym", "document_id", "pseudonym"),
+    )
+
+
+class AnonymizationAuditEntryModel(Base):
+    """Append-only audit log for anonymize/deanonymize/view events.
+
+    Retention: 2y (GDPR) / 6y (HIPAA). On source-doc delete, rows are
+    kept with `source_deleted_at` populated; the compliance trail must
+    outlive the data it describes.
+    """
+    __tablename__ = "anonymization_audit_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    document_id: Mapped[str] = mapped_column(String(12), nullable=False)
+    user_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    entity_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+    source_deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "action IN ('anonymize', 'deanonymize', 'view')",
+            name="ck_anon_audit_action",
+        ),
+        Index("ix_anon_audit_doc", "document_id", "timestamp"),
+    )
 
 
 class ChunkEdgeModel(Base):

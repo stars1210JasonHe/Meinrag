@@ -1,0 +1,24 @@
+{
+  "_comment": "Ground-truth PII labels for synthetic fixtures. Used by Phase 2-6 tests to assert recognizer accuracy. Each entry is the substring that MUST be detected (any entity_type is acceptable as long as the span is caught). False-negative count > 0 fails the recognizer test.",
+  "_fixture_note": "Both files are entirely synthetic — names like 'John Smith' and '张三' are placeholders, SSN/ID numbers do NOT correspond to real persons. Safe to check into the repo. Do NOT replace with real PII.",
+
+  "sample_en.txt": {
+    "PERSON": ["Alice Johnson", "John Smith", "Mr. Smith", "Bob Wilson"],
+    "EMAIL_ADDRESS": ["alice@example.com", "bob.wilson@acme-legal.example"],
+    "US_SSN": ["555-12-3456"],
+    "PHONE_NUMBER": ["+1-415-555-0142"],
+    "CREDIT_CARD": ["4242-4242-4242-4242"],
+    "IP_ADDRESS": ["192.168.1.42"],
+    "_must_not_flag": ["Acme Industries", "Acme", "Maple Street", "1987-03-15"]
+  },
+
+  "sample_zh.txt": {
+    "PERSON": ["张三", "李华", "王五", "赵六"],
+    "EMAIL_ADDRESS": ["zhangsan@example.com"],
+    "CHINESE_ID_NUMBER": ["110101199003071234"],
+    "CHINESE_PHONE": ["13800138000", "13912345678", "13700137000"],
+    "CHINESE_BANK_CARD": ["6228480402564890018"],
+    "CHINESE_PASSPORT": ["E12345678"],
+    "_must_not_flag": ["北京市朝阳区", "某公司", "2026 年 3 月 15 日"]
+  }
+}

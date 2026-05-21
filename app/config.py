@@ -190,6 +190,37 @@ class Settings(BaseSettings):
     port: int = 8000
     log_level: str = "info"
 
+    # ─── PII anonymization plugin ───────────────────────────────────────────
+    # Off by default. When enabled, pre-embedding pseudonymization replaces
+    # PII in chunk text with typed placeholders (`[PERSON_1]` etc.) and
+    # stores a Fernet-encrypted mapping in PostgreSQL so authorized users
+    # can see original content at retrieval time. Requires installing the
+    # `anonymization` extra (`uv sync --extra anonymization`) plus spaCy
+    # models. See docs/plans/2026-05-21-anonymization-plugin.md.
+    anonymization_enabled: bool = False
+    # Fernet key (URL-safe base64-encoded 32 bytes). Generate via:
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # MUST be set when anonymization_enabled=True (validator enforces).
+    anonymization_encryption_key: str | None = None
+    # Presidio analyzer confidence threshold for accepting a span as PII.
+    # Default 0.7 matches research recommendation. Raise to reduce false
+    # positives (over-anonymization); lower to catch more (more false negatives).
+    anonymization_confidence_threshold: float = 0.7
+    # Active per-chunk languages. Each adds a spaCy NER model:
+    #   "en" -> en_core_web_lg (~750 MB)
+    #   "zh" -> zh_core_web_trf (~500 MB)
+    anonymization_languages: list[str] = ["en", "zh"]
+    # Entity types to anonymize. Defaults follow article §11.2:
+    # irreducibly-identifying PII only (names, IDs, contact info). Orgs,
+    # locations, dates, non-DOB excluded by default since they carry high
+    # semantic value for retrieval. Override via env CSV.
+    anonymization_entity_types: list[str] = [
+        "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "US_SSN",
+        "CREDIT_CARD", "IP_ADDRESS",
+        "CHINESE_ID_NUMBER", "CHINESE_PHONE", "CHINESE_BANK_CARD",
+        "CHINESE_PASSPORT",
+    ]
+
     @model_validator(mode="before")
     @classmethod
     def _compat_parse_mode(cls, values):
@@ -202,6 +233,20 @@ class Settings(BaseSettings):
             elif legacy_key in values:
                 values.pop(legacy_key)
         return values
+
+    @model_validator(mode="after")
+    def _validate_anonymization_key(self):
+        """If anonymization is enabled, an encryption key MUST be set —
+        otherwise mappings can't be stored. Fail-fast at startup rather
+        than at first upload.
+        """
+        if self.anonymization_enabled and not self.anonymization_encryption_key:
+            raise ValueError(
+                "ANONYMIZATION_ENABLED=true but ANONYMIZATION_ENCRYPTION_KEY is unset. "
+                "Generate a Fernet key with: "
+                'python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
+            )
+        return self
 
 
 def get_settings() -> Settings:
