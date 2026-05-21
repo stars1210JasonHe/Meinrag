@@ -11,4 +11,18 @@ describe('findFirstUnclaimedTextRange', () => {
     expect(range).not.toBeNull()
     expect(range.toString()).toBe('plaintiff filed')
   })
+
+  it('skips a needle occurrence already claimed by takenRanges', () => {
+    const root = document.createElement('div')
+    root.innerHTML = '<p>本条 first hit and 本条 second hit.</p>'
+
+    const first = findFirstUnclaimedTextRange(root, '本条', [])
+    expect(first.toString()).toBe('本条')
+    expect(first.startOffset).toBe(0)
+
+    const second = findFirstUnclaimedTextRange(root, '本条', [first])
+    expect(second).not.toBeNull()
+    expect(second.toString()).toBe('本条')
+    expect(second.startOffset).toBeGreaterThan(first.endOffset)
+  })
 })

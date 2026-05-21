@@ -11,15 +11,17 @@ export function findFirstUnclaimedTextRange(root, needle, takenRanges) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null)
   let node
   while ((node = walker.nextNode())) {
-    const idx = node.textContent.indexOf(needle)
-    if (idx === -1) continue
+    let idx = 0
+    while ((idx = node.textContent.indexOf(needle, idx)) !== -1) {
+      const range = document.createRange()
+      range.setStart(node, idx)
+      range.setEnd(node, idx + needle.length)
 
-    const range = document.createRange()
-    range.setStart(node, idx)
-    range.setEnd(node, idx + needle.length)
-
-    if (rangeIntersectsAny(range, takenRanges)) continue
-    return range
+      if (!rangeIntersectsAny(range, takenRanges)) {
+        return range
+      }
+      idx += needle.length
+    }
   }
   return null
 }
