@@ -89,7 +89,22 @@ export default function DocxViewer({ docId, activeChunkIndex }) {
     return () => { cancelled = true }
   }, [blob, chunks])
 
-  // TODO Task 4.2-4.5: fetch blob + chunks, render via docx-preview, wrap chunks.
+  // When activeChunkIndex changes, scroll to + highlight that chunk.
+  useEffect(() => {
+    if (status !== 'ready' || activeChunkIndex == null || !containerRef.current) return
+
+    // Clear previous active class
+    containerRef.current.querySelectorAll('.chunk-marker.chunk-active')
+      .forEach(el => el.classList.remove('chunk-active'))
+
+    const el = containerRef.current.querySelector(`[data-chunk-index="${activeChunkIndex}"]`)
+    if (!el) {
+      console.warn(`[DocxViewer] activeChunkIndex ${activeChunkIndex} not found in DOM`)
+      return
+    }
+    el.classList.add('chunk-active')
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [status, activeChunkIndex])
 
   return (
     <div className="flex flex-col h-full overflow-auto p-4" ref={containerRef}>
