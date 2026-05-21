@@ -9,7 +9,7 @@ import {
   ChevronLeft, ChevronRight, Search, X, ZoomIn, ZoomOut,
   Download, FileText, Table2, Image, Calculator
 } from 'lucide-react'
-import { fetchDocumentChunks } from '@/lib/api'
+import { fetchDocumentChunks, fetchDocuments } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
@@ -45,6 +45,16 @@ export default function PdfViewerPage() {
     observer.observe(el)
     return () => observer.disconnect()
   }, [])
+
+  // Fetch document metadata for file_type routing
+  const { data: documentsData } = useQuery({
+    queryKey: ['documents', USER_ID],
+    queryFn: () => fetchDocuments(USER_ID),
+    staleTime: 5 * 60_000,
+  })
+  const docList = documentsData?.documents || (Array.isArray(documentsData) ? documentsData : [])
+  const currentDoc = docList.find(d => d.doc_id === docId)
+  const fileType = (currentDoc?.file_type || '').toLowerCase().replace('.', '')
 
   // Fetch chunks for current page (visual chunks only + active text)
   const { data: chunksData } = useQuery({
