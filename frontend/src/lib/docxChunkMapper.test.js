@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { findFirstUnclaimedTextRange, wrapRangeInSpan } from './docxChunkMapper'
+import { findFirstUnclaimedTextRange, wrapRangeInSpan, extendRangeForwards } from './docxChunkMapper'
 
 describe('findFirstUnclaimedTextRange', () => {
   it('finds a unique needle in a single text node', () => {
@@ -52,5 +52,37 @@ describe('wrapRangeInSpan', () => {
     expect(span.getAttribute('data-chunk-type')).toBe('text')
     expect(span.classList.contains('chunk-marker')).toBe(true)
     expect(span.textContent).toBe('plaintiff filed')
+  })
+})
+
+describe('extendRangeForwards', () => {
+  it('extends a range forward by the given character count', () => {
+    const root = document.createElement('div')
+    root.innerHTML = '<p>The plaintiff filed a claim against Acme on Monday.</p>'
+    const range = findFirstUnclaimedTextRange(root, 'plaintiff filed', [])
+
+    extendRangeForwards(range, 21) // " a claim against Acme"
+
+    expect(range.toString()).toBe('plaintiff filed a claim against Acme')
+  })
+
+  it('clamps at end of document', () => {
+    const root = document.createElement('div')
+    root.innerHTML = '<p>Short.</p>'
+    const range = findFirstUnclaimedTextRange(root, 'Short', [])
+
+    extendRangeForwards(range, 9999)
+    expect(range.toString()).toBe('Short.')
+  })
+
+  it('clamps to end of last text node when document has multiple text nodes', () => {
+    const root = document.createElement('div')
+    root.innerHTML = '<p><span>First </span><span>middle </span><span>last</span></p>'
+    const range = findFirstUnclaimedTextRange(root, 'First', [])
+
+    extendRangeForwards(range, 9999)
+
+    // Should cover "First middle last" — extending across all three text nodes.
+    expect(range.toString()).toBe('First middle last')
   })
 })

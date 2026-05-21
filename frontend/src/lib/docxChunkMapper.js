@@ -92,3 +92,51 @@ export function wrapRangeInSpan(range, chunkIndex, chunkType) {
   }
   return span
 }
+
+/**
+ * Mutate `range` in place to extend its end forward by `extraChars`
+ * characters of visible text. Clamps to end-of-document if asked
+ * to extend past the last text node.
+ */
+export function extendRangeForwards(range, extraChars) {
+  if (extraChars <= 0) return
+
+  let endNode = range.endContainer
+  let endOffset = range.endOffset
+  let remaining = extraChars
+  let lastTextNode = endNode  // tracks the last text node we visited for EOD clamping
+
+  // Determine the root for tree walking. Walk up from endNode's parent
+  // to find a container that is likely to have more text nodes beyond the current one.
+  // If endNode is a text node, start from its parent; then walk up to a reasonable level.
+  let root = endNode.parentElement
+  // Walk up one more level to escape single-element parents (e.g., <span>text</span>)
+  if (root && root.parentElement) {
+    root = root.parentElement
+  }
+
+  while (remaining > 0) {
+    const available = endNode.length - endOffset
+    if (available >= remaining) {
+      range.setEnd(endNode, endOffset + remaining)
+      return
+    }
+    remaining -= available
+    const next = nextTextNode(endNode, root)
+    if (!next) {
+      // No more text nodes — clamp to the end of the LAST text node we
+      // successfully visited (not the range's original endContainer).
+      range.setEnd(lastTextNode, lastTextNode.length)
+      return
+    }
+    lastTextNode = next
+    endNode = next
+    endOffset = 0
+  }
+}
+
+function nextTextNode(from, root) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null)
+  walker.currentNode = from
+  return walker.nextNode()
+}
