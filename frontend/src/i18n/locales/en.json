@@ -123,7 +123,10 @@
     "failedToLoadPdf": "Failed to load PDF",
     "searchPlaceholder": "Search in PDF...",
     "pageChunks": "Page Chunks ({{count}})",
-    "noChunks": "No chunks on this page"
+    "noChunks": "No chunks on this page",
+    "loadingDocx": "Loading document…",
+    "docxRenderFailed": "Failed to render .docx",
+    "unsupportedFileType": "This file type is not supported for in-browser viewing."
   },
   "textDocViewer": {
     "empty": "This document has no chunks.",
@@ -165,7 +168,8 @@
     "mindmapLeafCoveredBy": "Covered by",
     "mindmapLeafAskAi": "Ask AI about this",
     "mindmapLeafChunks_one": "{{count}} chunk",
-    "mindmapLeafChunks_other": "{{count}} chunks"
+    "mindmapLeafChunks_other": "{{count}} chunks",
+    "openDocument": "Open document"
   },
   "multiDoc": {
     "legendLabel": "Documents in graph",

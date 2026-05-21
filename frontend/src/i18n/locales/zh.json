@@ -123,7 +123,10 @@
     "failedToLoadPdf": "无法加载 PDF",
     "searchPlaceholder": "在 PDF 中搜索...",
     "pageChunks": "页面块（{{count}}）",
-    "noChunks": "此页面没有块"
+    "noChunks": "此页面没有块",
+    "loadingDocx": "正在加载文档…",
+    "docxRenderFailed": "无法渲染 .docx 文档",
+    "unsupportedFileType": "此文件类型不支持在线查看。"
   },
   "textDocViewer": {
     "empty": "该文档暂无片段。",
@@ -165,7 +168,8 @@
     "mindmapLeafCoveredBy": "覆盖文档",
     "mindmapLeafAskAi": "向 AI 提问",
     "mindmapLeafChunks_one": "{{count}} 块",
-    "mindmapLeafChunks_other": "{{count}} 块"
+    "mindmapLeafChunks_other": "{{count}} 块",
+    "openDocument": "打开文档"
   },
   "multiDoc": {
     "legendLabel": "图中的文档",

@@ -548,12 +548,12 @@ export default function GraphPage() {
         { label: t('graph.exploreChunks'), icon: Network, action: () => navigate(`/graph/${docId}`) },
         { label: t('graph.viewAsMindmap', { defaultValue: 'View as Mind Map' }), icon: GitBranch, action: () => navigate(`/graph/${docId}?mode=mindmap`) },
         { label: t('dashboard.chatAboutThis'), icon: MessageSquare, action: () => navigate(`/chat?doc=${docId}&name=${encodeURIComponent(node._data.source_file || '')}`) },
-        { label: t('dashboard.openInPdf'), icon: ExternalLink, action: () => navigate(`/pdf/${docId}`) },
+        { label: t('graph.openDocument'), icon: ExternalLink, action: () => navigate(`/pdf/${docId}`) },
       )
     } else {
       items.push(
         { label: t('dashboard.chatAboutThis'), icon: MessageSquare, action: () => navigate(`/chat?doc=${node._data.doc_id}&name=${encodeURIComponent(node._data.source_file || '')}`) },
-        { label: t('dashboard.openInPdf'), icon: ExternalLink, action: () => navigate(`/pdf/${node._data.doc_id}`) },
+        { label: t('graph.openDocument'), icon: ExternalLink, action: () => navigate(`/pdf/${node._data.doc_id}`) },
         { label: t('graph.viewNeighbors'), icon: Network, action: () => { handleNodeClick(node) } },
       )
     }
