@@ -5,8 +5,8 @@ from sqlalchemy import select
 
 from app.anonymization.crypto import MappingCrypto
 from app.anonymization.registry import EntityMapping
-from app.anonymization.repositories import AnonymizationMappingRepository
-from app.db.models import Base, AnonymizationMappingModel, DocumentModel, UserModel
+from app.anonymization.repositories import AnonymizationMappingRepository, AnonymizationAuditRepository
+from app.db.models import Base, AnonymizationMappingModel, AnonymizationAuditEntryModel, DocumentModel, UserModel
 from cryptography.fernet import Fernet
 
 
@@ -128,9 +128,9 @@ async def test_get_by_doc_does_not_leak_other_doc_rows(session_factory, seeded_d
 @pytest_asyncio.fixture
 async def two_seeded_docs(session_factory):
     async with session_factory() as s:
-        s.add(UserModel(user_id="u1", display_name="U1"))
-        s.add(DocumentModel(doc_id="docA", filename="a", file_type=".txt", chunk_count=1, user_id="u1"))
-        s.add(DocumentModel(doc_id="docB", filename="b", file_type=".txt", chunk_count=1, user_id="u1"))
+        s.add(UserModel(user_id="u2", display_name="U2"))
+        s.add(DocumentModel(doc_id="docA", filename="a", file_type=".txt", chunk_count=1, user_id="u2"))
+        s.add(DocumentModel(doc_id="docB", filename="b", file_type=".txt", chunk_count=1, user_id="u2"))
         await s.commit()
     return ["docA", "docB"]
 
@@ -163,3 +163,67 @@ async def test_get_by_docs_empty_input_returns_empty_dict(session_factory, crypt
         repo = AnonymizationMappingRepository(s, crypto)
         result = await repo.get_by_docs([])
     assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_audit_log_writes_row(session_factory, seeded_doc):
+    async with session_factory() as s:
+        audit = AnonymizationAuditRepository(s)
+        await audit.log(seeded_doc, user_id="u1", action="anonymize", entity_count=7)
+        await s.commit()
+
+    async with session_factory() as s:
+        rows = (await s.execute(
+            select(AnonymizationAuditEntryModel).where(
+                AnonymizationAuditEntryModel.document_id == seeded_doc
+            )
+        )).scalars().all()
+
+    assert len(rows) == 1
+    assert rows[0].action == "anonymize"
+    assert rows[0].entity_count == 7
+    assert rows[0].user_id == "u1"
+    assert rows[0].timestamp is not None
+
+
+@pytest.mark.asyncio
+async def test_audit_mark_source_deleted_sets_timestamp(session_factory, seeded_doc):
+    async with session_factory() as s:
+        audit = AnonymizationAuditRepository(s)
+        await audit.log(seeded_doc, user_id="u1", action="anonymize", entity_count=3)
+        await audit.log(seeded_doc, user_id="u1", action="deanonymize", entity_count=3)
+        await audit.mark_source_deleted(seeded_doc)
+        await s.commit()
+
+    async with session_factory() as s:
+        rows = (await s.execute(
+            select(AnonymizationAuditEntryModel).where(
+                AnonymizationAuditEntryModel.document_id == seeded_doc
+            )
+        )).scalars().all()
+
+    assert len(rows) == 2  # audit rows survive doc delete (compliance trail)
+    assert all(r.source_deleted_at is not None for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_mapping_delete_for_doc_removes_rows(session_factory, seeded_doc, crypto):
+    async with session_factory() as s:
+        repo = AnonymizationMappingRepository(s, crypto)
+        await repo.save_batch(seeded_doc, [
+            EntityMapping(original="X", pseudonym="[PERSON_1]", entity_type="PERSON"),
+        ])
+        await s.commit()
+
+    async with session_factory() as s:
+        repo = AnonymizationMappingRepository(s, crypto)
+        await repo.delete_for_doc(seeded_doc)
+        await s.commit()
+
+    async with session_factory() as s:
+        rows = (await s.execute(
+            select(AnonymizationMappingModel).where(
+                AnonymizationMappingModel.document_id == seeded_doc
+            )
+        )).scalars().all()
+    assert rows == []

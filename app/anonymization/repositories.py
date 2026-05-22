@@ -81,3 +81,67 @@ class AnonymizationMappingRepository:
                 row.original_text_encrypted
             )
         return out
+
+    async def delete_for_doc(self, doc_id: str) -> int:
+        """Remove all mapping rows for a document. Returns affected count.
+
+        The migration's FK already has `ON DELETE CASCADE`, so this is
+        usually a no-op (the row vanishes when documents.doc_id is deleted).
+        Provided as an explicit cleanup path for the case where mappings
+        outlive the parent doc (e.g. soft-delete experiments).
+        """
+        result = await self._session.execute(
+            delete(AnonymizationMappingModel).where(
+                AnonymizationMappingModel.document_id == doc_id
+            )
+        )
+        await self._session.flush()
+        return result.rowcount or 0
+
+
+class AnonymizationAuditRepository:
+    """Append-only audit log for anonymize/deanonymize/view events.
+
+    Rows are retained past document deletion — `mark_source_deleted` stamps
+    them with a timestamp so the trail survives the data it describes.
+    """
+
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
+    async def log(
+        self,
+        doc_id: str,
+        user_id: str | None,
+        action: str,
+        entity_count: int | None = None,
+    ) -> None:
+        """Append one audit row. Caller handles the transaction commit.
+
+        Allowed actions: 'anonymize', 'deanonymize', 'view'. The DB has a
+        CHECK constraint — anything else raises an IntegrityError on commit.
+        """
+        self._session.add(
+            AnonymizationAuditEntryModel(
+                document_id=doc_id,
+                user_id=user_id,
+                action=action,
+                entity_count=entity_count,
+            )
+        )
+        await self._session.flush()
+
+    async def mark_source_deleted(self, doc_id: str) -> int:
+        """Stamp every audit row for this doc with `source_deleted_at=now`.
+
+        Called from the document delete handler alongside the cascade —
+        the rows themselves stay (compliance), but get marked so future
+        readers can tell the source data is gone.
+        """
+        await self._session.execute(
+            update(AnonymizationAuditEntryModel)
+            .where(AnonymizationAuditEntryModel.document_id == doc_id)
+            .values(source_deleted_at=datetime.now(timezone.utc))
+        )
+        await self._session.flush()
+        return 1
