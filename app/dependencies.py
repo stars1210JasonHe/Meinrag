@@ -75,3 +75,34 @@ async def get_current_user(
 
 async def get_edge_repository(db: AsyncSession = Depends(get_db)) -> EdgeRepository:
     return EdgeRepository(db)
+
+
+def get_mapping_crypto(request: Request):
+    """Returns the singleton MappingCrypto from app.state, or None when
+    ANONYMIZATION_ENABLED=false. Routes that need it must check for None.
+    """
+    return getattr(request.app.state, "mapping_crypto", None)
+
+
+async def get_anonymization_mapping_repo(
+    db: AsyncSession = Depends(get_db),
+    crypto=Depends(get_mapping_crypto),
+):
+    """Returns the mapping repo wired with the request's session + the
+    process-wide crypto. Returns None when anonymization is disabled so
+    routes can early-skip without conditional construction.
+    """
+    if crypto is None:
+        return None
+    from app.anonymization.repositories import AnonymizationMappingRepository
+    return AnonymizationMappingRepository(db, crypto)
+
+
+async def get_anonymization_audit_repo(
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    if not settings.anonymization_enabled:
+        return None
+    from app.anonymization.repositories import AnonymizationAuditRepository
+    return AnonymizationAuditRepository(db)

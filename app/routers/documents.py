@@ -15,6 +15,7 @@ from app.classification import PRIMARY_CATEGORIES, TAXONOMY
 from app.dependencies import (
     get_settings, get_vector_store, get_registry, get_llm, get_embeddings, get_current_user, get_db,
     get_summary_store, get_edge_repository,
+    get_anonymization_mapping_repo, get_anonymization_audit_repo,
 )
 from app.db.repositories import DocumentRepository
 from langchain_core.embeddings import Embeddings
@@ -890,6 +891,8 @@ async def delete_document(
     registry: DocumentRepository = Depends(get_registry),
     db: AsyncSession = Depends(get_db),
     summary_store=Depends(get_summary_store),
+    mapping_repo=Depends(get_anonymization_mapping_repo),
+    audit_repo=Depends(get_anonymization_audit_repo),
 ):
     if not await registry.get(doc_id):
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
@@ -943,5 +946,11 @@ async def delete_document(
         invalidate_caches_for_doc(doc_id)
     except Exception as e:
         logger.warning(f"Failed to invalidate multi-mindmap caches for {doc_id}: {e}")
+
+    # Anonymization-aware cleanup: remove mappings + stamp audit log.
+    # When the flag is off, both deps are None; this block no-ops.
+    if mapping_repo is not None and audit_repo is not None:
+        await mapping_repo.delete_for_doc(doc_id)
+        await audit_repo.mark_source_deleted(doc_id)
 
     return DeleteResponse(doc_id=doc_id, message="Document deleted successfully")
