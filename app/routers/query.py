@@ -9,7 +9,7 @@ from app.config import Settings
 from app.dependencies import (
     get_settings, get_vector_store, get_llm, get_embeddings, get_memory_manager,
     get_registry, get_current_user, get_edge_repository, get_summary_store,
-    get_anonymization_mapping_repo,
+    get_anonymization_mapping_repo, get_anonymization_audit_repo,
 )
 from app.db.repositories import DocumentRepository, ChatSessionRepository, EdgeRepository
 from app.models.schemas import QueryRequest, QueryResponse, SourceChunk, ChunkContextRequest, AskAIRequest, AskAIResponse
@@ -254,6 +254,7 @@ async def _doc_summary_fastpath(
     current_user: str | None,
     settings: Settings,
     mapping_repo=None,
+    audit_repo=None,
 ) -> QueryResponse:
     """Answer using pre-computed doc.summary + a handful of supporting chunks.
 
@@ -277,6 +278,13 @@ async def _doc_summary_fastpath(
             if mappings:
                 deanon_docs = deanonymize_chunks(raw_docs, mappings)
                 top_chunks = list(zip(deanon_docs, (s for _, s in top_chunks)))
+                if audit_repo is not None:
+                    for did, mapping in mappings.items():
+                        if mapping:  # skip docs with no entities
+                            await audit_repo.log(
+                                did, current_user, "deanonymize",
+                                entity_count=len(mapping),
+                            )
 
     context = format_docs([doc for doc, _ in top_chunks]) if top_chunks else "(no supporting excerpts available)"
     sources = _build_source_chunks(top_chunks) if top_chunks else []
@@ -335,6 +343,7 @@ async def query_documents(
     edge_repo: EdgeRepository = Depends(get_edge_repository),
     summary_store=Depends(get_summary_store),
     mapping_repo=Depends(get_anonymization_mapping_repo),
+    audit_repo=Depends(get_anonymization_audit_repo),
 ):
     doc_ids, user_scoped = await _resolve_doc_ids(request, settings, registry, current_user)
 
@@ -359,6 +368,7 @@ async def query_documents(
                 request, doc_summary, doc_ids, llm, vector_store,
                 memory_manager, chat_history, current_user,
                 settings=settings, mapping_repo=mapping_repo,
+                audit_repo=audit_repo,
             )
 
         # Single retrieval — one source of truth for both LLM context and frontend sources
@@ -377,6 +387,8 @@ async def query_documents(
             chat_history=chat_history,
             registry=registry,
             mapping_repo=mapping_repo,
+            audit_repo=audit_repo,
+            user_id=current_user,
         )
 
         if result.web_search_needed:
@@ -565,6 +577,7 @@ async def query_documents_stream(
     edge_repo: EdgeRepository = Depends(get_edge_repository),
     summary_store=Depends(get_summary_store),
     mapping_repo=Depends(get_anonymization_mapping_repo),
+    audit_repo=Depends(get_anonymization_audit_repo),
 ):
     """Streaming version of /query. Returns SSE events."""
     doc_ids, user_scoped = await _resolve_doc_ids(request, settings, registry, current_user)
@@ -598,6 +611,13 @@ async def query_documents_stream(
                 if mappings:
                     deanon_docs = deanonymize_chunks(raw_docs, mappings)
                     supporting = list(zip(deanon_docs, (s for _, s in supporting)))
+                    if audit_repo is not None:
+                        for did, mapping in mappings.items():
+                            if mapping:  # skip docs with no entities
+                                await audit_repo.log(
+                                    did, current_user, "deanonymize",
+                                    entity_count=len(mapping),
+                                )
         fast_path_sources_data = [s.model_dump() for s in _build_source_chunks(supporting)]
         result = None
         needs_web_search = False
@@ -632,6 +652,8 @@ async def query_documents_stream(
             chat_history=chat_history,
             registry=registry,
             mapping_repo=mapping_repo,
+            audit_repo=audit_repo,
+            user_id=current_user,
         )
         needs_web_search = result.web_search_needed
         query_types = result.query_types

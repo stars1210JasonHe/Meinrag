@@ -1185,6 +1185,8 @@ async def retrieve_and_rank(
     chat_history=None,
     registry=None,
     mapping_repo=None,
+    audit_repo=None,
+    user_id: str | None = None,
 ) -> RetrievalResult:
     """Full retrieval pipeline — single source of truth.
 
@@ -1470,6 +1472,13 @@ async def retrieve_and_rank(
                 # get_by_docs pre-populates empty dicts for legacy/PII-free docs.
                 if any(mappings_by_doc.get(d) for d in chunk_doc_ids):
                     logger.info("Deanonymized %d chunks at retrieval boundary", len(retrieved))
+                if audit_repo is not None:
+                    for did, mapping in mappings_by_doc.items():
+                        if mapping:  # skip docs with no entities (PII-free / legacy)
+                            await audit_repo.log(
+                                did, user_id, "deanonymize",
+                                entity_count=len(mapping),
+                            )
 
     sources = _build_source_chunks(retrieved)
 
