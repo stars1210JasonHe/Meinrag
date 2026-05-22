@@ -16,6 +16,7 @@ from app.dependencies import (
     get_settings, get_vector_store, get_registry, get_llm, get_embeddings, get_current_user, get_db,
     get_summary_store, get_edge_repository,
     get_anonymization_mapping_repo, get_anonymization_audit_repo,
+    get_anonymization_engine,
 )
 from app.db.repositories import DocumentRepository
 from langchain_core.embeddings import Embeddings
@@ -65,6 +66,10 @@ async def upload_document(
     current_user: str = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     summary_store=Depends(get_summary_store),
+    # NEW (Task 8 — anonymization pre-embedding hook)
+    anon_engine=Depends(get_anonymization_engine),
+    mapping_repo=Depends(get_anonymization_mapping_repo),
+    audit_repo=Depends(get_anonymization_audit_repo),
 ):
     filename = file.filename or "unknown"
     suffix = Path(filename).suffix.lower()
@@ -103,6 +108,46 @@ async def upload_document(
         # Process and index
         processor = DocumentProcessor(settings)
         chunks = await processor.load_and_split(upload_path, doc_id=doc_id, llm=llm)
+
+        # ─── Anonymization pre-embedding hook (Task 8) ─────────────────
+        # When the flag is on, every chunk's text is pseudonymized
+        # before embedding. The vector store + OpenAI embedding API
+        # never see raw PII. Mappings + audit row persisted before
+        # vector store add so a downstream write failure doesn't leave
+        # orphan chunks we can't deanonymize later.
+        if settings.anonymization_enabled and anon_engine is not None:
+            from app.anonymization import EntityRegistry
+            from langchain_core.documents import Document
+
+            entity_registry = EntityRegistry()
+            new_chunks: list = []
+            total_entities = 0
+            for chunk in chunks:
+                result = anon_engine.analyze_and_anonymize(
+                    chunk.page_content, entity_registry,
+                )
+                total_entities += result.entity_count
+                new_chunks.append(Document(
+                    page_content=result.text,
+                    metadata={
+                        **chunk.metadata,
+                        "anonymized": True,
+                        "entity_count": result.entity_count,
+                        "language": result.language,
+                    },
+                ))
+            chunks = new_chunks
+
+            if mapping_repo is not None:
+                await mapping_repo.save_batch(doc_id, entity_registry.new_mappings)
+            if audit_repo is not None:
+                await audit_repo.log(
+                    doc_id, current_user, "anonymize", entity_count=total_entities,
+                )
+            logger.info(
+                "Anonymized doc %s: %d chunks, %d entities",
+                doc_id, len(chunks), total_entities,
+            )
 
         # Parse user-curated collections from comma-separated form field
         parsed_collections: list[str] = []
