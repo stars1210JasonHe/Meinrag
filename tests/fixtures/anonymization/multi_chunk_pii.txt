@@ -1,0 +1,9 @@
+Section 1: Introduction. Alice Smith joined Acme Corp in 2021.
+
+Section 2: First incident. On 2026-04-15, Alice Smith reported a violation.
+
+Section 3: Investigation. The investigator interviewed Alice Smith about the matter.
+
+Section 4: Resolution. Alice Smith and Acme Corp reached a settlement.
+
+Section 5: Followup. Alice Smith filed paperwork on 2026-04-22. Bob Jones witnessed.
