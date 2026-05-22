@@ -1184,6 +1184,7 @@ async def retrieve_and_rank(
     summary_store=None,
     chat_history=None,
     registry=None,
+    mapping_repo=None,
 ) -> RetrievalResult:
     """Full retrieval pipeline — single source of truth.
 
@@ -1445,6 +1446,27 @@ async def retrieve_and_rank(
             retrieved = retrieved[:n_label] + _reorder_for_attention(retrieved[n_label:])
     else:
         retrieved = _reorder_for_attention(retrieved)
+
+    # 17. Deanonymize at retrieval boundary (Phase 5).
+    # Replaces pseudonyms with original PII in both the LLM context and the
+    # API response (sources). The vector store retains pseudonymized text.
+    # mapping_repo is None when anonymization is disabled or unavailable.
+    if settings.anonymization_enabled and mapping_repo is not None:
+        from app.services.deanonymize import deanonymize_chunks
+
+        chunk_doc_ids = list({
+            c.metadata.get("doc_id")
+            for c, _ in retrieved
+            if c.metadata.get("doc_id")
+        })
+        if chunk_doc_ids:
+            mappings_by_doc = await mapping_repo.get_by_docs(chunk_doc_ids)
+            if mappings_by_doc:
+                deanon_docs = deanonymize_chunks(
+                    [c for c, _ in retrieved], mappings_by_doc
+                )
+                retrieved = list(zip(deanon_docs, (s for _, s in retrieved)))
+                logger.info("Deanonymized %d chunks at retrieval boundary", len(retrieved))
 
     sources = _build_source_chunks(retrieved)
 

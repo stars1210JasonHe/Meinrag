@@ -9,6 +9,7 @@ from app.config import Settings
 from app.dependencies import (
     get_settings, get_vector_store, get_llm, get_embeddings, get_memory_manager,
     get_registry, get_current_user, get_edge_repository, get_summary_store,
+    get_anonymization_mapping_repo,
 )
 from app.db.repositories import DocumentRepository, ChatSessionRepository, EdgeRepository
 from app.models.schemas import QueryRequest, QueryResponse, SourceChunk, ChunkContextRequest, AskAIRequest, AskAIResponse
@@ -316,6 +317,7 @@ async def query_documents(
     current_user: str = Depends(get_current_user),
     edge_repo: EdgeRepository = Depends(get_edge_repository),
     summary_store=Depends(get_summary_store),
+    mapping_repo=Depends(get_anonymization_mapping_repo),
 ):
     doc_ids, user_scoped = await _resolve_doc_ids(request, settings, registry, current_user)
 
@@ -356,6 +358,7 @@ async def query_documents(
             summary_store=summary_store,
             chat_history=chat_history,
             registry=registry,
+            mapping_repo=mapping_repo,
         )
 
         if result.web_search_needed:
@@ -543,6 +546,7 @@ async def query_documents_stream(
     current_user: str = Depends(get_current_user),
     edge_repo: EdgeRepository = Depends(get_edge_repository),
     summary_store=Depends(get_summary_store),
+    mapping_repo=Depends(get_anonymization_mapping_repo),
 ):
     """Streaming version of /query. Returns SSE events."""
     doc_ids, user_scoped = await _resolve_doc_ids(request, settings, registry, current_user)
@@ -598,6 +602,7 @@ async def query_documents_stream(
             summary_store=summary_store,
             chat_history=chat_history,
             registry=registry,
+            mapping_repo=mapping_repo,
         )
         needs_web_search = result.web_search_needed
         query_types = result.query_types
