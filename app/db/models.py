@@ -180,6 +180,10 @@ class AnonymizationMappingModel(Base):
     __table_args__ = (
         Index("ix_anon_mappings_doc", "document_id"),
         Index("ix_anon_mappings_pseudonym", "document_id", "pseudonym"),
+        UniqueConstraint(
+            "document_id", "pseudonym",
+            name="uq_anon_mappings_doc_pseudonym",
+        ),
     )
 
 

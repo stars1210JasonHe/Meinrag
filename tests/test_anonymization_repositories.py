@@ -90,3 +90,36 @@ async def test_get_by_doc_returns_empty_dict_when_no_rows(session_factory, seede
         repo = AnonymizationMappingRepository(s, crypto)
         result = await repo.get_by_doc(seeded_doc)
     assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_get_by_doc_does_not_leak_other_doc_rows(session_factory, seeded_doc, crypto):
+    """Cross-doc isolation: a query for doc1 must not return doc2's rows.
+
+    Regression guard against an accidental change to the WHERE clause —
+    that would be a PII leak across documents.
+    """
+    # Seed a second doc (seeded_doc fixture already created doc1 + user u1)
+    async with session_factory() as s:
+        s.add(DocumentModel(
+            doc_id="doc2", filename="g", file_type=".txt",
+            chunk_count=1, user_id="u1",
+        ))
+        await s.commit()
+
+    async with session_factory() as s:
+        repo = AnonymizationMappingRepository(s, crypto)
+        await repo.save_batch(seeded_doc, [
+            EntityMapping(original="Alice", pseudonym="[PERSON_1]", entity_type="PERSON"),
+        ])
+        await repo.save_batch("doc2", [
+            EntityMapping(original="Bob", pseudonym="[PERSON_1]", entity_type="PERSON"),
+        ])
+        await s.commit()
+
+    async with session_factory() as s:
+        repo = AnonymizationMappingRepository(s, crypto)
+        result = await repo.get_by_doc(seeded_doc)
+
+    assert result == {"[PERSON_1]": "Alice"}
+    assert "Bob" not in result.values()
