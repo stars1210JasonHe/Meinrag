@@ -110,17 +110,39 @@ async def upload_document(
         chunks = await processor.load_and_split(upload_path, doc_id=doc_id, llm=llm)
 
         # ─── Anonymization pre-embedding hook (Task 8) ─────────────────
-        # When the flag is on, every chunk's text is pseudonymized
-        # before embedding. The vector store + OpenAI embedding API
-        # never see raw PII. Mappings + audit row persisted before
-        # vector store add so a downstream write failure doesn't leave
-        # orphan chunks we can't deanonymize later.
-        if settings.anonymization_enabled and anon_engine is not None:
+        # When the flag is on, every chunk's text is pseudonymized before
+        # embedding. The vector store + OpenAI embedding API never see
+        # raw PII.
+        #
+        # Ordering rationale (mapping rows persist BEFORE vector store):
+        # both orderings have a fail mode if a downstream write raises.
+        # Current: vector_store failure → orphan mapping rows in DB +
+        # nothing in FAISS. Cleanup = DELETE mappings WHERE doc_id NOT IN
+        # (SELECT doc_id FROM documents). No PII in FAISS, just throwaway
+        # encrypted bytes.
+        # Reverse: save_batch failure → anonymized chunks in FAISS + no
+        # mappings to deanonymize them. Chunks contain [PERSON_1] forever
+        # and can never be recovered. Strictly worse.
+        if settings.anonymization_enabled:
+            # Hard-fail when state sentinels diverge. anon_engine, mapping_repo,
+            # and audit_repo all gate on app.state.mapping_crypto being set in
+            # the lifespan. If any are None here, the lifespan didn't wire them
+            # correctly — anonymizing chunks without saving mappings would
+            # produce permanently unrecoverable documents.
+            if anon_engine is None or mapping_repo is None or audit_repo is None:
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        "anonymization_enabled=True but engine/repos not initialized. "
+                        "Check lifespan log for crypto setup errors."
+                    ),
+                )
+
             from app.anonymization import EntityRegistry
             from langchain_core.documents import Document
 
             entity_registry = EntityRegistry()
-            new_chunks: list = []
+            new_chunks: list[Document] = []
             total_entities = 0
             for chunk in chunks:
                 result = anon_engine.analyze_and_anonymize(
@@ -138,12 +160,10 @@ async def upload_document(
                 ))
             chunks = new_chunks
 
-            if mapping_repo is not None:
-                await mapping_repo.save_batch(doc_id, entity_registry.new_mappings)
-            if audit_repo is not None:
-                await audit_repo.log(
-                    doc_id, current_user, "anonymize", entity_count=total_entities,
-                )
+            await mapping_repo.save_batch(doc_id, entity_registry.new_mappings)
+            await audit_repo.log(
+                doc_id, current_user, "anonymize", entity_count=total_entities,
+            )
             logger.info(
                 "Anonymized doc %s: %d chunks, %d entities",
                 doc_id, len(chunks), total_entities,
@@ -156,6 +176,14 @@ async def upload_document(
 
         # Auto-classify into primary_category + subtags. The classifier never
         # invents new collections — it can only suggest existing user ones.
+        # NOTE on ordering vs anonymization: classification runs AFTER
+        # anonymization, so when the flag is on the classifier sees
+        # `[PERSON_1] filed against [ORG_1]` instead of real names. This
+        # degrades classification quality on PII-heavy docs (legal cases,
+        # personal dossiers). Tradeoff is deliberate — classify_document
+        # uses an OpenAI LLM, so running it on raw text would defeat the
+        # whole anonymization promise. Quality cost accepted; alternative
+        # would require a fully-local classifier.
         primary_category: str | None = None
         subtags: list[str] = []
         suggested_collections: list[str] = []
@@ -493,7 +521,16 @@ async def get_page_highlight(
     registry: DocumentRepository = Depends(get_registry),
     current_user: str = Depends(get_current_user),
 ):
-    """Render a PDF page with highlighted region (bbox → red rect, text → yellow highlight)."""
+    """Render a PDF page with highlighted region (bbox → red rect, text → yellow highlight).
+
+    KNOWN LIMITATION (anonymization): when ANONYMIZATION_ENABLED is on at
+    ingest time, chunk text contains placeholders ([PERSON_1], etc.) that
+    are absent from the original PDF bytes. The `text=` parameter will
+    silently match nothing. bbox-based highlighting (bbox param) still
+    works because bboxes are extracted at parse time and stored in chunk
+    metadata, independent of textual content. Callers driving this
+    endpoint from anonymized docs should prefer the bbox path.
+    """
     import fitz
 
     # Sanitize doc_id
