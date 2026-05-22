@@ -31,11 +31,17 @@ def deanonymize_chunks(
     for chunk in chunks:
         doc_id = chunk.metadata.get("doc_id")
         mapping = mappings_by_doc.get(doc_id) if doc_id else None
+        # Empty dict is legitimate: doc was anonymized but had no PII
+        # detected (e.g., a public arXiv paper). Passthrough is correct
+        # in both the missing-key (None) and empty ({}) cases — the
+        # downstream string-replace loop would no-op anyway.
         if not mapping:
             out.append(chunk)
             continue
         text = chunk.page_content
         for pseudonym in sorted(mapping.keys(), key=len, reverse=True):
             text = text.replace(pseudonym, mapping[pseudonym])
+        # Shallow copy is safe: chunk metadata values in this codebase
+        # are scalars or JSON-string blobs, never live mutable containers.
         out.append(Document(page_content=text, metadata=dict(chunk.metadata)))
     return out

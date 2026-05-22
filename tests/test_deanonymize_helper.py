@@ -56,3 +56,16 @@ def test_deanonymize_doc_id_not_in_mappings_passthrough():
     chunks = [Document(page_content="[PERSON_1] said hi", metadata={"doc_id": "docC"})]
     out = deanonymize_chunks(chunks, {"docA": {"[PERSON_1]": "Alice"}})
     assert out[0].page_content == "[PERSON_1] said hi"
+
+
+def test_deanonymize_empty_mapping_dict_passthrough():
+    """doc_id IS in mappings_by_doc but the inner dict is empty.
+
+    Documents the contract: `get_by_docs` pre-populates every requested
+    doc_id with `{}` even when no mapping rows exist. The legitimate
+    case this covers is a doc that was anonymized but contained no PII
+    (e.g., a public arXiv paper). Passthrough is correct.
+    """
+    chunks = [Document(page_content="[PERSON_1] said hi", metadata={"doc_id": "docA"})]
+    out = deanonymize_chunks(chunks, {"docA": {}})
+    assert out[0].page_content == "[PERSON_1] said hi"
