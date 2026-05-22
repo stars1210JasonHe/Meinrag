@@ -77,6 +77,35 @@ async def lifespan(app: FastAPI):
     app.state.llm = llm
     app.state.embeddings = embeddings
 
+    # ─── Anonymization plugin (optional, default off) ─────────────
+    if settings.anonymization_enabled:
+        from app.anonymization import AnonymizationEngine, MappingCrypto, EncryptionError
+
+        if not settings.anonymization_encryption_key:
+            raise RuntimeError(
+                "ANONYMIZATION_ENABLED=true but ANONYMIZATION_ENCRYPTION_KEY is empty. "
+                'Generate one via: python -c "from cryptography.fernet import Fernet; '
+                'print(Fernet.generate_key().decode())"'
+            )
+
+        try:
+            mapping_crypto = MappingCrypto(settings.anonymization_encryption_key)
+            # Round-trip self-test surfaces bad keys at startup, not first upload
+            if not mapping_crypto.verify():
+                raise EncryptionError("MappingCrypto.verify() returned False")
+        except EncryptionError as e:
+            raise RuntimeError(f"Anonymization encryption setup failed: {e}") from e
+
+        app.state.mapping_crypto = mapping_crypto
+        app.state.anonymization_engine = AnonymizationEngine(settings)
+        logger.info(
+            "Anonymization plugin loaded | languages=%s | confidence>=%.2f",
+            settings.anonymization_languages, settings.anonymization_confidence_threshold,
+        )
+    else:
+        app.state.mapping_crypto = None
+        app.state.anonymization_engine = None
+
     logger.info(
         f"MEINRAG started | LLM={settings.llm_provider.value} "
         f"| VectorStore={settings.vector_store.value} "
