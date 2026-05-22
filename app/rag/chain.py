@@ -16,6 +16,17 @@ from app.vectorstore.base import VectorStoreManager
 logger = logging.getLogger(__name__)
 
 
+def _should_use_bm25(settings) -> bool:
+    """BM25 over anonymized text silently fails on PII-named queries
+    (chunk has `[PERSON_1]`, query has the raw name — zero token overlap).
+    Disable BM25 outright when anonymization is on. Vector + reranker
+    still run normally.
+    """
+    if getattr(settings, "anonymization_enabled", False):
+        return False
+    return bool(getattr(settings, "hybrid_search_enabled", False))
+
+
 def _strip_ext(filename: str) -> str:
     """Strip file extension from filename."""
     dot = filename.rfind(".")
@@ -323,7 +334,7 @@ def build_rag_chain(
     # Determine effective fetch count (over-fetch if re-ranking)
     rerank_enabled = settings.rerank_enabled if settings else False
     rerank_top_n = settings.rerank_top_n if settings else 4
-    hybrid_enabled = settings.hybrid_search_enabled if settings else False
+    hybrid_enabled = _should_use_bm25(settings) if settings else False
     bm25_weight = settings.hybrid_bm25_weight if settings else 0.5
 
     # Over-fetch to allow reference demotion (fetch extra, then filter down)
