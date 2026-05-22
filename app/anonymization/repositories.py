@@ -60,3 +60,24 @@ class AnonymizationMappingRepository:
             row.pseudonym: self._crypto.decrypt(row.original_text_encrypted)
             for row in result.scalars().all()
         }
+
+    async def get_by_docs(self, doc_ids: list[str]) -> dict[str, dict[str, str]]:
+        """Batch variant of get_by_doc.
+
+        Returns `{doc_id: {pseudonym: original}}`. One SQL roundtrip across
+        all requested doc_ids — used by the retrieval-time deanonymizer
+        which gets a set of doc_ids from the retrieved chunks.
+        """
+        if not doc_ids:
+            return {}
+        result = await self._session.execute(
+            select(AnonymizationMappingModel).where(
+                AnonymizationMappingModel.document_id.in_(doc_ids)
+            )
+        )
+        out: dict[str, dict[str, str]] = {d: {} for d in doc_ids}
+        for row in result.scalars().all():
+            out[row.document_id][row.pseudonym] = self._crypto.decrypt(
+                row.original_text_encrypted
+            )
+        return out

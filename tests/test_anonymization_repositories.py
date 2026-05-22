@@ -123,3 +123,43 @@ async def test_get_by_doc_does_not_leak_other_doc_rows(session_factory, seeded_d
 
     assert result == {"[PERSON_1]": "Alice"}
     assert "Bob" not in result.values()
+
+
+@pytest_asyncio.fixture
+async def two_seeded_docs(session_factory):
+    async with session_factory() as s:
+        s.add(UserModel(user_id="u1", display_name="U1"))
+        s.add(DocumentModel(doc_id="docA", filename="a", file_type=".txt", chunk_count=1, user_id="u1"))
+        s.add(DocumentModel(doc_id="docB", filename="b", file_type=".txt", chunk_count=1, user_id="u1"))
+        await s.commit()
+    return ["docA", "docB"]
+
+
+@pytest.mark.asyncio
+async def test_get_by_docs_returns_nested_map_per_doc(session_factory, two_seeded_docs, crypto):
+    async with session_factory() as s:
+        repo = AnonymizationMappingRepository(s, crypto)
+        await repo.save_batch("docA", [
+            EntityMapping(original="Alice", pseudonym="[PERSON_1]", entity_type="PERSON"),
+        ])
+        await repo.save_batch("docB", [
+            EntityMapping(original="Bob",   pseudonym="[PERSON_1]", entity_type="PERSON"),
+        ])
+        await s.commit()
+
+    async with session_factory() as s:
+        repo = AnonymizationMappingRepository(s, crypto)
+        result = await repo.get_by_docs(["docA", "docB"])
+
+    assert result == {
+        "docA": {"[PERSON_1]": "Alice"},
+        "docB": {"[PERSON_1]": "Bob"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_by_docs_empty_input_returns_empty_dict(session_factory, crypto):
+    async with session_factory() as s:
+        repo = AnonymizationMappingRepository(s, crypto)
+        result = await repo.get_by_docs([])
+    assert result == {}
