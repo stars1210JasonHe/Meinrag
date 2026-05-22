@@ -112,3 +112,8 @@ async def get_anonymization_audit_repo(
         return None
     from app.anonymization.repositories import AnonymizationAuditRepository
     return AnonymizationAuditRepository(db)
+
+
+def get_anonymization_engine(request: Request):
+    """Return the singleton AnonymizationEngine, or None when disabled."""
+    return getattr(request.app.state, "anonymization_engine", None)
