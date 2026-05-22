@@ -100,9 +100,15 @@ async def get_anonymization_mapping_repo(
 
 async def get_anonymization_audit_repo(
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),
+    crypto=Depends(get_mapping_crypto),
 ):
-    if not settings.anonymization_enabled:
+    """Same disable gate as get_anonymization_mapping_repo — both
+    factories key off whether app.state.mapping_crypto was published
+    in the lifespan. Avoids the dual-gate (state vs settings)
+    inconsistency that could let one repo go live while the other
+    silently returns None.
+    """
+    if crypto is None:
         return None
     from app.anonymization.repositories import AnonymizationAuditRepository
     return AnonymizationAuditRepository(db)
