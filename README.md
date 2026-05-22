@@ -228,6 +228,90 @@ RERANK_TOP_N=4
 
 ---
 
+## Enabling Anonymization (Optional)
+
+MEINRAG ships with an optional PII de-identification plugin (Microsoft
+Presidio + spaCy) that pseudonymizes documents before they reach the
+embedding API or vector store. The vector store sees `[PERSON_1]`
+instead of "Alice Smith"; authorized users see the original names in
+chat answers thanks to a reversible mapping table (Fernet-encrypted).
+
+**Default: OFF.** OSS users don't pay for the ~580 MB of spaCy NER
+models unless they enable the feature.
+
+### What's protected, what's not
+
+| Component | Sees raw PII? |
+|---|---|
+| OpenAI embedding API | No |
+| Vector store (FAISS) | No |
+| BM25 index | No (disabled when anonymization is on) |
+| LLM completion API | **Yes** — transient, for authorized users only |
+| API response (citations) | Yes — for authorized users only |
+| Encrypted mappings table | Stored Fernet-encrypted; only decrypted at query time |
+
+The LLM-completion exposure is intentional: anonymized chunks degrade
+answer quality too much. The bigger risk (PII persisting in vector
+store + embedding API logs) is covered.
+
+### Enabling
+
+1. Install the extra dependency group:
+   ```bash
+   uv sync --extra anonymization
+   ```
+2. Download spaCy models (one-time, ~580 MB):
+   ```bash
+   uv run python -m spacy download en_core_web_lg
+   uv run python -m spacy download zh_core_web_trf
+   ```
+3. Generate a Fernet encryption key:
+   ```bash
+   uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+   ```
+4. Set environment variables in `.env`:
+   ```
+   ANONYMIZATION_ENABLED=true
+   ANONYMIZATION_ENCRYPTION_KEY=<paste the key from step 3>
+   ```
+5. Run the migration (already applied if you've been running migrations,
+   but safe to re-run):
+   ```bash
+   uv run alembic upgrade head
+   ```
+6. Verify the key works at startup:
+   ```bash
+   uv run python scripts/verify_anonymization_key.py
+   ```
+7. Restart the server. Upload a new document. Inspect via:
+   ```bash
+   uv run python scripts/scan_vector_store_for_pii.py --doc <doc_id>
+   ```
+   Expected: zero PII hits.
+
+### Important caveats
+
+- **No retroactive protection.** Enabling the flag protects only
+  **new** uploads. To anonymize an existing doc, use
+  `scripts/reanonymize_doc.py <doc_id>` (re-runs the pipeline through
+  the anonymization step).
+- **Disabling is one-way.** Flipping the flag back to false leaves
+  pseudonymized chunks in the vector store — chat answers will show
+  `[PERSON_1]` placeholders. To revert, re-ingest affected docs with
+  the flag off.
+- **Lose the key, lose the mappings.** The encryption key is the only
+  way to recover original PII from the mapping table. If lost, those
+  docs are effectively destroyed for de-anonymization purposes.
+  Back up the key to a secrets manager / offline copy.
+- **BM25 is disabled when anonymization is on.** Keyword queries
+  containing raw PII (e.g. "show me everything about Alice Smith") will
+  not match anonymized chunks via BM25. Vector + reranker still work
+  semantically.
+- **Default-off forever.** This is a deployment-time choice; the OSS
+  main branch will never auto-enable anonymization.
+
+---
+
 ## API endpoints
 
 > Building an external agent or MCP integration? See **[`API.md`](API.md)** for the
