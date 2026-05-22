@@ -252,15 +252,32 @@ async def _doc_summary_fastpath(
     memory_manager: ChatSessionRepository,
     chat_history,
     current_user: str | None,
+    settings: Settings,
+    mapping_repo=None,
 ) -> QueryResponse:
     """Answer using pre-computed doc.summary + a handful of supporting chunks.
 
     Skips the full retrieval pipeline. Fetches top-3 chunks for citations
     only — the doc summary is the primary content.
+
+    Deanonymization note: this path bypasses retrieve_and_rank, so it
+    must run deanonymize_chunks itself before format_docs + sources are
+    built. Without this, anonymized docs surface [PERSON_N] tokens in
+    both the LLM context and the user-facing citations.
     """
     top_chunks = vector_store.similarity_search_with_scores(
         request.question, k=3, doc_ids=doc_ids,
     )
+    if top_chunks and settings.anonymization_enabled and mapping_repo is not None:
+        from app.services.deanonymize import deanonymize_chunks
+        raw_docs = [doc for doc, _ in top_chunks]
+        chunk_doc_ids = list({d.metadata.get("doc_id") for d in raw_docs if d.metadata.get("doc_id")})
+        if chunk_doc_ids:
+            mappings = await mapping_repo.get_by_docs(chunk_doc_ids)
+            if mappings:
+                deanon_docs = deanonymize_chunks(raw_docs, mappings)
+                top_chunks = list(zip(deanon_docs, (s for _, s in top_chunks)))
+
     context = format_docs([doc for doc, _ in top_chunks]) if top_chunks else "(no supporting excerpts available)"
     sources = _build_source_chunks(top_chunks) if top_chunks else []
 
@@ -341,6 +358,7 @@ async def query_documents(
             return await _doc_summary_fastpath(
                 request, doc_summary, doc_ids, llm, vector_store,
                 memory_manager, chat_history, current_user,
+                settings=settings, mapping_repo=mapping_repo,
             )
 
         # Single retrieval — one source of truth for both LLM context and frontend sources
@@ -569,6 +587,17 @@ async def query_documents_stream(
         supporting = vector_store.similarity_search_with_scores(
             request.question, k=3, doc_ids=doc_ids,
         )
+        # Deanonymize before sources + context (this path bypasses
+        # retrieve_and_rank, so the Task 11 hook does not fire here).
+        if supporting and settings.anonymization_enabled and mapping_repo is not None:
+            from app.services.deanonymize import deanonymize_chunks
+            raw_docs = [doc for doc, _ in supporting]
+            chunk_doc_ids = list({d.metadata.get("doc_id") for d in raw_docs if d.metadata.get("doc_id")})
+            if chunk_doc_ids:
+                mappings = await mapping_repo.get_by_docs(chunk_doc_ids)
+                if mappings:
+                    deanon_docs = deanonymize_chunks(raw_docs, mappings)
+                    supporting = list(zip(deanon_docs, (s for _, s in supporting)))
         fast_path_sources_data = [s.model_dump() for s in _build_source_chunks(supporting)]
         result = None
         needs_web_search = False

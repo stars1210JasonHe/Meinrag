@@ -1466,7 +1466,10 @@ async def retrieve_and_rank(
                     [c for c, _ in retrieved], mappings_by_doc
                 )
                 retrieved = list(zip(deanon_docs, (s for _, s in retrieved)))
-                logger.info("Deanonymized %d chunks at retrieval boundary", len(retrieved))
+                # Only log when at least one doc actually had mappings to apply —
+                # get_by_docs pre-populates empty dicts for legacy/PII-free docs.
+                if any(mappings_by_doc.get(d) for d in chunk_doc_ids):
+                    logger.info("Deanonymized %d chunks at retrieval boundary", len(retrieved))
 
     sources = _build_source_chunks(retrieved)
 
