@@ -35,3 +35,16 @@ def test_bm25_off_when_hybrid_off():
         openai_api_key="x",
     )
     assert _should_use_bm25(s) is False
+
+
+def test_bm25_off_when_anonymization_on_even_if_hybrid_off():
+    """Anonymization gate fires regardless of hybrid_search_enabled — the
+    fourth cell of the 2x2. anon=T short-circuits before hybrid is checked.
+    """
+    s = Settings(
+        hybrid_search_enabled=False,
+        anonymization_enabled=True,
+        anonymization_encryption_key=Fernet.generate_key().decode(),
+        openai_api_key="x",
+    )
+    assert _should_use_bm25(s) is False

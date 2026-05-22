@@ -16,15 +16,17 @@ from app.vectorstore.base import VectorStoreManager
 logger = logging.getLogger(__name__)
 
 
-def _should_use_bm25(settings) -> bool:
+def _should_use_bm25(settings: Settings) -> bool:
     """BM25 over anonymized text silently fails on PII-named queries
     (chunk has `[PERSON_1]`, query has the raw name — zero token overlap).
     Disable BM25 outright when anonymization is on. Vector + reranker
     still run normally.
+
+    Callers must guard `settings is None` themselves (see build_rag_chain).
     """
-    if getattr(settings, "anonymization_enabled", False):
+    if settings.anonymization_enabled:
         return False
-    return bool(getattr(settings, "hybrid_search_enabled", False))
+    return settings.hybrid_search_enabled
 
 
 def _strip_ext(filename: str) -> str:
