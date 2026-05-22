@@ -53,6 +53,31 @@ describe('wrapRangeInSpan', () => {
     expect(span.classList.contains('chunk-marker')).toBe(true)
     expect(span.textContent).toBe('plaintiff filed')
   })
+
+  it('uses a <div> wrapper when the range crosses block-element boundaries', () => {
+    // Multi-paragraph chunk: range starts in <p>1, ends in <p>2.
+    // A <span> wrapping <p> elements is parser-invalid and renders as
+    // a tiny inline sliver in browsers. The wrapper MUST be a <div>
+    // for the highlight CSS to render around the full region.
+    const root = document.createElement('div')
+    root.innerHTML = '<p>First paragraph here.</p><p>Second paragraph here.</p>'
+
+    const firstP = root.querySelector('p:nth-child(1)')
+    const secondP = root.querySelector('p:nth-child(2)')
+    const range = document.createRange()
+    range.setStart(firstP.firstChild, 0)            // start of "First paragraph here."
+    range.setEnd(secondP.firstChild, secondP.firstChild.length)  // end of "Second paragraph here."
+
+    const wrapper = wrapRangeInSpan(range, 7, 'text')
+
+    expect(wrapper.tagName).toBe('DIV')
+    expect(wrapper.getAttribute('data-chunk-index')).toBe('7')
+    expect(wrapper.getAttribute('data-chunk-type')).toBe('text')
+    expect(wrapper.classList.contains('chunk-marker')).toBe(true)
+    // The wrapper should contain content from BOTH paragraphs.
+    expect(wrapper.textContent).toContain('First paragraph here.')
+    expect(wrapper.textContent).toContain('Second paragraph here.')
+  })
 })
 
 describe('extendRangeForwards', () => {

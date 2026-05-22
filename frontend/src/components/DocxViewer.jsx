@@ -108,7 +108,12 @@ export default function DocxViewer({ docId, activeChunkIndex }) {
   }, [status, activeChunkIndex])
 
   return (
-    <div className="flex flex-col h-full overflow-auto p-4" ref={containerRef}>
+    // The outer flex div is React-managed. The inner `containerRef` div is
+    // dedicated to docx-preview's imperative DOM and MUST stay free of
+    // React-rendered children — putting loading/error JSX in the same parent
+    // led to a `Failed to execute 'removeChild' on Node` crash when
+    // `innerHTML = ''` (line 65 below) wiped a React-tracked loading div.
+    <div className="flex flex-col h-full overflow-auto p-4">
       {status === 'loading' && (
         <div className="opacity-40 text-sm">
           {t('pdfViewer.loadingDocx', { defaultValue: 'Loading document…' })}
@@ -120,6 +125,7 @@ export default function DocxViewer({ docId, activeChunkIndex }) {
           {errorMsg && <div className="text-xs opacity-60 mt-1">{errorMsg}</div>}
         </div>
       )}
+      <div ref={containerRef} />
     </div>
   )
 }

@@ -88,30 +88,45 @@ function rangeIntersectsAny(range, taken) {
 }
 
 /**
- * Wrap the contents of `range` in a new <span> with chunk-marker
- * classes + data attributes. Returns the inserted span element.
+ * Wrap the contents of `range` in a new chunk-marker element. For
+ * ranges inside a single inline context the wrapper is a <span>; for
+ * ranges that cross block-element boundaries (multi-paragraph text
+ * chunks in docx-preview output) the wrapper is a <div>, since a
+ * <span> wrapping <p> elements is parser-invalid and renders as a
+ * tiny inline sliver in browsers.
  *
- * Caveat: if the range spans multiple parent elements (rare in
- * docx-preview output but possible with inline styling), the wrap
- * may not be semantically clean — but visually it still works
- * because we only add a left border + background.
+ * Returns the inserted wrapper element. The element always carries
+ * `class="chunk-marker"` + the data attributes regardless of tag.
  */
 export function wrapRangeInSpan(range, chunkIndex, chunkType) {
-  const span = document.createElement('span')
-  span.classList.add('chunk-marker')
-  span.setAttribute('data-chunk-index', String(chunkIndex))
-  if (chunkType) span.setAttribute('data-chunk-type', chunkType)
+  const buildWrapper = (tagName) => {
+    const el = document.createElement(tagName)
+    el.classList.add('chunk-marker')
+    el.setAttribute('data-chunk-index', String(chunkIndex))
+    if (chunkType) el.setAttribute('data-chunk-type', chunkType)
+    return el
+  }
+
+  // Try the inline path first. surroundContents succeeds when both
+  // range endpoints share an inline parent context — the common case
+  // for single-paragraph text chunks.
+  const span = buildWrapper('span')
   try {
     range.surroundContents(span)
+    return span
   } catch {
     // surroundContents throws when the range partially selects a
-    // non-text node. Fallback: extract + append, less clean but
-    // works for our needs (the active highlight still attaches).
+    // non-text node — almost always because it crosses block-element
+    // (<p>, <div>, <table>) boundaries. A <span> wrapper would be
+    // invalid HTML in this case, so use a <div> + extract+insert
+    // instead. The <div> can validly contain block children, so the
+    // highlight border + background renders around the full region.
+    const div = buildWrapper('div')
     const contents = range.extractContents()
-    span.appendChild(contents)
-    range.insertNode(span)
+    div.appendChild(contents)
+    range.insertNode(div)
+    return div
   }
-  return span
 }
 
 /**
