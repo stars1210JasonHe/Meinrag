@@ -44,3 +44,19 @@ class AnonymizationMappingRepository:
         ]
         self._session.add_all(rows)
         await self._session.flush()
+
+    async def get_by_doc(self, doc_id: str) -> dict[str, str]:
+        """Return all `{pseudonym: original_plaintext}` entries for a doc.
+
+        Decrypts every row. Used at retrieval time to rebuild a registry
+        so chunk text can be deanonymized before reaching the LLM prompt.
+        """
+        result = await self._session.execute(
+            select(AnonymizationMappingModel).where(
+                AnonymizationMappingModel.document_id == doc_id
+            )
+        )
+        return {
+            row.pseudonym: self._crypto.decrypt(row.original_text_encrypted)
+            for row in result.scalars().all()
+        }

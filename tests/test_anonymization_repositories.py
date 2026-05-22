@@ -64,3 +64,29 @@ async def test_save_batch_persists_encrypted_originals(session_factory, seeded_d
     by_pseudonym = {r.pseudonym: crypto.decrypt(r.original_text_encrypted) for r in rows}
     assert by_pseudonym["[PERSON_1]"] == "Alice Smith"
     assert by_pseudonym["[EMAIL_1]"] == "bob@x.com"
+
+
+@pytest.mark.asyncio
+async def test_get_by_doc_returns_pseudonym_to_original_map(session_factory, seeded_doc, crypto):
+    mappings = [
+        EntityMapping(original="张三",        pseudonym="[PERSON_1]", entity_type="PERSON"),
+        EntityMapping(original="13800138000", pseudonym="[PHONE_1]",  entity_type="PHONE_NUMBER"),
+    ]
+    async with session_factory() as s:
+        repo = AnonymizationMappingRepository(s, crypto)
+        await repo.save_batch(seeded_doc, mappings)
+        await s.commit()
+
+    async with session_factory() as s:
+        repo = AnonymizationMappingRepository(s, crypto)
+        result = await repo.get_by_doc(seeded_doc)
+
+    assert result == {"[PERSON_1]": "张三", "[PHONE_1]": "13800138000"}
+
+
+@pytest.mark.asyncio
+async def test_get_by_doc_returns_empty_dict_when_no_rows(session_factory, seeded_doc, crypto):
+    async with session_factory() as s:
+        repo = AnonymizationMappingRepository(s, crypto)
+        result = await repo.get_by_doc(seeded_doc)
+    assert result == {}
