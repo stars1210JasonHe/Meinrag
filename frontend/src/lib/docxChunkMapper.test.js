@@ -214,4 +214,36 @@ describe('wrapChunkSpans — table + image', () => {
     expect(img1Marker.querySelector('img').getAttribute('alt')).toBe('Figure 1')
     expect(img2Marker.querySelector('img').getAttribute('alt')).toBe('Figure 2')
   })
+
+  it('logs and skips a table chunk with no matching <table> in DOM', () => {
+    const root = document.createElement('div')
+    root.innerHTML = '<p>Only text here, no tables.</p>'
+
+    const chunks = [
+      { chunk_index: 0, chunk_type: 'text',  content: 'Only text here, no tables.' },
+      { chunk_index: 1, chunk_type: 'table', content: '| ghost | table |' },
+    ]
+
+    const result = wrapChunkSpans(root, chunks)
+
+    expect(result.matched).toBe(1)
+    expect(result.skipped).toBe(1)
+    expect(result.skippedChunks).toEqual([1])
+  })
+
+  it('skips an image chunk with no matching <img> in DOM', () => {
+    const root = document.createElement('div')
+    root.innerHTML = '<p>Text only, no img.</p>'
+
+    const chunks = [
+      { chunk_index: 0, chunk_type: 'text',  content: 'Text only, no img.' },
+      { chunk_index: 1, chunk_type: 'image', content: 'Lonely caption' },
+    ]
+
+    const result = wrapChunkSpans(root, chunks)
+
+    expect(result.matched).toBe(1)
+    expect(result.skipped).toBe(1)
+    expect(result.skippedChunks).toEqual([1])
+  })
 })
