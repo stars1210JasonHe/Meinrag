@@ -138,10 +138,10 @@ class AnonymizationAuditRepository:
         the rows themselves stay (compliance), but get marked so future
         readers can tell the source data is gone.
         """
-        await self._session.execute(
+        result = await self._session.execute(
             update(AnonymizationAuditEntryModel)
             .where(AnonymizationAuditEntryModel.document_id == doc_id)
             .values(source_deleted_at=datetime.now(timezone.utc))
         )
         await self._session.flush()
-        return 1
+        return result.rowcount or 0

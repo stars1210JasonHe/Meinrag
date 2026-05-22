@@ -192,8 +192,22 @@ async def test_audit_mark_source_deleted_sets_timestamp(session_factory, seeded_
         audit = AnonymizationAuditRepository(s)
         await audit.log(seeded_doc, user_id="u1", action="anonymize", entity_count=3)
         await audit.log(seeded_doc, user_id="u1", action="deanonymize", entity_count=3)
-        await audit.mark_source_deleted(seeded_doc)
         await s.commit()
+
+    # Confirm rows start with source_deleted_at == None so the after-check is meaningful
+    async with session_factory() as s:
+        pre_rows = (await s.execute(
+            select(AnonymizationAuditEntryModel).where(
+                AnonymizationAuditEntryModel.document_id == seeded_doc
+            )
+        )).scalars().all()
+    assert all(r.source_deleted_at is None for r in pre_rows)
+
+    async with session_factory() as s:
+        audit = AnonymizationAuditRepository(s)
+        affected = await audit.mark_source_deleted(seeded_doc)
+        await s.commit()
+    assert affected == 2  # rowcount is the actual UPDATE count, not a literal 1
 
     async with session_factory() as s:
         rows = (await s.execute(
@@ -217,8 +231,9 @@ async def test_mapping_delete_for_doc_removes_rows(session_factory, seeded_doc, 
 
     async with session_factory() as s:
         repo = AnonymizationMappingRepository(s, crypto)
-        await repo.delete_for_doc(seeded_doc)
+        count = await repo.delete_for_doc(seeded_doc)
         await s.commit()
+    assert count == 1  # delete_for_doc returns rowcount
 
     async with session_factory() as s:
         rows = (await s.execute(
