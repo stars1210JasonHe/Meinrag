@@ -1473,12 +1473,30 @@ async def retrieve_and_rank(
                 if any(mappings_by_doc.get(d) for d in chunk_doc_ids):
                     logger.info("Deanonymized %d chunks at retrieval boundary", len(retrieved))
                 if audit_repo is not None:
+                    # entity_count records the number of DISTINCT pseudonyms
+                    # in the doc's mapping (not the number of substitutions
+                    # actually performed in the retrieved chunks). Use this
+                    # as a proxy for "how much PII could have been exposed"
+                    # — accurate substitution-count requires re-scanning
+                    # chunk text, deferred to v2.
+                    #
+                    # Fail-safe posture: a failed audit write must not
+                    # silently roll back the user's query data. We log the
+                    # failure loudly so operators can detect it, then
+                    # continue.
                     for did, mapping in mappings_by_doc.items():
                         if mapping:  # skip docs with no entities (PII-free / legacy)
-                            await audit_repo.log(
-                                did, user_id, "deanonymize",
-                                entity_count=len(mapping),
-                            )
+                            try:
+                                await audit_repo.log(
+                                    did, user_id, "deanonymize",
+                                    entity_count=len(mapping),
+                                )
+                            except Exception:
+                                logger.error(
+                                    "AUDIT WRITE FAILED for doc=%s user=%s — "
+                                    "deanonymize event NOT recorded",
+                                    did, user_id, exc_info=True,
+                                )
 
     sources = _build_source_chunks(retrieved)
 

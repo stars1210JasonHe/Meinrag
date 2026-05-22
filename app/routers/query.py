@@ -279,12 +279,22 @@ async def _doc_summary_fastpath(
                 deanon_docs = deanonymize_chunks(raw_docs, mappings)
                 top_chunks = list(zip(deanon_docs, (s for _, s in top_chunks)))
                 if audit_repo is not None:
+                    # See retrieval.py step 17 for entity_count semantics +
+                    # fail-safe rationale. Same pattern here for the
+                    # doc-summary fast-path bypass.
                     for did, mapping in mappings.items():
                         if mapping:  # skip docs with no entities
-                            await audit_repo.log(
-                                did, current_user, "deanonymize",
-                                entity_count=len(mapping),
-                            )
+                            try:
+                                await audit_repo.log(
+                                    did, current_user, "deanonymize",
+                                    entity_count=len(mapping),
+                                )
+                            except Exception:
+                                logger.error(
+                                    "AUDIT WRITE FAILED for doc=%s user=%s — "
+                                    "deanonymize event NOT recorded (fast-path)",
+                                    did, current_user, exc_info=True,
+                                )
 
     context = format_docs([doc for doc, _ in top_chunks]) if top_chunks else "(no supporting excerpts available)"
     sources = _build_source_chunks(top_chunks) if top_chunks else []
@@ -612,12 +622,22 @@ async def query_documents_stream(
                     deanon_docs = deanonymize_chunks(raw_docs, mappings)
                     supporting = list(zip(deanon_docs, (s for _, s in supporting)))
                     if audit_repo is not None:
+                        # See retrieval.py step 17 for entity_count semantics
+                        # + fail-safe rationale. Same pattern here for the
+                        # streaming doc-summary fast-path bypass.
                         for did, mapping in mappings.items():
                             if mapping:  # skip docs with no entities
-                                await audit_repo.log(
-                                    did, current_user, "deanonymize",
-                                    entity_count=len(mapping),
-                                )
+                                try:
+                                    await audit_repo.log(
+                                        did, current_user, "deanonymize",
+                                        entity_count=len(mapping),
+                                    )
+                                except Exception:
+                                    logger.error(
+                                        "AUDIT WRITE FAILED for doc=%s user=%s — "
+                                        "deanonymize event NOT recorded (stream fast-path)",
+                                        did, current_user, exc_info=True,
+                                    )
         fast_path_sources_data = [s.model_dump() for s in _build_source_chunks(supporting)]
         result = None
         needs_web_search = False

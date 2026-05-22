@@ -174,7 +174,12 @@ async def test_query_writes_deanonymize_audit_entry(anon_audit_app, tmp_path):
         doc_id = r.json()["doc_id"]
 
         # Run a query — LLM call is mocked, full retrieval pipeline runs
-        client.post("/query", json={"question": "Who filed?", "doc_ids": [doc_id]})
+        r = client.post("/query", json={"question": "Who filed?", "doc_ids": [doc_id]})
+        # Status assert so a silent 500 doesn't pass the audit assertion
+        # by way of an empty rollback — without this, a failure mid-query
+        # would surface as "no deanonymize audit row" rather than the
+        # actual error.
+        assert r.status_code == 200, f"Query failed: {r.status_code} {r.text}"
     finally:
         os.unlink(fixture_path)
 
