@@ -106,6 +106,25 @@ async def lifespan(app: FastAPI):
         app.state.mapping_crypto = None
         app.state.anonymization_engine = None
 
+        # Flag is off — but if there are anonymized docs from a previous
+        # session, surfacing [PERSON_N] in chat answers is a bad UX.
+        # Warn loudly so the operator notices.
+        from sqlalchemy import select, func
+        from app.db.models import AnonymizationMappingModel
+
+        async with session_factory() as s:
+            count = (await s.execute(
+                select(func.count()).select_from(AnonymizationMappingModel)
+            )).scalar_one()
+        if count > 0:
+            logger.warning(
+                "ANONYMIZATION_ENABLED=false but %d row(s) in "
+                "anonymization_mappings exist — chat answers for those "
+                "documents will display [PERSON_N] placeholders. "
+                "Use scripts/reanonymize_doc.py --disable <doc_id> to revert.",
+                count,
+            )
+
     logger.info(
         f"MEINRAG started | LLM={settings.llm_provider.value} "
         f"| VectorStore={settings.vector_store.value} "
