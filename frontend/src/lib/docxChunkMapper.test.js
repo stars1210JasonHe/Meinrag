@@ -141,3 +141,41 @@ describe('wrapChunkSpans', () => {
     expect(result.skipped).toBe(2)
   })
 })
+
+describe('wrapChunkSpans — table + image', () => {
+  it('wraps the Nth table chunk into the Nth <table> in DOM', () => {
+    const root = document.createElement('div')
+    root.innerHTML =
+      '<p>Intro text.</p>' +
+      '<table><tr><td>First table cell</td></tr></table>' +
+      '<p>Middle text.</p>' +
+      '<table><tr><td>Second table cell</td></tr></table>' +
+      '<p>Trailing text.</p>'
+
+    const chunks = [
+      { chunk_index: 0, chunk_type: 'text',  content: 'Intro text.' },
+      { chunk_index: 1, chunk_type: 'table', content: '| First table cell |' },
+      { chunk_index: 2, chunk_type: 'text',  content: 'Middle text.' },
+      { chunk_index: 3, chunk_type: 'table', content: '| Second table cell |' },
+      { chunk_index: 4, chunk_type: 'text',  content: 'Trailing text.' },
+    ]
+
+    const result = wrapChunkSpans(root, chunks)
+
+    expect(result.matched).toBe(5)
+    expect(result.skipped).toBe(0)
+
+    // Markers exist for both tables, with correct chunk_index attribution
+    const table1Marker = root.querySelector('[data-chunk-index="1"]')
+    const table2Marker = root.querySelector('[data-chunk-index="3"]')
+    expect(table1Marker).not.toBeNull()
+    expect(table2Marker).not.toBeNull()
+    expect(table1Marker.getAttribute('data-chunk-type')).toBe('table')
+    expect(table2Marker.getAttribute('data-chunk-type')).toBe('table')
+
+    // The first marker's content includes the first table's text; the second
+    // marker's content includes the second table's text.
+    expect(table1Marker.textContent).toContain('First table cell')
+    expect(table2Marker.textContent).toContain('Second table cell')
+  })
+})

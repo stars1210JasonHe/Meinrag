@@ -162,16 +162,46 @@ function nextTextNode(from, root) {
   return walker.nextNode()
 }
 
+/**
+ * Find the FIRST unclaimed element of `tagName` (e.g. 'table', 'img')
+ * inside `container` and wrap it in a marker element. Tables get a
+ * <div> wrapper (block element, valid inside <body>); images get a
+ * <span> wrapper (inline). Returns the wrapper element, or null if
+ * no unclaimed element exists.
+ *
+ * "Unclaimed" = not already inside a `.chunk-marker` ancestor. Because
+ * chunks are iterated in document order and each call claims one
+ * element, repeated calls naturally walk through tables/images in
+ * order: 1st call wraps the 1st <table>, 2nd call wraps the 2nd, etc.
+ */
+export function wrapFirstUnclaimedBlock(container, tagName, chunkIndex, chunkType) {
+  const all = container.querySelectorAll(tagName)
+  for (const el of all) {
+    if (el.closest('.chunk-marker')) continue
+    // <table> needs a block wrapper to stay valid HTML (a <span>
+    // around a <table> is parser-invalid).
+    const wrapperTag = tagName === 'table' ? 'div' : 'span'
+    const wrapper = document.createElement(wrapperTag)
+    wrapper.classList.add('chunk-marker')
+    wrapper.setAttribute('data-chunk-index', String(chunkIndex))
+    wrapper.setAttribute('data-chunk-type', chunkType)
+    el.parentNode.insertBefore(wrapper, el)
+    wrapper.appendChild(el)
+    return wrapper
+  }
+  return null
+}
+
 const NEEDLE_LEN = 80
 
 /**
- * Walk `container`'s DOM and wrap each text chunk's first-occurrence
- * text in a marker span. Returns a summary object with match counts
- * and a list of skipped chunk_index values (whose text didn't render
- * verbatim — usually because docling normalized whitespace differently).
- *
- * Image and table chunks are skipped in v1 — handled in a separate
- * pass over <img> / <table> DOM nodes (v2 follow-up).
+ * Walk `container`'s DOM and wrap each chunk in a marker element.
+ * Text chunks get a <span> wrapping the matched text range.
+ * Table chunks get a <div> wrapping the Nth unclaimed <table>.
+ * Image chunks get a <span> wrapping the Nth unclaimed <img>.
+ * Returns a summary object with match counts and a list of skipped
+ * chunk_index values (whose content didn't render verbatim or wasn't
+ * found in the DOM).
  */
 export function wrapChunkSpans(container, chunks) {
   const taken = []
@@ -180,39 +210,75 @@ export function wrapChunkSpans(container, chunks) {
   const skippedChunks = []
 
   for (const chunk of chunks) {
-    if (chunk.chunk_type !== 'text') {
-      skipped++
-      skippedChunks.push(chunk.chunk_index)
+    // ─── TEXT branch (unchanged from current implementation) ──────
+    if (chunk.chunk_type === 'text') {
+      const content = (chunk.content || '').trim()
+      if (!content) {
+        skipped++
+        skippedChunks.push(chunk.chunk_index)
+        continue
+      }
+
+      const needle = content.slice(0, Math.min(NEEDLE_LEN, content.length)).trim()
+      const range = findFirstUnclaimedTextRange(container, needle, taken)
+      if (!range) {
+        console.warn(
+          `[docxChunkMapper] chunk ${chunk.chunk_index} text not found in rendered doc; skipping highlight`
+        )
+        skipped++
+        skippedChunks.push(chunk.chunk_index)
+        continue
+      }
+
+      extendRangeForwards(range, Math.max(0, content.length - needle.length))
+      // Clone the range before wrapping: surroundContents() mutates the range's
+      // boundary points from text-node offsets to element offsets, which breaks
+      // compareBoundaryPoints for subsequent taken-set checks.
+      const claimedRange = range.cloneRange()
+      wrapRangeInSpan(range, chunk.chunk_index, chunk.chunk_type)
+      taken.push(claimedRange)
+      matched++
       continue
     }
 
-    const content = (chunk.content || '').trim()
-    if (!content) {
-      skipped++
-      skippedChunks.push(chunk.chunk_index)
-      continue
-    }
-
-    const needle = content.slice(0, Math.min(NEEDLE_LEN, content.length)).trim()
-    const range = findFirstUnclaimedTextRange(container, needle, taken)
-    if (!range) {
-      console.warn(
-        `[docxChunkMapper] chunk ${chunk.chunk_index} text not found in rendered doc; skipping highlight`
+    // ─── TABLE branch (new) ──────────────────────────────────────
+    if (chunk.chunk_type === 'table') {
+      const wrapper = wrapFirstUnclaimedBlock(
+        container, 'table', chunk.chunk_index, 'table',
       )
-      skipped++
-      skippedChunks.push(chunk.chunk_index)
+      if (!wrapper) {
+        console.warn(
+          `[docxChunkMapper] chunk ${chunk.chunk_index} table not found in rendered doc; skipping highlight`
+        )
+        skipped++
+        skippedChunks.push(chunk.chunk_index)
+        continue
+      }
+      matched++
       continue
     }
 
-    extendRangeForwards(range, Math.max(0, content.length - needle.length))
-    // Clone the range before wrapping: surroundContents() mutates the range's
-    // boundary points from text-node offsets to element offsets, which breaks
-    // compareBoundaryPoints for subsequent taken-set checks in happy-dom /
-    // browsers. The clone preserves the pre-wrap text-node boundaries.
-    const claimedRange = range.cloneRange()
-    wrapRangeInSpan(range, chunk.chunk_index, chunk.chunk_type)
-    taken.push(claimedRange)
-    matched++
+    // ─── IMAGE branch (new) ──────────────────────────────────────
+    if (chunk.chunk_type === 'image') {
+      const wrapper = wrapFirstUnclaimedBlock(
+        container, 'img', chunk.chunk_index, 'image',
+      )
+      if (!wrapper) {
+        console.warn(
+          `[docxChunkMapper] chunk ${chunk.chunk_index} image not found in rendered doc; skipping highlight`
+        )
+        skipped++
+        skippedChunks.push(chunk.chunk_index)
+        continue
+      }
+      matched++
+      continue
+    }
+
+    // ─── Unknown chunk_type (e.g. 'formula' in v2) ───────────────
+    // Skip without warning — out-of-scope for v1 by design.
+    skipped++
+    skippedChunks.push(chunk.chunk_index)
   }
 
   return { matched, skipped, skippedChunks }
