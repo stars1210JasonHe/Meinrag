@@ -178,4 +178,40 @@ describe('wrapChunkSpans — table + image', () => {
     expect(table1Marker.textContent).toContain('First table cell')
     expect(table2Marker.textContent).toContain('Second table cell')
   })
+
+  it('wraps the Nth image chunk into the Nth <img> in DOM', () => {
+    const root = document.createElement('div')
+    root.innerHTML =
+      '<p>Before figures.</p>' +
+      '<img src="data:image/png;base64,iVBORw0KGgo=" alt="Figure 1" />' +
+      '<p>Between figures.</p>' +
+      '<img src="data:image/png;base64,iVBORw0KGgo=" alt="Figure 2" />' +
+      '<p>After figures.</p>'
+
+    const chunks = [
+      { chunk_index: 0, chunk_type: 'text',  content: 'Before figures.' },
+      { chunk_index: 1, chunk_type: 'image', content: 'Figure 1' },
+      { chunk_index: 2, chunk_type: 'text',  content: 'Between figures.' },
+      { chunk_index: 3, chunk_type: 'image', content: 'Figure 2' },
+      { chunk_index: 4, chunk_type: 'text',  content: 'After figures.' },
+    ]
+
+    const result = wrapChunkSpans(root, chunks)
+
+    expect(result.matched).toBe(5)
+    expect(result.skipped).toBe(0)
+
+    const img1Marker = root.querySelector('[data-chunk-index="1"]')
+    const img2Marker = root.querySelector('[data-chunk-index="3"]')
+    expect(img1Marker).not.toBeNull()
+    expect(img2Marker).not.toBeNull()
+    expect(img1Marker.getAttribute('data-chunk-type')).toBe('image')
+    expect(img2Marker.getAttribute('data-chunk-type')).toBe('image')
+
+    // Each marker wraps exactly one <img>
+    expect(img1Marker.querySelectorAll('img').length).toBe(1)
+    expect(img2Marker.querySelectorAll('img').length).toBe(1)
+    expect(img1Marker.querySelector('img').getAttribute('alt')).toBe('Figure 1')
+    expect(img2Marker.querySelector('img').getAttribute('alt')).toBe('Figure 2')
+  })
 })
