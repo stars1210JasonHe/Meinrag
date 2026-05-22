@@ -79,24 +79,24 @@ async def lifespan(app: FastAPI):
 
     # ─── Anonymization plugin (optional, default off) ─────────────
     if settings.anonymization_enabled:
+        # Key presence is enforced by Settings._validate_anonymization_key
+        # (see app/config.py). Reaching here guarantees the key is set —
+        # MappingCrypto's job here is to catch *malformed* keys (e.g.,
+        # right length but bad base64) via the verify() round-trip.
         from app.anonymization import AnonymizationEngine, MappingCrypto, EncryptionError
-
-        if not settings.anonymization_encryption_key:
-            raise RuntimeError(
-                "ANONYMIZATION_ENABLED=true but ANONYMIZATION_ENCRYPTION_KEY is empty. "
-                'Generate one via: python -c "from cryptography.fernet import Fernet; '
-                'print(Fernet.generate_key().decode())"'
-            )
 
         try:
             mapping_crypto = MappingCrypto(settings.anonymization_encryption_key)
-            # Round-trip self-test surfaces bad keys at startup, not first upload
             if not mapping_crypto.verify():
-                raise EncryptionError("MappingCrypto.verify() returned False")
+                raise EncryptionError(
+                    "MappingCrypto.verify() self-test failed — key may be truncated or corrupted."
+                )
         except EncryptionError as e:
             raise RuntimeError(f"Anonymization encryption setup failed: {e}") from e
 
         app.state.mapping_crypto = mapping_crypto
+        # AnonymizationEngine.__init__ is intentionally trivial — no heavy
+        # imports, no IO. Presidio + spaCy load lazily on first call.
         app.state.anonymization_engine = AnonymizationEngine(settings)
         logger.info(
             "Anonymization plugin loaded | languages=%s | confidence>=%.2f",
