@@ -44,11 +44,24 @@ Lang = Literal["en", "zh", "mixed", "other"]
 # Unicode ranges for the most common CJK ideographs. We use this to
 # detect "mixed" chunks where the text clearly contains both scripts.
 _CJK_RANGE = re.compile(r"[一-鿿㐀-䶿]")
-_LATIN_RANGE = re.compile(r"[A-Za-z]{3,}")  # words of 3+ Latin chars
+# Words of 3+ Latin chars. Known limitation: text whose only Latin tokens
+# are 1-2 chars (e.g., "Dr. Müller", "Ja, nein.") slips past this gate and
+# routes to "en" without a langdetect call. Acceptable for v1 — real PII
+# docs in our corpus contain longer Latin words; the gap matters only for
+# stub-like content where the language signal is also weak.
+_LATIN_RANGE = re.compile(r"[A-Za-z]{3,}")
 
 # Latin-script langdetect codes we accept as "en". Anything else with
 # high confidence becomes "other" so engine.py can emit a fallback warning.
 _EN_LANGDETECT_CODES = {"en"}
+# 0.90 chosen empirically: langdetect needs ~1-2 sentences of pure non-EN
+# Latin text to reach 0.90 confidence on FR/DE/ES; below that the signal
+# is often dominated by Latin punctuation/proper nouns and an "other"
+# routing would be noisy. Validated against the real PII corpus in
+# scripts/anonymization_validate_real_corpus.py. NOTE: the 0.95 figure
+# in the module docstring above is aspirational / historical — the actual
+# "mixed" routing uses the CJK-ratio heuristic (lines below), not a
+# langdetect confidence threshold.
 _OTHER_LANG_CONFIDENCE_MIN = 0.90
 
 
