@@ -60,7 +60,11 @@ def test_missing_key_raises_before_lifespan(monkeypatch, tmp_path):
     construction, so create_app() itself raises — never reaches lifespan.
     """
     monkeypatch.setenv("ANONYMIZATION_ENABLED", "true")
-    monkeypatch.delenv("ANONYMIZATION_ENCRYPTION_KEY", raising=False)
+    # Empty string in os.environ takes precedence over any value in
+    # the project's .env file — `monkeypatch.delenv` alone would leave
+    # pydantic-settings free to fall back to the .env file's value,
+    # which has a real key set for local development.
+    monkeypatch.setenv("ANONYMIZATION_ENCRYPTION_KEY", "")
     monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
     monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
     monkeypatch.setenv("VECTORSTORE_DIR", str(tmp_path / "vs"))

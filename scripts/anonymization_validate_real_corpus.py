@@ -4,6 +4,18 @@ Walks --corpus <dir>, loads each docx/pdf/doc via the project's
 DocumentProcessor, anonymizes every chunk, and emits per-doc CSVs +
 a markdown summary fragment for the validation report.
 
+⚠️  PRIVACY NOTICE
+The per-doc CSV outputs contain the ORIGINAL entity text in plaintext
+(alongside its pseudonym) so that a human reviewer can spot-check Check 1
+precision/recall against ground truth. That is *the point* of this
+validation tool — but it also means each output CSV is a secondary
+plaintext PII artifact. Treat the --output directory as sensitive:
+- Don't commit it (tmp/ is already gitignored as a default-safe location).
+- Don't transmit unredacted CSVs over insecure channels.
+- Delete the outputs when validation is finished.
+If you only need the aggregate report (entity counts, perf, consistency)
+without per-row plaintext, redact the CSVs after spot-checking.
+
 Usage:
     uv run python scripts/anonymization_validate_real_corpus.py \\
         --corpus "\\\\100.85.155.22\\homes\\贺富强\\杂项" \\
@@ -159,6 +171,12 @@ def write_summary(out_dir: Path, results: list[dict]) -> None:
     lines = []
     lines.append("# Anonymization Validation — Summary Fragment\n")
     lines.append(f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+    lines.append(
+        "> ⚠️ The per-doc `validation_*.csv` files in this directory contain "
+        "ORIGINAL `entity_text` values in plaintext (for ground-truth spot-checking). "
+        "Treat the output directory as sensitive — do not commit or transmit "
+        "unredacted CSVs, and delete after validation review.\n\n"
+    )
 
     lines.append("## Per-doc rollup\n\n")
     lines.append("| file | n_chunks | n_entities | lang_mix | mean ms | p95 ms | p99 ms | error |\n")
@@ -236,6 +254,16 @@ async def _run():
         logger.error("Corpus dir not found or not accessible: %s", args.corpus)
         sys.exit(2)
     args.output.mkdir(parents=True, exist_ok=True)
+
+    # Loud privacy banner — the CSVs we're about to write contain plaintext
+    # entity_text by design (so a human can spot-check Check 1 recall against
+    # ground truth). That makes the --output dir a secondary PII artifact.
+    logger.warning(
+        "PRIVACY: per-doc CSVs will contain ORIGINAL entity_text in plaintext. "
+        "Treat %s as sensitive — do not commit or transmit unencrypted, and "
+        "delete after validation review.",
+        args.output,
+    )
 
     from app.config import get_settings
     from app.anonymization import AnonymizationEngine
