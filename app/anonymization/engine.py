@@ -32,6 +32,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Module-level: warn at most once per process for non-EN/ZH content so
+# operators notice but logs aren't flooded by long FR/DE/ES documents.
+_warned_other = False
+
 
 @dataclass
 class AnonymizationResult:
@@ -85,6 +89,19 @@ class AnonymizationEngine:
             results_en = self._analyze(text, language="en")
             results_zh = self._analyze(text, language="zh")
             results = _merge_overlapping(results_en + results_zh)
+        elif lang == "other":
+            global _warned_other
+            if not _warned_other:
+                preview = text[:60].replace("\n", " ")
+                logger.warning(
+                    "anonymization: non-EN/ZH content detected, "
+                    "falling back to EN analyzer. Sample: %r. "
+                    "Add the language to ANONYMIZATION_LANGUAGES + register "
+                    "language-specific recognizers to improve accuracy.",
+                    preview,
+                )
+                _warned_other = True
+            results = self._analyze(text, language="en")
         else:
             results = self._analyze(text, language=lang)
 
