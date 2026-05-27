@@ -92,13 +92,17 @@ class AnonymizationEngine:
         elif lang == "other":
             global _warned_other
             if not _warned_other:
-                preview = text[:60].replace("\n", " ")
+                # Intentionally do NOT log the chunk content. This pipeline
+                # exists to prevent raw PII from leaking outside the
+                # anonymization boundary — and that boundary includes logs.
+                # The operator only needs a single signal that the branch
+                # fired; chunk length is enough to confirm it's substantive.
                 logger.warning(
-                    "anonymization: non-EN/ZH content detected, "
-                    "falling back to EN analyzer. Sample: %r. "
+                    "anonymization: non-EN/ZH content detected "
+                    "(chunk length=%d chars), falling back to EN analyzer. "
                     "Add the language to ANONYMIZATION_LANGUAGES + register "
                     "language-specific recognizers to improve accuracy.",
-                    preview,
+                    len(text),
                 )
                 _warned_other = True
             results = self._analyze(text, language="en")
