@@ -17,6 +17,14 @@ and gets confused on very short or mixed text. We mitigate by:
 The detector is cached per-text (LRU); the upstream pipeline also
 caches at the doc-level since most chunks of a single document share
 a language.
+
+Extension: adding a new language (e.g., French) requires three steps —
+(a) add the language code to `settings.anonymization_languages`,
+(b) extend `_EN_LANGDETECT_CODES` or add a similar mapping for the new
+    language so it doesn't fall through to "other",
+(c) create `app/anonymization/recognizers/french.py` and register it
+in the engine. Today, anything non-EN / non-ZH Latin script returns
+"other" so the engine knows to emit a fallback warning.
 """
 from __future__ import annotations
 
@@ -24,28 +32,35 @@ import re
 from functools import lru_cache
 from typing import Literal
 
-from langdetect import DetectorFactory
+from langdetect import DetectorFactory, detect_langs
 
 # Reproducible language detection — without this seed the lib randomly
 # permutes feature orderings, making the same chunk sometimes go EN and
 # sometimes go ZH. See https://github.com/Mimino666/langdetect#basic-usage
 DetectorFactory.seed = 0
 
-Lang = Literal["en", "zh", "mixed"]
+Lang = Literal["en", "zh", "mixed", "other"]
 
 # Unicode ranges for the most common CJK ideographs. We use this to
 # detect "mixed" chunks where the text clearly contains both scripts.
 _CJK_RANGE = re.compile(r"[一-鿿㐀-䶿]")
 _LATIN_RANGE = re.compile(r"[A-Za-z]{3,}")  # words of 3+ Latin chars
 
+# Latin-script langdetect codes we accept as "en". Anything else with
+# high confidence becomes "other" so engine.py can emit a fallback warning.
+_EN_LANGDETECT_CODES = {"en"}
+_OTHER_LANG_CONFIDENCE_MIN = 0.90
+
 
 @lru_cache(maxsize=1024)
 def detect_language(text: str) -> Lang:
-    """Return one of 'en', 'zh', or 'mixed'.
+    """Return one of 'en', 'zh', 'mixed', or 'other'.
 
     'mixed' triggers running BOTH analyzers in the engine layer with
-    span deduplication. Always-EN docs go straight to en_core_web_lg
-    (fast). Always-ZH docs go to zh_core_web_trf (slower transformer).
+    span deduplication. 'other' triggers a one-time warning + EN
+    fallback (we don't have FR/DE NER models). Always-EN docs go
+    straight to en_core_web_lg (fast). Always-ZH docs go to
+    zh_core_web_trf (slower transformer).
     """
     if not text or not text.strip():
         return "en"  # arbitrary safe default for empty input
@@ -65,14 +80,33 @@ def detect_language(text: str) -> Lang:
             return "mixed"
         # Fall through to langdetect for the dominant-language case
 
-    # Single-script quick paths — pure CJK or pure Latin is a confident
-    # signal in itself, more reliable than langdetect's probability output
-    # on short or technical text.
+    # Pure CJK is unambiguous.
     if has_cjk and not has_latin:
         return "zh"
+
+    # Pure Latin-script: was "en" by default; now we check langdetect to
+    # catch FR/DE/ES/etc. and route them to "other". Falls back to "en"
+    # on any langdetect error (short text, weird unicode) — preserves old
+    # behavior for the boring cases.
     if has_latin and not has_cjk:
-        # Could be EN, DE, FR, etc. — anything non-CJK routes to the EN
-        # pipeline for v1. v2 multi-language work expands this.
+        try:
+            candidates = detect_langs(text)
+        except Exception:
+            return "en"
+        if not candidates:
+            return "en"
+        top = candidates[0]
+        if top.lang in _EN_LANGDETECT_CODES:
+            return "en"
+        if top.prob >= _OTHER_LANG_CONFIDENCE_MIN:
+            return "other"
+        return "en"
+
+    # Reached when neither has_cjk nor has_latin matched (e.g., a 2-char
+    # word like "Hi" that's below the _LATIN_RANGE 3-char threshold, or
+    # pure punctuation/digits). Too short or ambiguous for langdetect —
+    # fall back to "en" as the safe default, same as for empty input.
+    if not has_cjk and not has_latin:
         return "en"
 
     # Both scripts present. Article §9.1 + §11.4 are decisive: run BOTH
