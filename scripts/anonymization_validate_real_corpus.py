@@ -29,7 +29,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s")
 logger = logging.getLogger("validate")
 
-SUPPORTED_EXTS = {".docx", ".pdf", ".doc"}
+# Ordered list (not set): makes the --limit slice deterministic across
+# Python implementations and hash-randomization seeds. Without this, a
+# user running with --limit=5 against a corpus of mixed docx/pdf/doc
+# could get a different 5 each run.
+SUPPORTED_EXTS = [".docx", ".pdf", ".doc"]
 
 
 def discover_files(corpus: Path, limit: int | None) -> list[Path]:
@@ -121,9 +125,29 @@ async def validate_doc(file_path: Path, engine, processor) -> dict:
     }
 
 
-def write_csv(out_dir: Path, file_path: Path, result: dict) -> None:
-    csv_path = out_dir / f"validation_{file_path.stem}.csv"
-    with csv_path.open("w", newline="", encoding="utf-8") as f:
+def _safe_stem(file_path: Path, corpus_root: Path) -> str:
+    """Build a collision-free CSV stem from a file's path relative to the
+    corpus root. Two files named `contract.docx` and `contract.pdf` in the
+    same dir, or in different subdirs, would otherwise share a stem and
+    one's CSV would silently overwrite the other.
+    """
+    try:
+        rel = file_path.relative_to(corpus_root)
+    except ValueError:
+        # corpus_root isn't an ancestor (shouldn't happen post-discover_files,
+        # but be defensive) — fall back to just the filename with suffix.
+        rel = Path(file_path.name)
+    # Path-separator + extension + spaces → underscore; preserves UTF-8
+    # filename characters (Chinese names render fine in modern explorers).
+    return str(rel).replace("/", "_").replace("\\", "_").replace(" ", "_").replace(".", "_")
+
+
+def write_csv(out_dir: Path, corpus_root: Path, file_path: Path, result: dict) -> None:
+    safe = _safe_stem(file_path, corpus_root)
+    csv_path = out_dir / f"validation_{safe}.csv"
+    # utf-8-sig (UTF-8 with BOM) so Excel opens Chinese entity_text values
+    # correctly on Windows. The BOM is invisible to other UTF-8 readers.
+    with csv_path.open("w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
         w.writerow(["chunk_idx", "entity_text", "pseudonym", "entity_type"])
         for e in result["entities"]:
@@ -238,7 +262,7 @@ async def _run():
     for i, f in enumerate(files, 1):
         logger.info("(%d/%d) %s", i, len(files), f.name)
         r = await validate_doc(f, engine, processor)
-        write_csv(args.output, f, r)
+        write_csv(args.output, args.corpus, f, r)
         results.append(r)
 
     write_summary(args.output, results)
