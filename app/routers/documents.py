@@ -159,13 +159,14 @@ async def upload_document(
                     },
                 ))
             chunks = new_chunks
-
-            await mapping_repo.save_batch(doc_id, entity_registry.new_mappings)
-            await audit_repo.log(
-                doc_id, current_user, "anonymize", entity_count=total_entities,
-            )
+            # mapping_repo.save_batch + audit_repo.log are deferred until
+            # AFTER registry.add (below). Otherwise the INSERT into
+            # anonymization_mappings violates the FK to documents.id —
+            # the documents row doesn't exist until registry.add runs.
+            # The in-memory entity_registry.new_mappings carries the
+            # data forward across that gap.
             logger.info(
-                "Anonymized doc %s: %d chunks, %d entities",
+                "Anonymized doc %s: %d chunks, %d entities (mappings persist after registry.add)",
                 doc_id, len(chunks), total_entities,
             )
 
@@ -255,6 +256,15 @@ async def upload_document(
             primary_category=primary_category,
             subtags=subtags,
         )
+
+        # Persist anonymization mappings now that the documents row exists
+        # (FK target for anonymization_mappings.document_id). entity_registry
+        # and total_entities were populated in the anonymization block above.
+        if settings.anonymization_enabled:
+            await mapping_repo.save_batch(doc_id, entity_registry.new_mappings)
+            await audit_repo.log(
+                doc_id, current_user, "anonymize", entity_count=total_entities,
+            )
 
         message = "Document uploaded and indexed successfully"
         if primary_category:

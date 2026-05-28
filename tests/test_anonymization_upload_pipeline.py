@@ -83,6 +83,20 @@ def anon_upload_app(tmp_path):
     vs_dir.mkdir()
 
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+
+    # SQLite ignores foreign-key constraints unless PRAGMA foreign_keys=ON
+    # is set per connection. Without this, the anonymization_mappings ->
+    # documents FK is not enforced, and a save_batch-before-registry.add
+    # ordering bug passes here but fails on PostgreSQL. Enforcing FKs makes
+    # this test catch that ordering regression. (Real bug found 2026-05-28.)
+    from sqlalchemy import event
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _enable_sqlite_fk(dbapi_conn, _record):
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA foreign_keys=ON")
+        cur.close()
+
     session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     @asynccontextmanager
