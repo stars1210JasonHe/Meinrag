@@ -122,8 +122,12 @@ export default function ChatPage() {
   // list (cached) to resolve them to filenames for the peek popover. Only
   // runs when a multi-doc scope is active — single-doc scope shows its name
   // in the chip already.
+  // Canonical key so the dashboard/graph mutations that
+  // invalidateQueries(['documents', USER_ID]) also refresh this list —
+  // otherwise the peek popover would show stale filenames after a
+  // rename/upload/delete.
   const { data: docsForScope } = useQuery({
-    queryKey: ['documents', 'scope-resolve'],
+    queryKey: ['documents', USER_ID],
     queryFn: () => fetchDocuments(USER_ID),
     enabled: !!scopeDocIds,
     staleTime: 60_000,
@@ -285,8 +289,10 @@ export default function ChatPage() {
     setSearchParams({})
   }
 
-  // Remove one doc from a multi-doc scope. Rebuilds ?doc_ids= with the
-  // remainder; clears scope entirely if nothing is left.
+  // Remove one doc from a multi-doc scope. Changing the doc set resets the
+  // conversation (see the scope-change effect below), so we write a clean
+  // scope-only URL rather than carrying a now-stale ?session=/?q=/?chunk=.
+  // Removing the last doc clears scope entirely.
   const removeScopeDoc = (docId) => {
     if (!scopeDocIds) return
     const remaining = scopeDocIds.filter((id) => id !== docId)
@@ -295,9 +301,7 @@ export default function ChatPage() {
       clearScope()
       return
     }
-    const next = new URLSearchParams(searchParams)
-    next.set('doc_ids', remaining.join(','))
-    setSearchParams(next)
+    setSearchParams({ doc_ids: remaining.join(',') })
   }
 
   const startNewChat = () => {
