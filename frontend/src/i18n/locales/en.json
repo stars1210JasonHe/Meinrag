@@ -88,6 +88,7 @@
     "requestFailed": "Request failed: {{message}}",
     "responseFailed": "Failed to get response: {{message}}",
     "nDocs": "{{count}} selected documents",
+    "peekScope": "Show selected documents",
     "pinTab": "Pin tab",
     "unpinTab": "Unpin tab",
     "pinnedTabHint": "{{name}} (pinned)",

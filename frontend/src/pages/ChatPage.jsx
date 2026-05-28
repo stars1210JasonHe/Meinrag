@@ -7,7 +7,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
-import { fetchSessionMessages, fetchDocumentChunks } from '@/lib/api'
+import { fetchSessionMessages, fetchDocumentChunks, fetchDocuments } from '@/lib/api'
 import CitationBadge from '@/components/CitationBadge'
 import QueryTypeBadges from '@/components/QueryTypeBadges'
 import ConfidenceBadge from '@/components/ConfidenceBadge'
@@ -20,6 +20,7 @@ import TextDocViewer from '@/components/TextDocViewer'
 import SourceCard from '@/components/SourceCard'
 import PdfViewer from '@/components/PdfViewer'
 import ChatEmptyState from '@/components/ChatEmptyState'
+import SelectedDocsPopover from '@/components/SelectedDocsPopover'
 import { ParagraphSkeleton, SourceCardSkeleton } from '@/components/skeletons'
 
 // Substrings that identify a corpus-refusal answer. The English marker is
@@ -117,6 +118,22 @@ export default function ChatPage() {
     () => (scopeDocIdsParam ? scopeDocIdsParam.split(',').filter(Boolean) : null),
     [scopeDocIdsParam]
   )
+  // Multi-doc orientation chip: the chip carries only IDs, so fetch the doc
+  // list (cached) to resolve them to filenames for the peek popover. Only
+  // runs when a multi-doc scope is active — single-doc scope shows its name
+  // in the chip already.
+  const { data: docsForScope } = useQuery({
+    queryKey: ['documents', 'scope-resolve'],
+    queryFn: () => fetchDocuments(USER_ID),
+    enabled: !!scopeDocIds,
+    staleTime: 60_000,
+  })
+  const scopeDocsResolved = useMemo(() => {
+    if (!scopeDocIds) return []
+    const byId = new Map((docsForScope?.documents || []).map((d) => [d.doc_id, d.filename]))
+    return scopeDocIds.map((id) => ({ doc_id: id, filename: byId.get(id) || id }))
+  }, [scopeDocIds, docsForScope])
+  const [scopePeekOpen, setScopePeekOpen] = useState(false)
   const prefillQuestion = searchParams.get('q')
   // G2: ?suggest= renders a *soft* ghost-text suggestion the user can dismiss
   // (whereas ?q= still hard-prefills for legacy callers like Dashboard's Ask).
@@ -206,6 +223,7 @@ export default function ChatPage() {
     setFastPath(false)
     setContextInfo(null)
     setSelectedSource(null)
+    setScopePeekOpen(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopeDocId, scopeCollection, scopeDocIdsParam])
 
@@ -265,6 +283,21 @@ export default function ChatPage() {
 
   const clearScope = () => {
     setSearchParams({})
+  }
+
+  // Remove one doc from a multi-doc scope. Rebuilds ?doc_ids= with the
+  // remainder; clears scope entirely if nothing is left.
+  const removeScopeDoc = (docId) => {
+    if (!scopeDocIds) return
+    const remaining = scopeDocIds.filter((id) => id !== docId)
+    if (remaining.length === 0) {
+      setScopePeekOpen(false)
+      clearScope()
+      return
+    }
+    const next = new URLSearchParams(searchParams)
+    next.set('doc_ids', remaining.join(','))
+    setSearchParams(next)
   }
 
   const startNewChat = () => {
@@ -942,12 +975,23 @@ export default function ChatPage() {
                 }
               >
                 <FileText size={11} className="shrink-0" />
-                <span className="truncate">
-                  {scopeDocIds
-                    ? t('chat.nDocs', { count: scopeDocIds.length, defaultValue: `${scopeDocIds.length} selected documents` })
-                    : scopeDocId ? scopeDocName
-                    : scopeCollection}
-                </span>
+                {scopeDocIds ? (
+                  // Multi-doc: click to peek which documents are in scope
+                  <button
+                    type="button"
+                    data-peek-trigger
+                    onClick={() => setScopePeekOpen((o) => !o)}
+                    className="truncate underline decoration-dotted underline-offset-2 hover:opacity-80"
+                    aria-expanded={scopePeekOpen}
+                    aria-label={t('chat.peekScope', { defaultValue: 'Show selected documents' })}
+                  >
+                    {t('chat.nDocs', { count: scopeDocIds.length, defaultValue: `${scopeDocIds.length} selected documents` })}
+                  </button>
+                ) : (
+                  <span className="truncate">
+                    {scopeDocId ? scopeDocName : scopeCollection}
+                  </span>
+                )}
                 <button
                   type="button"
                   onClick={clearScope}
@@ -957,6 +1001,13 @@ export default function ChatPage() {
                   <X size={10} />
                 </button>
               </div>
+            )}
+            {scopePeekOpen && scopeDocIds && (
+              <SelectedDocsPopover
+                selectedDocs={scopeDocsResolved}
+                onRemove={removeScopeDoc}
+                onClose={() => setScopePeekOpen(false)}
+              />
             )}
             <div className="flex-1 min-w-0 relative">
               <input
