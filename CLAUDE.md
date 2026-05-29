@@ -105,3 +105,4 @@ Pydantic Settings in `app/config.py` reads from `.env`. Key groups: LLM provider
 | POST | `/documents/{doc_id}/reclassify` | AI reclassify document |
 | DELETE | `/documents/{doc_id}` | Remove a document |
 | POST | `/query` | Ask a question (supports `doc_ids`, `session_id`, `collection`) |
+| POST | `/search` | Retrieve-only: ranked chunks, no LLM answer (for MCP/agent consumers) |

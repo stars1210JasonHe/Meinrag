@@ -338,6 +338,7 @@ store + embedding API logs) is covered.
 - `POST /query/stream` — same but SSE: `sources` → `tokens` → `done`
 - `POST /query/chunk-context` — ask about a specific source chunk
 - `POST /query/ask-ai` / `POST /query/ask-ai/stream` — pure LLM, no retrieval
+- `POST /search` — retrieve-only: ranked corpus chunks (full text), **no LLM answer**, no web fallback. For MCP / agent consumers that reason over raw results themselves. Body: `query`, optional `top_k` / `doc_ids` / `collection`. Returns `results` (deanonymized `SourceChunk[]`) + `confidence_tier` + `total_available` + `query_types`.
 
 Common request body fields:
 ```json
