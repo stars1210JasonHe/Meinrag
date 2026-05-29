@@ -102,6 +102,31 @@ class QueryResponse(BaseModel):
     fast_path: bool = False  # true when answered via pre-computed doc summary
 
 
+class SearchRequest(BaseModel):
+    """Retrieve-only search request (MCP / agent consumers).
+
+    `query` mirrors the MCP search tool contract `search(query, ...)`. `top_k`
+    is the caller's token-discipline lever; when omitted it resolves to
+    settings.retrieval_top_k in the endpoint (configurable, not hardcoded).
+    """
+    query: str = Field(..., min_length=1, max_length=2000, description="The search text")
+    top_k: int | None = Field(default=None, ge=1, le=50, description="Max chunks to return; None -> settings.retrieval_top_k")
+    doc_ids: list[str] | None = Field(default=None, description="Restrict to these document IDs")
+    collection: str | None = Field(default=None, description="Restrict to this collection")
+
+
+class SearchResponse(BaseModel):
+    """Retrieve-only search response — deliberately NO `answer` field.
+
+    `results` reuses SourceChunk (full chunk text — content is NOT truncated
+    for /search). `total_available` is the pre-top_k-cap candidate count.
+    """
+    results: list[SourceChunk]
+    confidence_tier: str | None = None
+    total_available: int | None = None
+    query_types: list[str] | None = None
+
+
 class UserInfo(BaseModel):
     user_id: str
     display_name: str

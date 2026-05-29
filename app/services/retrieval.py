@@ -698,11 +698,20 @@ def _smart_truncate(text: str, max_len: int = 500) -> str:
     return text[:max_len] + "..."
 
 
-def _build_source_chunks(retrieved: list) -> list[SourceChunk]:
-    """Build SourceChunk list from retrieved (doc, score) pairs."""
+def _build_source_chunks(retrieved: list, truncate_chars: int | None = 500) -> list[SourceChunk]:
+    """Build SourceChunk list from retrieved (doc, score) pairs.
+
+    truncate_chars: max chars per chunk's content. Default 500 (frontend
+    source-card preview). Pass None for the full chunk text (used by /search,
+    where agent consumers reason over raw chunks).
+    """
     return [
         SourceChunk(
-            content=_smart_truncate(doc.page_content, 500),
+            content=(
+                _smart_truncate(doc.page_content, truncate_chars)
+                if truncate_chars is not None
+                else doc.page_content
+            ),
             source_file=doc.metadata.get("source_file", "unknown"),
             chunk_index=doc.metadata.get("chunk_index"),
             doc_id=doc.metadata.get("doc_id"),
@@ -1181,12 +1190,14 @@ async def retrieve_and_rank(
     edge_repo,
     settings: Settings,
     force_web_search: bool = False,
+    force_corpus_only: bool = False,
     summary_store=None,
     chat_history=None,
     registry=None,
     mapping_repo=None,
     audit_repo=None,
     user_id: str | None = None,
+    source_truncate_chars: int | None = 500,
 ) -> RetrievalResult:
     """Full retrieval pipeline — single source of truth.
 
@@ -1375,8 +1386,12 @@ async def retrieve_and_rank(
             logger.info("Restored %d mandatory chunks dropped by reranker", restored)
         logger.debug("[TRACE] after rerank (top_n=%d): %d chunks", effective_top_n, len(retrieved))
 
-    # 7. Check web search
-    if force_web_search or _needs_web_search(user_scoped, retrieved, settings):
+    # 7. Check web search.
+    # force_corpus_only (set by /search) suppresses the web-search gate so the
+    # caller always gets best-effort corpus chunks instead of an early empty
+    # return — but only the gate is suppressed; user_scoped is still honest, so
+    # per-doc coverage (step 6a) still applies when docs/a collection are named.
+    if not force_corpus_only and (force_web_search or _needs_web_search(user_scoped, retrieved, settings)):
         return RetrievalResult(
             sources=[], retrieved=[], query_types=query_types,
             query_label=query_label, web_search_needed=True,
@@ -1498,7 +1513,7 @@ async def retrieve_and_rank(
                                     did, user_id, exc_info=True,
                                 )
 
-    sources = _build_source_chunks(retrieved)
+    sources = _build_source_chunks(retrieved, truncate_chars=source_truncate_chars)
 
     logger.info(
         "Context budget: %d chunks (%d tokens / %d budget), query=%s",

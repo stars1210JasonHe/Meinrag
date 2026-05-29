@@ -12,7 +12,10 @@ from app.dependencies import (
     get_anonymization_mapping_repo, get_anonymization_audit_repo,
 )
 from app.db.repositories import DocumentRepository, ChatSessionRepository, EdgeRepository
-from app.models.schemas import QueryRequest, QueryResponse, SourceChunk, ChunkContextRequest, AskAIRequest, AskAIResponse
+from app.models.schemas import (
+    QueryRequest, QueryResponse, SourceChunk, ChunkContextRequest,
+    AskAIRequest, AskAIResponse, SearchRequest, SearchResponse,
+)
 from langchain_core.output_parsers import StrOutputParser
 from app.rag.chain import format_docs
 from app.rag.prompts import (
@@ -72,7 +75,7 @@ async def _rewrite_search_queries(question: str, llm: BaseChatModel) -> list[str
 
 
 async def _resolve_doc_ids(
-    request: QueryRequest,
+    request: "QueryRequest | SearchRequest",
     settings: Settings,
     registry: DocumentRepository,
     current_user: str,
@@ -477,6 +480,69 @@ async def query_documents(
                 detail="The AI provider returned an error. Please try again in a moment.",
             )
         raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
+
+
+@router.post("/search", response_model=SearchResponse)
+async def search_documents(
+    request: SearchRequest,
+    settings: Settings = Depends(get_settings),
+    vector_store: VectorStoreManager = Depends(get_vector_store),
+    llm: BaseChatModel = Depends(get_llm),
+    embeddings: Embeddings = Depends(get_embeddings),
+    registry: DocumentRepository = Depends(get_registry),
+    current_user: str = Depends(get_current_user),
+    edge_repo: EdgeRepository = Depends(get_edge_repository),
+    summary_store=Depends(get_summary_store),
+    mapping_repo=Depends(get_anonymization_mapping_repo),
+    audit_repo=Depends(get_anonymization_audit_repo),
+):
+    """Retrieve-only search: ranked corpus chunks, no LLM-synthesized answer.
+
+    For MCP / agent consumers that reason over raw results themselves. Unlike
+    /query this: never synthesizes an answer, never falls back to web search
+    (force_corpus_only=True), and returns FULL chunk text (source_truncate_chars
+    =None, not the 500-char preview). Deanonymization still happens inside
+    retrieve_and_rank, so results are deanonymized.
+    """
+    doc_ids, user_scoped = await _resolve_doc_ids(request, settings, registry, current_user)
+    effective_top_k = request.top_k if request.top_k is not None else settings.retrieval_top_k
+
+    try:
+        result = await retrieve_and_rank(
+            question=request.query,
+            top_k=effective_top_k,
+            doc_ids=doc_ids,
+            user_scoped=user_scoped,
+            llm=llm,
+            vector_store=vector_store,
+            embeddings=embeddings,
+            edge_repo=edge_repo,
+            settings=settings,
+            force_web_search=False,
+            force_corpus_only=True,
+            source_truncate_chars=None,
+            summary_store=summary_store,
+            chat_history=None,
+            registry=registry,
+            mapping_repo=mapping_repo,
+            audit_repo=audit_repo,
+            user_id=current_user,
+        )
+        return SearchResponse(
+            results=result.sources,
+            confidence_tier=result.confidence_tier,
+            total_available=result.chunks_available,
+            query_types=result.query_types,
+        )
+    except Exception as e:
+        logger.exception("Search failed")
+        err_msg = str(e).lower()
+        if any(k in err_msg for k in ("api_error", "internal server error", "overloaded", "rate")):
+            raise HTTPException(
+                status_code=502,
+                detail="The AI provider returned an error. Please try again in a moment.",
+            )
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
 
 @router.post("/query/chunk-context", response_model=QueryResponse)
