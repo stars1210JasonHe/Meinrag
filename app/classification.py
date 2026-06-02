@@ -8,11 +8,22 @@ Users can edit data/taxonomy.json and restart the server to apply changes.
 """
 import json
 import logging
+import os
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-TAXONOMY_PATH = Path("data/taxonomy.json")
+
+def _resolve_taxonomy_path() -> Path:
+    """Resolve the taxonomy file path from settings (env TAXONOMY_PATH),
+    falling back to the env var then the default. Lets each deployment load
+    its own taxonomy without forking the codebase.
+    """
+    try:
+        from app.config import get_settings
+        return Path(get_settings().taxonomy_path)
+    except Exception:  # config import/instantiation issue — fall back safely
+        return Path(os.environ.get("TAXONOMY_PATH", "data/taxonomy.json"))
 
 _DEFAULT_TAXONOMY: dict[str, dict[str, list[str]]] = {
     "legal-compliance": {
@@ -181,24 +192,28 @@ _DEFAULT_TAXONOMY: dict[str, dict[str, list[str]]] = {
 }
 
 
-def _load_taxonomy() -> dict[str, dict[str, list[str]]]:
-    """Load taxonomy from JSON file, creating default if missing."""
-    if TAXONOMY_PATH.exists():
+def _load_taxonomy(path: Path | None = None) -> dict[str, dict[str, list[str]]]:
+    """Load taxonomy from JSON file, creating default if missing.
+
+    *path* defaults to the configured taxonomy path (env TAXONOMY_PATH / settings).
+    """
+    path = Path(path) if path is not None else _resolve_taxonomy_path()
+    if path.exists():
         try:
-            with open(TAXONOMY_PATH, encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 taxonomy = json.load(f)
-            logger.info("Taxonomy loaded from %s (%d categories)", TAXONOMY_PATH, len(taxonomy))
+            logger.info("Taxonomy loaded from %s (%d categories)", path, len(taxonomy))
             return taxonomy
         except (json.JSONDecodeError, OSError) as e:
-            logger.warning("Failed to load %s: %s — using default taxonomy", TAXONOMY_PATH, e)
+            logger.warning("Failed to load %s: %s — using default taxonomy", path, e)
             return _DEFAULT_TAXONOMY
 
     # Write default taxonomy for user to customize
     try:
-        TAXONOMY_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(TAXONOMY_PATH, "w", encoding="utf-8") as f:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(_DEFAULT_TAXONOMY, f, indent=2, ensure_ascii=False)
-        logger.info("Default taxonomy written to %s", TAXONOMY_PATH)
+        logger.info("Default taxonomy written to %s", path)
     except OSError as e:
         logger.warning("Could not write default taxonomy: %s", e)
 
@@ -206,7 +221,8 @@ def _load_taxonomy() -> dict[str, dict[str, list[str]]]:
 
 
 # Loaded once at import time. Restart server to pick up changes.
-TAXONOMY: dict[str, dict[str, list[str]]] = _load_taxonomy()
+TAXONOMY_PATH: Path = _resolve_taxonomy_path()
+TAXONOMY: dict[str, dict[str, list[str]]] = _load_taxonomy(TAXONOMY_PATH)
 
 PRIMARY_CATEGORIES: list[str] = list(TAXONOMY.keys())
 ALL_DOMAINS: list[str] = [

@@ -188,7 +188,7 @@ async def upload_document(
         primary_category: str | None = None
         subtags: list[str] = []
         suggested_collections: list[str] = []
-        if auto_suggest:
+        if auto_suggest and settings.classification_enabled:
             from app.services.collection_suggester import classify_document
             existing = await registry.get_all_collections()
             classification = classify_document(chunks, llm, existing, embeddings=embeddings)
@@ -934,6 +934,12 @@ async def reclassify_document(
     embeddings: Embeddings = Depends(get_embeddings),
     registry: DocumentRepository = Depends(get_registry),
 ):
+    if not settings.classification_enabled:
+        raise HTTPException(
+            status_code=403,
+            detail="Classification is disabled for this deployment (CLASSIFICATION_ENABLED=false).",
+        )
+
     doc = await registry.get(doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")

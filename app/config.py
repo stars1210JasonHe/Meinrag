@@ -54,6 +54,16 @@ class Settings(BaseSettings):
     # Paths
     upload_dir: Path = Path("data/uploads")
     vectorstore_dir: Path = Path("data/vectorstore")
+    # Document-classification taxonomy file. Per-deployment configurable so one
+    # codebase can run multiple independent libraries (e.g. a legal deployment
+    # loads data/taxonomy.legal.json) without forking. Loaded once at import in
+    # app/classification.py; restart to apply changes.
+    taxonomy_path: Path = Path("data/taxonomy.json")
+    # Auto-classification on upload + manual reclassify. When False, the
+    # probabilistic classifier never runs (no doc_type/subtag guessing) — for
+    # deployments that assign categories deterministically (e.g. a legal library
+    # that derives doc_type from curated source folders at ingest).
+    classification_enabled: bool = True
     # Chunking
     chunk_size: int = 1000
     chunk_overlap: int = 200
