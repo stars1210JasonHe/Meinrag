@@ -210,6 +210,8 @@ All settings live in [`app/config.py`](app/config.py) (the `Settings` Pydantic c
 | `OPENAI_MODEL` | `gpt-4o-mini` | |
 | `VECTOR_STORE` | `faiss` | Switch to `chroma` for native metadata filtering |
 | `MEMORY_SESSION_TTL` | `2592000` (30 d) | Chat history is persistent — short TTLs lose data |
+| `TAXONOMY_PATH` | `data/taxonomy.json` | Per-deployment classification taxonomy file |
+| `CLASSIFICATION_ENABLED` | `true` | Set `false` to disable auto-classify / reclassify (assign categories deterministically instead) |
 
 ### Switching providers
 
@@ -225,6 +227,30 @@ OPENROUTER_MODEL=openai/gpt-4o-mini
 RERANK_PROVIDER=cross-encoder    # flashrank | cross-encoder | jina | cohere | llm
 RERANK_TOP_N=4
 ```
+
+### Running multiple independent deployments
+
+One codebase can serve several independent libraries (e.g. a generic library and
+a legal library) — no fork, no branch. Each deployment is differentiated purely by
+environment; the cleanest isolation is **one Docker Compose project per deployment**:
+
+```bash
+docker compose -p meinrag-generic --env-file .env.generic up -d
+docker compose -p legal-library   --env-file .env.legal   up -d
+```
+
+Per-deployment env vars: `TAXONOMY_PATH`, `CLASSIFICATION_ENABLED`, `DATABASE_URL`,
+`VECTORSTORE_DIR`, `UPLOAD_DIR`, `PORT`, `REDIS_URL`, `ANONYMIZATION_ENABLED` (+ key).
+
+**Caveats:**
+- **Do not share one Redis** across deployments — the ARQ summary-task queue would
+  mix jobs, so one library's documents could be processed against another's vector
+  store. Give each deployment its own Redis (separate container, or distinct DB index).
+- Prefer Docker over bare processes for multi-instance — containers isolate the
+  filesystem, so any path-derived cache cannot collide between deployments.
+- A deployment that assigns categories deterministically (e.g. legal `doc_type` from
+  curated source folders) should set `CLASSIFICATION_ENABLED=false` so the
+  probabilistic classifier never runs.
 
 ---
 

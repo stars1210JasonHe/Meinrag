@@ -74,6 +74,8 @@ The lifespan in `app/main.py` initializes the DB engine, session factory, vector
 
 Pydantic Settings in `app/config.py` reads from `.env`. Key groups: LLM provider (OpenAI/OpenRouter), vector store type (Chroma/FAISS), database URL, chunking params, retrieval params, re-ranking, hybrid search, chat memory, user system, server config.
 
+**Multi-deployment:** one codebase can run several independent libraries, differentiated by `.env` (recommended: one Docker compose project each). Per-deployment knobs: `TAXONOMY_PATH` (classification taxonomy file — e.g. `data/taxonomy.legal.json`), `CLASSIFICATION_ENABLED` (set `false` to disable auto-classify/reclassify when categories are assigned deterministically), plus `DATABASE_URL` / `VECTORSTORE_DIR` / `UPLOAD_DIR` / `PORT` / `REDIS_URL` / `ANONYMIZATION_ENABLED`. Never share one Redis across deployments (ARQ summary jobs would cross-contaminate vector stores).
+
 ### Prompts
 
 `app/rag/prompts.py` has two templates: `RAG_PROMPT` (stateless) and `RAG_CHAT_PROMPT` (includes `MessagesPlaceholder("chat_history")`). The chain selects based on whether `chat_history` is provided.
