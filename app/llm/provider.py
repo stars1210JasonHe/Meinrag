@@ -13,6 +13,8 @@ def create_chat_model(settings: Settings) -> BaseChatModel:
             model=settings.openai_model,
             temperature=0,
             streaming=True,
+            timeout=settings.llm_timeout,
+            max_retries=settings.llm_max_retries,
         )
     elif settings.llm_provider == LLMProvider.OPENROUTER:
         return ChatOpenAI(
@@ -21,6 +23,8 @@ def create_chat_model(settings: Settings) -> BaseChatModel:
             model=settings.openrouter_model,
             temperature=0,
             streaming=True,
+            timeout=settings.llm_timeout,
+            max_retries=settings.llm_max_retries,
             default_headers={
                 "HTTP-Referer": settings.openrouter_site_url,
                 "X-Title": settings.openrouter_site_name,
@@ -40,4 +44,6 @@ def create_embeddings(settings: Settings) -> Embeddings:
     return OpenAIEmbeddings(
         api_key=settings.openai_api_key,
         model=settings.openai_embedding_model,
+        timeout=settings.llm_timeout,
+        max_retries=settings.llm_max_retries,
     )

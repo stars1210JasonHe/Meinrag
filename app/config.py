@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
     openai_embedding_model: str = "text-embedding-3-small"
+    # LLM/embedding call hardening: bound every chat + embedding request so one
+    # hung call can't deadlock ingest or starve /search. No timeout = OpenAI
+    # client default (~600s); a 263-chunk doc = 263 sequential summary calls.
+    llm_timeout: float = 60.0          # seconds per LLM/embedding HTTP request
+    llm_max_retries: int = 2           # bounded retries on transient errors
     openrouter_api_key: str = ""
     openrouter_model: str = "openai/gpt-4o-mini"
     openrouter_site_url: str = "http://localhost:8000"
