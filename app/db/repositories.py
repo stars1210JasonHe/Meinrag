@@ -39,6 +39,7 @@ class DocumentRepository:
         collections: list[str] | None = None,
         user_id: str = "admin",
         file_hash: str | None = None,
+        content_hash: str | None = None,
         primary_category: str | None = None,
         subtags: list[str] | None = None,
     ) -> None:
@@ -49,6 +50,7 @@ class DocumentRepository:
             chunk_count=chunk_count,
             user_id=user_id,
             file_hash=file_hash,
+            content_hash=content_hash,
             primary_category=primary_category,
             subtags=list(subtags or []),
         )

@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     # deployments that assign categories deterministically (e.g. a legal library
     # that derives doc_type from curated source folders at ingest).
     classification_enabled: bool = True
+    # Strip 北大法宝 / export noise from chunk text at ingest (legal deployment).
+    # Per-chunk, after parse, before embedding. Default off — patterns are inert
+    # on non-法宝 corpora but cost cycles; the legal deployment sets this true.
+    text_clean_enabled: bool = False
     # Chunking
     chunk_size: int = 1000
     chunk_overlap: int = 200

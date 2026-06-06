@@ -953,6 +953,10 @@ async def test_delete_document_removes_mindmap_cache(tmp_path, monkeypatch):
             registry=registry,
             db=db,
             summary_store=summary_store,
+            # anonymization off — pass None explicitly, else the unresolved
+            # Depends() defaults trip the `is not None` cleanup block.
+            mapping_repo=None,
+            audit_repo=None,
         )
 
     assert not cache_file.exists(), "delete_document must remove the mindmap cache"

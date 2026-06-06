@@ -109,6 +109,35 @@ async def upload_document(
         processor = DocumentProcessor(settings)
         chunks = await processor.load_and_split(upload_path, doc_id=doc_id, llm=llm)
 
+        # Strip export/portal noise (北大法宝 etc.) per-chunk before embedding.
+        if settings.text_clean_enabled:
+            from app.services.legal_text_clean import clean
+            cleaned = []
+            for c in chunks:
+                c.page_content = clean(c.page_content)
+                if c.page_content.strip():      # drop chunks that were pure noise
+                    cleaned.append(c)
+            chunks = cleaned
+
+        # Content-level dedup (Bug 2): file_hash compares raw bytes and misses
+        # re-exports of the same document with different portal noise/timestamps.
+        # content_hash is sha256 over the cleaned chunk text — computed HERE,
+        # after clean() and before anonymization (placeholder numbering varies
+        # run-to-run and would otherwise defeat the comparison).
+        content_hash = hashlib.sha256(
+            "\n".join(c.page_content for c in chunks).encode("utf-8")
+        ).hexdigest()
+        for doc in existing_docs:
+            if doc.get("content_hash") == content_hash:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"This document's content matches an already-uploaded file "
+                        f"'{doc['filename']}' (identical after cleaning). "
+                        f"Delete it first if you want to re-upload."
+                    ),
+                )
+
         # ─── Anonymization pre-embedding hook (Task 8) ─────────────────
         # When the flag is on, every chunk's text is pseudonymized before
         # embedding. The vector store + OpenAI embedding API never see
@@ -253,6 +282,7 @@ async def upload_document(
             collections=parsed_collections,
             user_id=current_user,
             file_hash=file_hash,
+            content_hash=content_hash,
             primary_category=primary_category,
             subtags=subtags,
         )
@@ -281,6 +311,10 @@ async def upload_document(
             user_id=current_user,
             message=message,
         )
+    except HTTPException:
+        # e.g. the content_hash 409 — propagate the real status, don't mask as 500
+        upload_path.unlink(missing_ok=True)
+        raise
     except Exception as e:
         upload_path.unlink(missing_ok=True)
         logger.exception(f"Failed to process {filename}")
@@ -996,11 +1030,18 @@ async def delete_document(
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
 
     try:
-        vector_store.delete_document(doc_id)
+        vector_store.delete_document(doc_id)   # idempotent: no-op if doc absent in FAISS
         from app.rag.chain import invalidate_bm25_cache
         invalidate_bm25_cache()
     except Exception as e:
-        logger.warning(f"Vector store delete failed for {doc_id} (continuing): {e}")
+        # Do NOT remove the registry row if FAISS delete failed — otherwise the
+        # chunks orphan and the registry-first 404 makes them un-deletable forever.
+        logger.error(f"Vector store delete failed for {doc_id}; registry row kept: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Vector store delete failed; document NOT removed (retry or run the reconcile sweep): {e}",
+        )
+    # only reached when FAISS delete confirmed — now safe to remove the registry row
 
     if summary_store:
         try:

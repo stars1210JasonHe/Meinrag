@@ -44,6 +44,10 @@ class DocumentModel(Base):
         index=True,
     )
     file_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+    # sha256 over the CLEANED chunk text (post-clean, pre-anonymization). Catches
+    # duplicates that file_hash misses — same document re-exported with different
+    # portal noise/timestamps has different raw bytes but identical content_hash.
+    content_hash: Mapped[str | None] = mapped_column(String(64), index=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="ready")
     primary_category: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
@@ -74,6 +78,8 @@ class DocumentModel(Base):
         }
         if self.file_hash:
             result["file_hash"] = self.file_hash
+        if self.content_hash:
+            result["content_hash"] = self.content_hash
         if self.summary is not None:
             result["summary"] = self.summary
         return result

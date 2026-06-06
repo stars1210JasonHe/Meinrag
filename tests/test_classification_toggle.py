@@ -120,3 +120,37 @@ def test_reclassify_passes_guard_when_enabled(tmp_path, monkeypatch):
     finally:
         app.dependency_overrides.clear()
     assert r.status_code == 404, r.text
+
+
+def test_upload_applies_clean_to_chunks_when_enabled(tmp_path, monkeypatch):
+    """TEXT_CLEAN_ENABLED → clean() is applied to every chunk before embedding.
+    (Chinese-noise correctness is covered by tests/test_legal_text_clean.py; here
+    we prove the WIRING via a spy + English text, avoiding the Windows TextLoader
+    GBK-vs-UTF8 artifact on Chinese .txt — irrelevant to the .docx prod path.)"""
+    monkeypatch.setenv("TEXT_CLEAN_ENABLED", "true")
+    monkeypatch.setenv("ANONYMIZATION_ENABLED", "false")
+    monkeypatch.setenv("CLASSIFICATION_ENABLED", "false")
+    monkeypatch.setattr("app.services.legal_text_clean.clean", lambda t: "[CLEANED] " + t)
+    app = _make_search_app(tmp_path)
+    try:
+        with TestClient(app, raise_server_exceptions=True) as client:
+            doc_id = _upload_auto(client, "d.txt", "Some legal article text about contracts. " * 20).json()["doc_id"]
+            chunks = client.get(f"/documents/{doc_id}/chunks").json()["chunks"]
+    finally:
+        app.dependency_overrides.clear()
+    assert chunks and all(c["content"].startswith("[CLEANED] ") for c in chunks)
+
+
+def test_upload_no_clean_when_disabled(tmp_path, monkeypatch):
+    monkeypatch.delenv("TEXT_CLEAN_ENABLED", raising=False)   # default off
+    monkeypatch.setenv("ANONYMIZATION_ENABLED", "false")
+    monkeypatch.setenv("CLASSIFICATION_ENABLED", "false")
+    monkeypatch.setattr("app.services.legal_text_clean.clean", lambda t: "[CLEANED] " + t)
+    app = _make_search_app(tmp_path)
+    try:
+        with TestClient(app, raise_server_exceptions=True) as client:
+            doc_id = _upload_auto(client, "d.txt", "Some legal article text about contracts. " * 20).json()["doc_id"]
+            chunks = client.get(f"/documents/{doc_id}/chunks").json()["chunks"]
+    finally:
+        app.dependency_overrides.clear()
+    assert chunks and not any("[CLEANED]" in c["content"] for c in chunks)
