@@ -553,7 +553,14 @@ async def _rerank_results(
         # Use max of setting and caller's request so a small setting doesn't cap large queries
         effective_top_n = max(settings.rerank_top_n, top_n) if top_n else settings.rerank_top_n
         compressor = _get_reranker(settings, llm, top_n_override=effective_top_n)
-        docs = [doc for doc, _ in retrieved]
+        # Cap input to top-N by score so the ONNX reranker never OOMs on huge
+        # candidate sets (large-collection scope). Original scores are preserved
+        # via score_map below; mandatory chunks are restored by the caller.
+        max_cand = getattr(settings, "rerank_max_candidates", 80)
+        rerank_input = sorted(retrieved, key=lambda x: x[1], reverse=True)[:max_cand]
+        if len(rerank_input) < len(retrieved):
+            logger.info("Rerank input capped: %d → %d candidates", len(retrieved), len(rerank_input))
+        docs = [doc for doc, _ in rerank_input]
         compressed = compressor.compress_documents(docs, question)
 
         # Build score map from original results
@@ -927,6 +934,7 @@ def _ensure_per_doc_coverage(
     scope_doc_ids: list[str] | None,
     question: str = "",
     vector_store=None,
+    max_backfill: int = 30,
 ) -> list[tuple]:
     """Guarantee at least 1 chunk from every doc the user explicitly selected.
 
@@ -961,8 +969,11 @@ def _ensure_per_doc_coverage(
     appended_from_pool = 0
     still_missing: list[str] = []
 
-    # Step 1: try pre-narrow pool
+    # Step 1: try pre-narrow pool (capped at max_backfill)
     for did in missing:
+        if appended_from_pool >= max_backfill:
+            still_missing.append(did)
+            continue
         best = None
         for doc, score in all_candidates:
             if doc.metadata.get("doc_id") == did:
@@ -986,6 +997,8 @@ def _ensure_per_doc_coverage(
     appended_from_search = 0
     if still_missing and vector_store is not None:
         for did in still_missing:
+            if appended_from_pool + appended_from_search >= max_backfill:
+                break
             try:
                 chunks = vector_store.get_chunks_by_doc(did)
                 if chunks:
@@ -1001,6 +1014,13 @@ def _ensure_per_doc_coverage(
         logger.info(
             "Per-doc coverage: added %d chunks (%d from pool + %d via search) for missing docs",
             total_appended, appended_from_pool, appended_from_search,
+        )
+    skipped = len(missing) - total_appended
+    if skipped > 0:
+        logger.info(
+            "Per-doc coverage: skipped backfill for %d missing docs (cap=%d) — "
+            "scope too large to represent every doc in one answer",
+            skipped, max_backfill,
         )
     return result
 
@@ -1343,6 +1363,7 @@ async def retrieve_and_rank(
         retrieved = _ensure_per_doc_coverage(
             retrieved, pre_narrow_candidates, doc_ids,
             question=question, vector_store=vector_store,
+            max_backfill=settings.per_doc_coverage_max_backfill,
         )
         logger.debug("[TRACE] after per_doc_coverage: %d chunks", len(retrieved))
 

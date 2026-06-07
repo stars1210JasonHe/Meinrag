@@ -81,7 +81,7 @@ class DocumentProcessor:
             try:
                 return self._load_vision(file_path, doc_id)
             except Exception as e:
-                logger.warning(f"Vision mode failed, falling back to enhanced/default: {e}")
+                logger.warning(f"Vision mode failed, falling back to enhanced/default: {e}", exc_info=True)
                 parse_mode = ParseMode.ENHANCED  # fall through
 
         # === DOCLING MODE (all file types) ===
@@ -92,7 +92,7 @@ class DocumentProcessor:
                     raise ImportError("docling not installed. Install with: uv sync --extra docling")
                 return await docling_process(file_path, doc_id, self._settings, self._clean_name, llm=llm)
             except Exception as e:
-                logger.warning(f"Docling mode failed, falling back: {e}")
+                logger.warning(f"Docling mode failed, falling back: {e}", exc_info=True)
                 if suffix == ".pdf":
                     parse_mode = ParseMode.ENHANCED
                 # non-PDF falls through to default loaders
@@ -102,7 +102,7 @@ class DocumentProcessor:
             try:
                 return self._load_pdf_enhanced(file_path, doc_id)
             except Exception as e:
-                logger.warning(f"Enhanced PDF processing failed, falling back to default: {e}")
+                logger.warning(f"Enhanced PDF processing failed, falling back to default: {e}", exc_info=True)
                 # fall through to default
 
         # === DEFAULT MODE ===

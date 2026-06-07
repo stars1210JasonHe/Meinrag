@@ -25,6 +25,30 @@ from app.services.chunk_utils import (
 )
 
 
+def _iter_doc_items(doc):
+    """Yield (element, level) from docling's iterate_items(), tolerating yields
+    that aren't 2-tuples. Some PDFs/docling versions yield a bare item or a
+    1-tuple → the raw `for x, y in ...` raised 'not enough values to unpack'
+    and 500'd the upload (Bug 1, 2026-06-07, both PDF and .docx). Degrade
+    instead of crash; log so we can measure how often it triggers."""
+    for item in doc.iterate_items():
+        if isinstance(item, tuple):
+            if len(item) >= 2:
+                yield item[0], item[1]
+            elif len(item) == 1:
+                logger.warning("docling iterate_items yielded a 1-tuple; level defaulted to None")
+                yield item[0], None
+            else:
+                logger.warning("docling iterate_items yielded an empty tuple; skipping")
+                continue
+        else:
+            logger.warning(
+                "docling iterate_items yielded a bare %s; level defaulted to None",
+                type(item).__name__,
+            )
+            yield item, None
+
+
 def _merge_element_bboxes(
     elements: list[dict], target_page: int
 ) -> list[float] | None:
@@ -385,7 +409,7 @@ async def process(
     all_chunks: list[Document] = []
     img_idx = 0
 
-    for element, _level in doc.iterate_items():
+    for element, _level in _iter_doc_items(doc):
         page = _get_element_page(element)
         page_h = page_heights.get(page + 1, 792.0)  # +1 for 1-indexed lookup
         bbox = _get_element_bbox(element, page_h)

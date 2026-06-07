@@ -874,6 +874,8 @@ class TestRouterHookInRetrieval:
         settings.router_enabled = True
         settings.router_min_scope = 15
         settings.router_top_k = 8
+        settings.per_doc_coverage_max_backfill = 30
+        settings.rerank_max_candidates = 80
         settings.router_model = "gpt-4o-mini"
         settings.hybrid_search_enabled = False
         settings.rerank_enabled = False
@@ -937,6 +939,8 @@ class TestRouterHookInRetrieval:
         settings.router_enabled = True
         settings.router_min_scope = 15
         settings.router_top_k = 8
+        settings.per_doc_coverage_max_backfill = 30
+        settings.rerank_max_candidates = 80
         settings.hybrid_search_enabled = False
         settings.rerank_enabled = False
         settings.query_expansion_enabled = False
@@ -998,6 +1002,8 @@ class TestRouterHookInRetrieval:
         settings.router_enabled = False  # off
         settings.router_min_scope = 15
         settings.router_top_k = 8
+        settings.per_doc_coverage_max_backfill = 30
+        settings.rerank_max_candidates = 80
         settings.hybrid_search_enabled = False
         settings.rerank_enabled = False
         settings.query_expansion_enabled = False

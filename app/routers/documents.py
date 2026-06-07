@@ -119,6 +119,15 @@ async def upload_document(
                     cleaned.append(c)
             chunks = cleaned
 
+        # Drop intra-doc duplicate paragraphs (PDF extraction artifacts).
+        # After clean() so noise-stripped near-identicals collapse too.
+        if settings.dedup_chunks_enabled:
+            from app.services.chunk_dedup import dedup_chunks
+            before = len(chunks)
+            chunks = dedup_chunks(chunks)
+            if len(chunks) < before:
+                logger.info("Deduped %d → %d chunks for %s", before, len(chunks), doc_id)
+
         # Content-level dedup (Bug 2): file_hash compares raw bytes and misses
         # re-exports of the same document with different portal noise/timestamps.
         # content_hash is sha256 over the cleaned chunk text — computed HERE,

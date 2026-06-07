@@ -73,6 +73,11 @@ class Settings(BaseSettings):
     # Per-chunk, after parse, before embedding. Default off — patterns are inert
     # on non-法宝 corpora but cost cycles; the legal deployment sets this true.
     text_clean_enabled: bool = False
+    # Drop intra-document duplicate paragraphs (by normalized text) at ingest.
+    # Off by default — the same text at different positions can be legitimate
+    # context in general corpora. Legal deployments set this true to remove PDF
+    # extraction artifacts (a paragraph emitted twice).
+    dedup_chunks_enabled: bool = False
     # Chunking
     chunk_size: int = 1000
     chunk_overlap: int = 200
@@ -102,12 +107,23 @@ class Settings(BaseSettings):
 
     # Retrieval
     retrieval_top_k: int = 10
+    # Cap on per-doc-coverage BACKFILL chunks for missing docs. A collection-
+    # scoped query expands to all member doc_ids; without this, a 1456-doc
+    # collection force-injects ~1453 mandatory chunks → reranker OOM + context
+    # blow-up. Surfaced docs are always covered; only missing-doc backfill is
+    # capped. Tuned to answer capacity, not collection size.
+    per_doc_coverage_max_backfill: int = 30
 
     # Re-ranking
     rerank_enabled: bool = False
     rerank_top_n: int = 4
     rerank_provider: RerankProvider = RerankProvider.FLASHRANK
     rerank_model: str = ""  # empty = auto-select default per provider
+    # Hard cap on candidates fed to the cross-encoder reranker. The ONNX reranker
+    # allocates per-candidate; thousands at once OOMs (~18GB on a 1456-doc
+    # collection). Input is truncated to the top-N by score before scoring; the
+    # remainder is unaffected by reranking. Output still comes from the reranker.
+    rerank_max_candidates: int = 80
 
     # Query expansion for vague queries (re-query with LLM-expanded terms)
     query_expansion_enabled: bool = True
