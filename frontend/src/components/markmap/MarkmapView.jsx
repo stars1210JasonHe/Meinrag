@@ -93,18 +93,19 @@ export default function MarkmapView({
     const onClick = (e) => {
       const el = e.target.closest('.mm-leaf')
       if (!el) return
+      const name = el.getAttribute('data-name') || ''
       const single = el.getAttribute('data-chunks')
       const multi = el.getAttribute('data-chunks-by-doc')
-      // Payload carries both new keys and the legacy nodeDatum field names so the
-      // existing GraphPage onLeafClick (reads __chunk_indices / __chunks_by_doc)
-      // works unchanged for both renderers.
+      // Payload carries both new keys and the legacy nodeDatum field names (name,
+      // __chunk_indices, __chunks_by_doc) so the existing GraphPage onLeafClick
+      // handlers work unchanged for both renderers.
       if (single != null) {
         const ids = single ? single.split(',').map(Number).filter(Number.isInteger) : []
-        onLeafClickRef.current?.({ chunkIndices: ids, __chunk_indices: ids })
+        onLeafClickRef.current?.({ name, chunkIndices: ids, __chunk_indices: ids })
       } else if (multi != null) {
         try {
           const cbd = JSON.parse(multi)
-          onLeafClickRef.current?.({ chunksByDoc: cbd, __chunks_by_doc: cbd })
+          onLeafClickRef.current?.({ name, chunksByDoc: cbd, __chunks_by_doc: cbd })
         } catch { /* malformed */ }
       }
     }

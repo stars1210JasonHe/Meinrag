@@ -115,6 +115,13 @@ describe('treeToINode — review regressions (F1–F9)', () => {
     expect(m.children[0].content).toMatch(/mm-count-badge[^>]*>2</) // count matches sanitized payload
   })
 
+  it('leaves carry an escaped data-name for the click payload (single + multi)', () => {
+    const s = single({ central: 'C', branches: [{ name: 'A"B', chunk_indices: [1] }] })
+    expect(s.children[0].content).toContain('data-name="A&quot;B"')
+    const m = multi({ central: 'C', branches: [{ name: 'X', chunks_by_doc: { d1: [1] } }] })
+    expect(m.children[0].content).toContain('data-name="X"')
+  })
+
   it('F7: single-quote / special chars in a docId round-trip through the attribute', () => {
     const m = multi({ central: 'C', branches: [{ name: 'L', chunks_by_doc: { "d'1": [1] } }] })
     const raw = m.children[0].content.match(/data-chunks-by-doc='([^']*)'/)[1]

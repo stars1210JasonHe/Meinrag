@@ -38,8 +38,9 @@ function badge(count) {
 
 function leafContentSingle(node) {
   const ids = intIds(node.chunk_indices)
-  return `<span class="mm-node mm-leaf" data-chunks="${ids.join(',')}">`
-    + `${escapeHtml(node.name)}${badge(ids.length)}</span>`
+  const nm = escapeHtml(node.name)
+  return `<span class="mm-node mm-leaf" data-name="${nm}" data-chunks="${ids.join(',')}">`
+    + `${nm}${badge(ids.length)}</span>`
 }
 
 function leafContentMulti(node, palette) {
@@ -59,8 +60,9 @@ function leafContentMulti(node, palette) {
       return col ? `<span class="mm-swatch" style="background:${col}"></span>` : ''
     })
     .join('')
-  return `<span class="mm-node mm-leaf" data-chunks-by-doc='${attr}'>`
-    + `${swatches}${escapeHtml(node.name)}${badge(count)}</span>`
+  const nm = escapeHtml(node.name)
+  return `<span class="mm-node mm-leaf" data-name="${nm}" data-chunks-by-doc='${attr}'>`
+    + `${swatches}${nm}${badge(count)}</span>`
 }
 
 function nodeToINode(node, mode, palette) {

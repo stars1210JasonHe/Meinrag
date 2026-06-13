@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import MarkmapView from '../markmap/MarkmapView'
 import sample from './sample.json'
+import sampleMulti from './sample_multi.json'
 
 const treeWithCJK = {
   ...sample,
@@ -18,6 +19,7 @@ const treeWithCJK = {
 
 export default function MarkmapViewHarness() {
   const [clicks, setClicks] = useState([])
+  const isMulti = new URLSearchParams(window.location.search).get('mm') === 'multi'
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       <div
@@ -25,16 +27,25 @@ export default function MarkmapViewHarness() {
         data-clicks={JSON.stringify(clicks)}
         style={{ padding: 8, color: 'var(--fg)', fontSize: 13 }}
       >
-        onLeafClick payloads: {JSON.stringify(clicks)}
+        mode={isMulti ? 'multi' : 'single'} · onLeafClick: {JSON.stringify(clicks)}
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
-        {/* selectedChunkIds [15,19] intersects the "Basic Concepts" leaf (15,19,20) → highlight */}
-        <MarkmapView
-          tree={treeWithCJK}
-          mode="single"
-          selectedChunkIds={[15, 19]}
-          onLeafClick={(p) => setClicks((c) => [...c, p])}
-        />
+        {isMulti ? (
+          <MarkmapView
+            tree={sampleMulti}
+            mode="multi"
+            palette={sampleMulti.palette}
+            onLeafClick={(p) => setClicks((c) => [...c, p])}
+          />
+        ) : (
+          // selectedChunkIds [15,19] intersects the "Basic Concepts" leaf (15,19,20) → highlight
+          <MarkmapView
+            tree={treeWithCJK}
+            mode="single"
+            selectedChunkIds={[15, 19]}
+            onLeafClick={(p) => setClicks((c) => [...c, p])}
+          />
+        )}
       </div>
     </div>
   )

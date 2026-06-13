@@ -1118,18 +1118,29 @@ export default function GraphPage() {
             (docList || []).map(d => [d.doc_id, d.filename]),
           )
           const treeWithNames = { ...tree, __nameByDocId: nameByDocId }
+          const onMultiLeafClick = (leafNode) => {
+            // Open a preview panel instead of auto-navigating — user clicks the
+            // explicit "Ask AI" button in the panel to commit. Matches single-doc.
+            setMindmapLeaf({
+              name: leafNode.name,
+              chunksByDoc: leafNode.__chunks_by_doc || {},
+            })
+          }
+          if (renderer === 'markmap') {
+            return (
+              <MarkmapView
+                tree={treeWithNames}
+                mode="multi"
+                palette={tree.palette}
+                nameByDocId={nameByDocId}
+                onLeafClick={onMultiLeafClick}
+              />
+            )
+          }
           return (
             <MultiDocMindmapTree
               tree={treeWithNames}
-              onLeafClick={(leafNode) => {
-                // Open a preview panel instead of auto-navigating —
-                // user clicks the explicit "Ask AI" button in the panel
-                // to commit. Matches single-doc mindmap's preview flow.
-                setMindmapLeaf({
-                  name: leafNode.name,
-                  chunksByDoc: leafNode.__chunks_by_doc || {},
-                })
-              }}
+              onLeafClick={onMultiLeafClick}
             />
           )
         })()}
