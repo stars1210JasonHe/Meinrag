@@ -35,7 +35,8 @@
   --collection-dim: #a8761e;
 
   /* Mindmap branch palette — 5 hues, dark-mode tuning.
-     Each branch in MindmapTree picks one (i % 5); leaves inherit. */
+     MarkmapView's colorForNode picks one per top-level branch (i % 5); deeper
+     nodes inherit via colorFreezeLevel. */
   --mm-hue-1: #6b8fd6;  --mm-hue-1-soft: rgba(107,143,214,0.18);  /* blue */
   --mm-hue-2: #d4a64a;  --mm-hue-2-soft: rgba(212,166,74,0.18);   /* amber */
   --mm-hue-3: #4ade80;  --mm-hue-3-soft: rgba(74,222,128,0.18);   /* emerald */
@@ -139,6 +140,28 @@ body {
 @keyframes mm-shimmer {
   from { background-position: 200% 0; }
   to   { background-position: -200% 0; }
+}
+/* Mind-map mode loading/error/empty states (GraphPage). Moved here from the
+   deleted MindmapTree.css so they survive the react-d3-tree removal. */
+.mm-skeleton {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 14px;
+  color: var(--fg, #f4f2ee);
+  opacity: 0.6;
+  padding: 16px;
+  text-align: center;
+}
+.mm-skeleton-lines {
+  width: 320px;
+  height: 4px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent);
+  background-size: 200% 100%;
+  animation: mm-shimmer 1.6s linear infinite;
+  border-radius: 2px;
 }
 .skeleton-line {
   background: linear-gradient(90deg, transparent, rgba(255,255,255,0.10), transparent);

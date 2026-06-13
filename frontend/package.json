@@ -32,7 +32,6 @@
     "markmap-lib": "^0.18.12",
     "markmap-view": "^0.18.12",
     "react": "^19.2.0",
-    "react-d3-tree": "^3.6.6",
     "react-dom": "^19.2.0",
     "react-force-graph-2d": "^1.29.1",
     "react-i18next": "^17.0.4",

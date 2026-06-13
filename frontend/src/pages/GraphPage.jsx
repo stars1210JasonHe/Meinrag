@@ -9,10 +9,8 @@ import { fetchGraphDocuments, fetchGraphNodes, fetchDocuments, fetchTaxonomy, fe
 import DocCombobox from '@/components/DocCombobox'
 import { cn } from '@/lib/utils'
 import ContextMenu from '@/components/ContextMenu'
-import MindmapTree from '@/components/MindmapTree'
 import MarkmapView from '@/components/markmap/MarkmapView'
 import MultiDocChunkBody from '@/components/MultiDocChunkBody'
-import MultiDocMindmapTree from '@/components/MultiDocMindmapTree'
 import SelectionActionBar from '@/components/SelectionActionBar'
 import SaveCollectionDialog from '@/components/SaveCollectionDialog'
 import { useSelection } from '@/hooks/useSelection'
@@ -149,8 +147,6 @@ export default function GraphPage() {
     [multiDocsParam]
   )
   const mode = searchParams.get('mode') === 'mindmap' ? 'mindmap' : 'graph'
-  // Experimental renderer toggle (default = legacy react-d3-tree). ?renderer=markmap
-  const renderer = searchParams.get('renderer') === 'markmap' ? 'markmap' : 'd3tree'
   const urlChunk = searchParams.get('chunk')
   const urlChunkId = urlChunk != null ? Number(urlChunk) : null
 
@@ -1034,7 +1030,6 @@ export default function GraphPage() {
         )}
         {mode === 'mindmap' && docId && (
           <MindmapModeBody
-            renderer={renderer}
             tree={mindmapData?.tree}
             loading={mindmapLoading}
             error={mindmapError}
@@ -1126,20 +1121,12 @@ export default function GraphPage() {
               chunksByDoc: leafNode.__chunks_by_doc || {},
             })
           }
-          if (renderer === 'markmap') {
-            return (
-              <MarkmapView
-                tree={treeWithNames}
-                mode="multi"
-                palette={tree.palette}
-                nameByDocId={nameByDocId}
-                onLeafClick={onMultiLeafClick}
-              />
-            )
-          }
           return (
-            <MultiDocMindmapTree
+            <MarkmapView
               tree={treeWithNames}
+              mode="multi"
+              palette={tree.palette}
+              nameByDocId={nameByDocId}
               onLeafClick={onMultiLeafClick}
             />
           )
@@ -1278,7 +1265,7 @@ export default function GraphPage() {
   )
 }
 
-function MindmapModeBody({ renderer = 'd3tree', tree, loading, error, urlChunkId, onLeafClick, onFallbackToGraph }) {
+function MindmapModeBody({ tree, loading, error, urlChunkId, onLeafClick, onFallbackToGraph }) {
   const { t } = useTranslation()
 
   if (loading) {
@@ -1317,19 +1304,10 @@ function MindmapModeBody({ renderer = 'd3tree', tree, loading, error, urlChunkId
   }
 
   const selectedChunkIds = urlChunkId != null ? [urlChunkId] : []
-  if (renderer === 'markmap') {
-    return (
-      <MarkmapView
-        tree={tree}
-        mode="single"
-        selectedChunkIds={selectedChunkIds}
-        onLeafClick={onLeafClick}
-      />
-    )
-  }
   return (
-    <MindmapTree
+    <MarkmapView
       tree={tree}
+      mode="single"
       selectedChunkIds={selectedChunkIds}
       onLeafClick={onLeafClick}
     />
