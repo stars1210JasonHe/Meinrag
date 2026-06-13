@@ -4,6 +4,7 @@ import DashboardPage from './pages/DashboardPage'
 import ChatPage from './pages/ChatPage'
 import GraphPage from './pages/GraphPage'
 import PdfViewerPage from './pages/PdfViewerPage'
+import MarkmapSpike from './components/_spike/MarkmapSpike'  // THROWAWAY Phase 0 spike — remove after
 
 export const router = createBrowserRouter([
   {
@@ -15,6 +16,7 @@ export const router = createBrowserRouter([
       { path: '/graph', element: <GraphPage /> },
       { path: '/graph/:docId', element: <GraphPage /> },
       { path: '/pdf/:docId', element: <PdfViewerPage /> },
+      { path: '/spike-markmap', element: <MarkmapSpike /> },  // THROWAWAY Phase 0 spike
     ],
   },
 ])
