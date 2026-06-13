@@ -10,6 +10,7 @@ import DocCombobox from '@/components/DocCombobox'
 import { cn } from '@/lib/utils'
 import ContextMenu from '@/components/ContextMenu'
 import MindmapTree from '@/components/MindmapTree'
+import MarkmapView from '@/components/markmap/MarkmapView'
 import MultiDocChunkBody from '@/components/MultiDocChunkBody'
 import MultiDocMindmapTree from '@/components/MultiDocMindmapTree'
 import SelectionActionBar from '@/components/SelectionActionBar'
@@ -148,6 +149,8 @@ export default function GraphPage() {
     [multiDocsParam]
   )
   const mode = searchParams.get('mode') === 'mindmap' ? 'mindmap' : 'graph'
+  // Experimental renderer toggle (default = legacy react-d3-tree). ?renderer=markmap
+  const renderer = searchParams.get('renderer') === 'markmap' ? 'markmap' : 'd3tree'
   const urlChunk = searchParams.get('chunk')
   const urlChunkId = urlChunk != null ? Number(urlChunk) : null
 
@@ -1031,6 +1034,7 @@ export default function GraphPage() {
         )}
         {mode === 'mindmap' && docId && (
           <MindmapModeBody
+            renderer={renderer}
             tree={mindmapData?.tree}
             loading={mindmapLoading}
             error={mindmapError}
@@ -1263,7 +1267,7 @@ export default function GraphPage() {
   )
 }
 
-function MindmapModeBody({ tree, loading, error, urlChunkId, onLeafClick, onFallbackToGraph }) {
+function MindmapModeBody({ renderer = 'd3tree', tree, loading, error, urlChunkId, onLeafClick, onFallbackToGraph }) {
   const { t } = useTranslation()
 
   if (loading) {
@@ -1301,10 +1305,21 @@ function MindmapModeBody({ tree, loading, error, urlChunkId, onLeafClick, onFall
     )
   }
 
+  const selectedChunkIds = urlChunkId != null ? [urlChunkId] : []
+  if (renderer === 'markmap') {
+    return (
+      <MarkmapView
+        tree={tree}
+        mode="single"
+        selectedChunkIds={selectedChunkIds}
+        onLeafClick={onLeafClick}
+      />
+    )
+  }
   return (
     <MindmapTree
       tree={tree}
-      selectedChunkIds={urlChunkId != null ? [urlChunkId] : []}
+      selectedChunkIds={selectedChunkIds}
       onLeafClick={onLeafClick}
     />
   )

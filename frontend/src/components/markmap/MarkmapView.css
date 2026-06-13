@@ -1,0 +1,70 @@
+.markmap-view-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+}
+.markmap-view-svg {
+  display: block;
+}
+
+/* Node labels are foreignObject HTML — text colour follows the theme via the
+   CSS var, no getComputedStyle hack (the legacy tree needed one; markmap doesn't). */
+.markmap-view-svg .mm-node {
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+.markmap-view-svg .mm-central {
+  font-weight: 600;
+  color: var(--signature);
+}
+.markmap-view-svg .mm-leaf {
+  text-decoration: none;
+}
+.markmap-view-svg .mm-leaf:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* chunk-count badge */
+.markmap-view-svg .mm-count-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--signature);
+  color: #fff;
+  font-size: 11px;
+  line-height: 16px;
+  vertical-align: middle;
+}
+
+/* multi-doc coverage swatch */
+.markmap-view-svg .mm-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+/* selection cross-highlight (single-doc) — applied post-render to OUR span
+   (markmap rewrites the <g> class each render, but not the span). */
+.markmap-view-svg .mm-leaf.mm-selected-leaf {
+  color: var(--signature);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.markmap-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-1);
+  font-size: 14px;
+}
