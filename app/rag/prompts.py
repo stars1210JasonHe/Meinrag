@@ -214,12 +214,14 @@ Rules:
   ]
 }}
 3. 3-6 top-level branches. Each branch has 2-5 children.
-4. A child is normally a LEAF (chunk_indices, no children). Use leaves by default.
-5. A child MAY be an INNER node (children, no chunk_indices) ONLY IF:
-   - There are at least 3 distinct sub-sub-concepts that genuinely cluster within it, AND
-   - Each sub-sub-concept maps to its own subset of chunks.
-   When in doubt, prefer leaves — depth is a cost, not a virtue.
-6. Maximum depth is 4 (central → branch → child → optional grandchild). No deeper.
+4. A child is a LEAF (chunk_indices, no children) when it is a single atomic concept.
+5. EXPAND a child into an INNER node (children, no chunk_indices) WHENEVER it
+   clearly splits into 2+ distinct sub-sub-concepts, each backed by its own chunks.
+   Prefer this 4th level whenever a sub-topic genuinely decomposes — the extra depth
+   aids navigation of richer documents. Use it wherever the content supports it; stay
+   flat only when a child truly is one indivisible idea. Do NOT invent filler
+   sub-nodes just to add depth.
+6. Maximum depth is 4 (central → branch → child → grandchild). No deeper.
 7. Each leaf's chunk_indices lists 1-5 chunks that support that concept.
 8. A chunk index may appear in multiple leaves (ideas cross-cut).
 9. Output language: match the document's predominant language.
@@ -278,12 +280,14 @@ Rules:
   ]
 }}
 3. 3-6 top-level branches. Each branch has 2-5 children.
-4. A child is normally a LEAF (chunks_by_doc, no children). Use leaves by default.
-5. A child MAY be an INNER node (children, no chunks_by_doc) ONLY IF:
-   - There are at least 3 distinct sub-sub-concepts that genuinely cluster within it, AND
-   - Each sub-sub-concept maps to its own subset of chunks.
-   When in doubt, prefer leaves — depth is a cost, not a virtue.
-6. Maximum depth is 4 (central → branch → child → optional grandchild). No deeper.
+4. A child is a LEAF (chunks_by_doc, no children) when it is a single atomic concept.
+5. EXPAND a child into an INNER node (children, no chunks_by_doc) WHENEVER it
+   clearly splits into 2+ distinct sub-sub-concepts, each backed by its own chunks.
+   Prefer this 4th level whenever a sub-topic genuinely decomposes — the extra depth
+   aids navigation across a rich document set. Use it wherever the content supports it;
+   stay flat only when a child truly is one indivisible idea. Do NOT invent filler
+   sub-nodes just to add depth.
+6. Maximum depth is 4 (central → branch → child → grandchild). No deeper.
 7. Each leaf's chunks_by_doc:
    - Keys are doc_ids from the menu above (NEVER invent doc_ids).
    - Values are 1-5 chunk indices for that doc that support the concept.
