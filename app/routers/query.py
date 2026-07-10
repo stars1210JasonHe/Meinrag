@@ -96,7 +96,8 @@ async def _resolve_doc_ids(
             collection_docs = await registry.list_by_collection(request.collection, user_id=current_user)
             collection_doc_ids = [d["doc_id"] for d in collection_docs]
             if doc_ids:
-                doc_ids = [d for d in doc_ids if d in collection_doc_ids and d in user_doc_ids]
+                collection_set = set(collection_doc_ids)  # collections reach thousands of ids
+                doc_ids = [d for d in doc_ids if d in collection_set and d in user_doc_ids]
             else:
                 doc_ids = collection_doc_ids
         elif doc_ids:
@@ -527,6 +528,10 @@ async def search_documents(
             mapping_repo=mapping_repo,
             audit_repo=audit_repo,
             user_id=current_user,
+            ensure_coverage=settings.search_coverage_enabled,
+            # retrieve-only: response order must be ranking order, not the
+            # LLM-context U-shape placement (which buries #2 at the end)
+            reorder_for_attention=False,
         )
         return SearchResponse(
             results=result.sources,

@@ -231,13 +231,18 @@ class TestGraphExpansion:
                 return [text_chunk, image_chunk]
 
         retrieved = [(text_chunk, 0.7)]
+        profile = _general_scoring()
         expanded = await _expand_via_edges(
-            retrieved, MockEdgeRepo(), MockStore(), _general_scoring(),
+            retrieved, MockEdgeRepo(), MockStore(), profile,
             relations=["describes", "references"],
         )
         assert len(expanded) == 2
         assert expanded[1][0].page_content == "Figure 1: Architecture"
-        assert expanded[1][1] == 0.8
+        # Expanded score is query-linked: parent x decay x edge — never the raw
+        # static edge score (that was the constant-top-3 bug, P1 2026-07-10).
+        decay = profile.graph_expansion_score_decay
+        assert expanded[1][1] == pytest.approx(0.7 * decay * 0.8)
+        assert expanded[1][1] < 0.7  # always below the parent chunk
 
     @pytest.mark.asyncio
     async def test_no_duplicates(self):

@@ -59,6 +59,28 @@ class DocumentUpdateResponse(BaseModel):
     message: str
 
 
+class BackfillItem(BaseModel):
+    """One document's metadata correction. Omitted fields are left unchanged."""
+    doc_id: str
+    primary_category: str | None = Field(default=None, description="One of PRIMARY_CATEGORIES (off-taxonomy values are applied but logged)")
+    subtags: list[str] | None = Field(default=None, description="Replace subtags wholesale")
+
+
+class BackfillMetadataRequest(BaseModel):
+    """Bulk classification backfill — registry + vector-store chunk metadata
+    in one pass, persisted once (per-doc PATCH persists the whole FAISS index
+    each call, unusable for thousands of docs)."""
+    items: list[BackfillItem] = Field(..., min_length=1, max_length=10000)
+    dry_run: bool = Field(default=False, description="Validate and report without writing")
+
+
+class BackfillMetadataResponse(BaseModel):
+    updated: int
+    unknown_doc_ids: list[str] = Field(default_factory=list)
+    dry_run: bool
+    message: str
+
+
 class QueryRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=2000)
     top_k: int = Field(default=4, ge=1, le=20)
@@ -75,6 +97,10 @@ class SourceChunk(BaseModel):
     doc_id: str | None = None
     page: int | None = None
     source_type: Literal["document", "web"] = "document"
+    # 0-100 composite: 100 x clamp01(w_sim * query_cosine + w_graph * graph_authority),
+    # weights per query type (data/query_types.json). Absolute scale — a weak match
+    # shows a low number; nothing is pinned to 100. List order may come from the
+    # cross-encoder reranker and be locally non-monotonic with this value.
     score: float | None = None
     url: str | None = None
     chunk_type: Literal["text", "table", "image", "formula"] | None = None

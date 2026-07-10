@@ -109,6 +109,41 @@ def test_reclassify_403_when_disabled(tmp_path, monkeypatch):
     assert r.status_code == 403, r.text
 
 
+def test_upload_primary_category_override_skips_classifier(tmp_path, monkeypatch):
+    """Deterministic legal ingest: an explicit primary_category override wins,
+    so the probabilistic classifier is not called even when enabled; subtags
+    is a list query param (>=2 values must round-trip — guards the Query() bug)."""
+    monkeypatch.delenv("CLASSIFICATION_ENABLED", raising=False)  # enabled
+    monkeypatch.setenv("ANONYMIZATION_ENABLED", "false")
+    calls = []
+    monkeypatch.setattr(
+        "app.services.collection_suggester.classify_document",
+        lambda *a, **k: (calls.append(1), _SpyResult())[1],
+    )
+    app = _make_search_app(tmp_path)
+    try:
+        with TestClient(app, raise_server_exceptions=True) as client:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
+                f.write("Some legal statute text. " * 20)
+                path = f.name
+            try:
+                with open(path, "rb") as fh:
+                    r = client.post(
+                        "/documents/upload?primary_category=regulation&subtags=操作指引&subtags=model-text",
+                        files={"file": ("law.txt", fh, "text/plain")},
+                    )
+            finally:
+                os.unlink(path)
+            assert r.status_code == 200, r.text
+            doc_id = r.json()["doc_id"]
+            doc = next(d for d in client.get("/documents").json()["documents"] if d["doc_id"] == doc_id)
+    finally:
+        app.dependency_overrides.clear()
+    assert calls == []                                  # classifier skipped by override
+    assert doc["primary_category"] == "regulation"
+    assert "操作指引" in doc["subtags"] and "model-text" in doc["subtags"]  # list round-trips
+
+
 def test_reclassify_passes_guard_when_enabled(tmp_path, monkeypatch):
     """Enabled + missing doc -> guard does NOT block; falls through to the
     normal 404. Proves the 403 is conditional on the flag, not unconditional."""

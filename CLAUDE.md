@@ -105,6 +105,9 @@ Pydantic Settings in `app/config.py` reads from `.env`. Key groups: LLM provider
 | GET | `/documents/{doc_id}/download` | Download original file |
 | PATCH | `/documents/{doc_id}` | Update document collections |
 | POST | `/documents/{doc_id}/reclassify` | AI reclassify document |
+| POST | `/documents/backfill-metadata` | Bulk classification backfill (registry + chunk metadata, one persist) |
 | DELETE | `/documents/{doc_id}` | Remove a document |
 | POST | `/query` | Ask a question (supports `doc_ids`, `session_id`, `collection`) |
 | POST | `/search` | Retrieve-only: ranked chunks, no LLM answer (for MCP/agent consumers) |
+
+**Collection scoping contract:** the `collection` parameter on `/query` and `/search` resolves ONLY via the `document_collections` junction table (written by upload `?collections=`, PATCH, and `/documents/collections/save`). `primary_category`/`subtags` are a separate classification axis — never consulted for collection membership.

@@ -33,9 +33,14 @@ class FAISSStoreManager(VectorStoreManager):
         self._store: FAISS | None = None
         self._embeddings: Embeddings | None = None
         self._gpu_enabled: bool = False
+        # Lazy doc_id -> [docstore_id] map. Without it every get_chunks_by_doc
+        # linearly scans the whole docstore — corpus-linear cost paid several
+        # times per query (coverage, visual proximity, graph expansion).
+        self._doc_id_index: dict[str, list[str]] | None = None
 
     def initialize(self, embeddings: Embeddings) -> None:
         self._embeddings = embeddings
+        self._doc_id_index = None
         index_file = self._persist_dir / "index.faiss"
         if index_file.exists():
             self._store = FAISS.load_local(
@@ -65,6 +70,7 @@ class FAISSStoreManager(VectorStoreManager):
             if self._gpu_enabled:
                 _try_gpu_index(self._store)
 
+        self._doc_id_index = None
         self.persist()
         return [f"{doc_id}_chunk_{i}" for i in range(len(documents))]
 
@@ -81,6 +87,7 @@ class FAISSStoreManager(VectorStoreManager):
         # If all documents deleted, reset store
         if not self._store.docstore._dict:
             self._store = None
+        self._doc_id_index = None
         self.persist()
 
     def similarity_search(self, query: str, k: int = 4) -> list[Document]:
@@ -101,7 +108,8 @@ class FAISSStoreManager(VectorStoreManager):
         # Over-fetch then post-filter by doc_ids
         candidates = self._store.similarity_search(query, k=k * 5)
         if doc_ids:
-            candidates = [d for d in candidates if d.metadata.get("doc_id") in doc_ids]
+            idset = set(doc_ids)  # collection scopes reach thousands of ids
+            candidates = [d for d in candidates if d.metadata.get("doc_id") in idset]
         return candidates[:k]
 
     def similarity_search_with_scores(
@@ -113,15 +121,27 @@ class FAISSStoreManager(VectorStoreManager):
         fetch_k = k * 5 if doc_ids else k
         results = self._store.similarity_search_with_score(query, k=fetch_k)
         if doc_ids:
-            results = [(d, s) for d, s in results if d.metadata.get("doc_id") in doc_ids]
+            idset = set(doc_ids)
+            results = [(d, s) for d, s in results if d.metadata.get("doc_id") in idset]
         return [(doc, l2sq_to_score(dist)) for doc, dist in results[:k]]
+
+    def _get_doc_id_index(self) -> dict[str, list[str]]:
+        """Build (once) the doc_id -> docstore-id map; mutators reset it to None."""
+        if self._doc_id_index is None:
+            index: dict[str, list[str]] = {}
+            for store_id, doc in self._store.docstore._dict.items():
+                index.setdefault(doc.metadata.get("doc_id"), []).append(store_id)
+            self._doc_id_index = index
+        return self._doc_id_index
 
     def get_chunks_by_doc(self, doc_id: str, chunk_indices: list[int] | None = None) -> list[Document]:
         if self._store is None:
             return []
+        docstore = self._store.docstore._dict
         docs = []
-        for doc in self._store.docstore._dict.values():
-            if doc.metadata.get("doc_id") != doc_id:
+        for store_id in self._get_doc_id_index().get(doc_id, []):
+            doc = docstore.get(store_id)
+            if doc is None:
                 continue
             if chunk_indices is not None:
                 if doc.metadata.get("chunk_index") not in chunk_indices:
@@ -151,14 +171,18 @@ class FAISSStoreManager(VectorStoreManager):
                     logger.warning("GPU→CPU persist failed, saving as-is: %s", e)
             self._store.save_local(str(self._persist_dir), index_name="index")
 
-    def update_document_metadata(self, doc_id: str, metadata_updates: dict) -> None:
+    def update_document_metadata(
+        self, doc_id: str, metadata_updates: dict, persist: bool = True,
+    ) -> None:
         """Update metadata on all chunks — direct docstore update, no rebuild."""
         if self._store is None:
             return
+        docstore = self._store.docstore._dict
         updated = False
-        for doc in self._store.docstore._dict.values():
-            if doc.metadata.get("doc_id") == doc_id:
+        for store_id in self._get_doc_id_index().get(doc_id, []):
+            doc = docstore.get(store_id)
+            if doc is not None:
                 doc.metadata.update(metadata_updates)
                 updated = True
-        if updated:
+        if updated and persist:
             self.persist()

@@ -873,6 +873,7 @@ class TestRouterHookInRetrieval:
         settings = MagicMock()
         settings.router_enabled = True
         settings.router_min_scope = 15
+        settings.router_max_scope = 300
         settings.router_top_k = 8
         settings.per_doc_coverage_max_backfill = 30
         settings.rerank_max_candidates = 80
@@ -938,6 +939,7 @@ class TestRouterHookInRetrieval:
         settings = MagicMock()
         settings.router_enabled = True
         settings.router_min_scope = 15
+        settings.router_max_scope = 300
         settings.router_top_k = 8
         settings.per_doc_coverage_max_backfill = 30
         settings.rerank_max_candidates = 80
@@ -1001,6 +1003,7 @@ class TestRouterHookInRetrieval:
         settings = MagicMock()
         settings.router_enabled = False  # off
         settings.router_min_scope = 15
+        settings.router_max_scope = 300
         settings.router_top_k = 8
         settings.per_doc_coverage_max_backfill = 30
         settings.rerank_max_candidates = 80

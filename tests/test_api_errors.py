@@ -3,6 +3,7 @@
 Uses FastAPI TestClient with mocked dependencies and in-memory SQLite DB.
 """
 import io
+import re
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
@@ -131,6 +132,25 @@ class TestUploadErrors:
             files={"file": ("photo.jpg", io.BytesIO(b"fake"), "image/jpeg")},
         )
         assert resp.status_code == 400
+
+    def test_corrupt_docx_returns_422_with_stage(self, client):
+        """P2 (ops work order): a file the parser can't ingest must yield a
+        diagnosable 422 naming the stage + error + frame, not an opaque 500."""
+        resp = client.post(
+            "/documents/upload",
+            files={
+                "file": (
+                    "broken.docx",
+                    io.BytesIO(b"this is not a zip archive"),
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                )
+            },
+        )
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert "Ingest failed at stage 'parse'" in detail
+        # innermost frame is included, e.g. [zipfile.py:1379]
+        assert re.search(r"\[\w+.*\.py:\d+\]", detail), detail
 
 
 class TestDeleteErrors:

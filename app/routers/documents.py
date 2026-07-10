@@ -3,6 +3,7 @@ import hashlib
 import logging
 import re
 import shutil
+import traceback
 from pathlib import Path
 
 import numpy as np
@@ -28,6 +29,8 @@ from app.models.schemas import (
     DeleteResponse,
     DocumentUpdateRequest,
     DocumentUpdateResponse,
+    BackfillMetadataRequest,
+    BackfillMetadataResponse,
     TaxonomyResponse,
     SaveCollectionRequest,
     SaveCollectionResponse,
@@ -52,12 +55,23 @@ def _get_user_filter(settings: Settings, user_id: str) -> str | None:
     return None
 
 
+def _innermost_frame(exc: BaseException) -> str:
+    """`module.py:123` of the deepest traceback frame — enough to locate a
+    library-level failure from the API response without the server logs."""
+    tb = traceback.extract_tb(exc.__traceback__)
+    if not tb:
+        return "unknown"
+    return f"{Path(tb[-1].filename).name}:{tb[-1].lineno}"
+
+
 @router.post("/upload", response_model=UploadResponse)
 async def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     collections: str | None = Query(default=None, description="Comma-separated collection names"),
     auto_suggest: bool = True,
+    primary_category: str | None = Query(default=None, description="Override doc_type/category (deterministic ingest); when set, skips the classifier"),
+    subtags: list[str] | None = Query(default=None, description="Override subtags (repeatable); preserved if provided, else the classifier fills them"),
     settings: Settings = Depends(get_settings),
     vector_store: VectorStoreManager = Depends(get_vector_store),
     llm: BaseChatModel = Depends(get_llm),
@@ -104,11 +118,18 @@ async def upload_document(
     upload_path = settings.upload_dir / f"{doc_id}_{filename}"
     upload_path.write_bytes(content)
 
+    # `stage` tracks which ingest phase is running so a failure names its
+    # phase in the API response — ops replaying a bad batch need "which stage,
+    # which error, where" without a docker-logs dig. Content-dependent stages
+    # (parse/clean/dedup) map to 422 "this file can't be ingested"; the rest
+    # stay 500 (infra).
+    stage = "parse"
     try:
         # Process and index
         processor = DocumentProcessor(settings)
         chunks = await processor.load_and_split(upload_path, doc_id=doc_id, llm=llm)
 
+        stage = "clean"
         # Strip export/portal noise (北大法宝 etc.) per-chunk before embedding.
         if settings.text_clean_enabled:
             from app.services.legal_text_clean import clean
@@ -119,6 +140,7 @@ async def upload_document(
                     cleaned.append(c)
             chunks = cleaned
 
+        stage = "dedup"
         # Drop intra-doc duplicate paragraphs (PDF extraction artifacts).
         # After clean() so noise-stripped near-identicals collapse too.
         if settings.dedup_chunks_enabled:
@@ -147,6 +169,7 @@ async def upload_document(
                     ),
                 )
 
+        stage = "anonymize"
         # ─── Anonymization pre-embedding hook (Task 8) ─────────────────
         # When the flag is on, every chunk's text is pseudonymized before
         # embedding. The vector store + OpenAI embedding API never see
@@ -208,6 +231,7 @@ async def upload_document(
                 doc_id, len(chunks), total_entities,
             )
 
+        stage = "classify"
         # Parse user-curated collections from comma-separated form field
         parsed_collections: list[str] = []
         if collections:
@@ -223,17 +247,25 @@ async def upload_document(
         # uses an OpenAI LLM, so running it on raw text would defeat the
         # whole anonymization promise. Quality cost accepted; alternative
         # would require a fully-local classifier.
-        primary_category: str | None = None
-        subtags: list[str] = []
+        # Explicit override (e.g. deterministic legal-corpus ingest via
+        # scripts/ingest_legal_corpus.py) WINS over the probabilistic classifier;
+        # the classifier only runs to fill a category that was not provided.
+        subtags = list(subtags) if subtags else []
         suggested_collections: list[str] = []
-        if auto_suggest and settings.classification_enabled:
+        if primary_category is None and auto_suggest and settings.classification_enabled:
             from app.services.collection_suggester import classify_document
             existing = await registry.get_all_collections()
             classification = classify_document(chunks, llm, existing, embeddings=embeddings)
             primary_category = classification.primary_category
-            subtags = classification.subtags
+            subtags = subtags or classification.subtags  # preserve caller-provided subtags
             suggested_collections = classification.collection_suggestions
 
+        # Surface (don't hard-fail) an override category outside the loaded taxonomy —
+        # a deterministic-ingest typo / config drift would otherwise mis-bucket silently.
+        if primary_category is not None and primary_category not in PRIMARY_CATEGORIES:
+            logger.warning("upload: primary_category %r not in the loaded taxonomy", primary_category)
+
+        stage = "vector-add"
         # Bake user-curated collections into chunk metadata for retrieval filtering
         collections_csv = "|".join(parsed_collections)
         for chunk in chunks:
@@ -245,6 +277,7 @@ async def upload_document(
         from app.rag.chain import invalidate_bm25_cache
         invalidate_bm25_cache()
 
+        stage = "edges"
         # Build graph edges between chunks
         from app.services.edge_builder import build_intra_doc_edges, build_cross_doc_edges
         from app.db.repositories import EdgeRepository
@@ -271,6 +304,7 @@ async def upload_document(
         edge_repo = EdgeRepository(db)
         await edge_repo.bulk_insert(intra_edges + cross_edges)
 
+        stage = "register"
         # Enqueue background summary generation
         if settings.summary_enabled:
             from app.services.task_dispatcher import enqueue_summary_task
@@ -309,6 +343,10 @@ async def upload_document(
         if primary_category:
             message += f". Classified as {primary_category}"
 
+        # Commit before responding (finalizer commit lands after the response —
+        # see delete_document) so read-after-upload verification sees the row.
+        await db.commit()
+
         return UploadResponse(
             doc_id=doc_id,
             filename=filename,
@@ -326,8 +364,19 @@ async def upload_document(
         raise
     except Exception as e:
         upload_path.unlink(missing_ok=True)
-        logger.exception(f"Failed to process {filename}")
-        raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
+        logger.exception(f"Failed to process {filename} (stage={stage})")
+        # 422 = this file can't be ingested (content problem); 500 = infra.
+        # The detail names stage + error + innermost frame so a batch replay
+        # is diagnosable from the API response alone (kept as a plain string —
+        # the dashboard and ops scripts display `detail` directly).
+        status = 422 if stage in ("parse", "clean", "dedup") else 500
+        raise HTTPException(
+            status_code=status,
+            detail=(
+                f"Ingest failed at stage '{stage}': "
+                f"{type(e).__name__}: {e} [{_innermost_frame(e)}]"
+            ),
+        )
 
 
 SEMANTIC_QUERY_MIN_WORDS = 4
@@ -926,6 +975,7 @@ async def update_document_collections(
     request: DocumentUpdateRequest,
     vector_store: VectorStoreManager = Depends(get_vector_store),
     registry: DocumentRepository = Depends(get_registry),
+    db: AsyncSession = Depends(get_db),
 ):
     doc = await registry.get(doc_id)
     if not doc:
@@ -957,6 +1007,10 @@ async def update_document_collections(
         await registry.update_collections(doc_id, new_collections)
         vector_store.update_document_metadata(doc_id, {"collections_csv": "|".join(new_collections)})
 
+    # Commit before responding (finalizer commit lands after the response —
+    # see delete_document) so read-after-update sees the new values.
+    await db.commit()
+
     # Re-read so the response reflects every applied change
     updated = await registry.get(doc_id)
     return DocumentUpdateResponse(
@@ -965,6 +1019,77 @@ async def update_document_collections(
         subtags=list(updated.get("subtags") or []),
         collections=list(updated.get("collections") or []),
         message="Document updated successfully",
+    )
+
+
+@router.post("/backfill-metadata", response_model=BackfillMetadataResponse)
+async def backfill_metadata(
+    request: BackfillMetadataRequest,
+    vector_store: VectorStoreManager = Depends(get_vector_store),
+    registry: DocumentRepository = Depends(get_registry),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bulk classification backfill (registry + chunk metadata, one persist).
+
+    Built for ops corrections of whole ingest batches — e.g. a batch uploaded
+    without classification metadata gets its known doc→category/subtags mapping
+    applied in one call. Unknown doc_ids are reported, not fatal: the rest of
+    the batch still applies.
+    """
+    unknown: list[str] = []
+    updated = 0
+    for item in request.items:
+        doc = await registry.get(item.doc_id)
+        if not doc:
+            unknown.append(item.doc_id)
+            continue
+
+        # Same partial-update semantics as PATCH: omitted field → keep existing
+        new_primary = (
+            item.primary_category
+            if item.primary_category is not None
+            else doc.get("primary_category")
+        )
+        new_subtags = (
+            list(item.subtags)
+            if item.subtags is not None
+            else list(doc.get("subtags") or [])
+        )
+        if new_primary and new_primary not in PRIMARY_CATEGORIES:
+            logger.warning(
+                "backfill: primary_category %r not in the loaded taxonomy (doc %s)",
+                new_primary, item.doc_id,
+            )
+        if request.dry_run:
+            updated += 1
+            continue
+
+        await registry.update_classification(item.doc_id, new_primary, new_subtags)
+        if new_primary:
+            # persist=False: batch all chunk-metadata writes, flush once below
+            vector_store.update_document_metadata(
+                item.doc_id, {"primary_category": new_primary}, persist=False,
+            )
+        updated += 1
+
+    if not request.dry_run and updated:
+        vector_store.persist()
+        # Commit before responding (see delete_document) so ops verification
+        # COUNT queries right after the call see the backfilled values.
+        await db.commit()
+
+    logger.info(
+        "Metadata backfill%s: %d updated, %d unknown of %d requested",
+        " (dry run)" if request.dry_run else "", updated, len(unknown), len(request.items),
+    )
+    return BackfillMetadataResponse(
+        updated=updated,
+        unknown_doc_ids=unknown,
+        dry_run=request.dry_run,
+        message=(
+            f"{'Would update' if request.dry_run else 'Updated'} {updated} document(s)"
+            + (f"; {len(unknown)} unknown doc_id(s) skipped" if unknown else "")
+        ),
     )
 
 
@@ -1100,5 +1225,10 @@ async def delete_document(
     if mapping_repo is not None and audit_repo is not None:
         await mapping_repo.delete_for_doc(doc_id)
         await audit_repo.mark_source_deleted(doc_id)
+
+    # Commit before responding: the get_db finalizer commit only runs AFTER the
+    # response is sent (FastAPI >=0.106 yield-dependency semantics), so without
+    # this an immediate read-after-delete can still see the row.
+    await db.commit()
 
     return DeleteResponse(doc_id=doc_id, message="Document deleted successfully")

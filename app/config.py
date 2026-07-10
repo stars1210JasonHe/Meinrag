@@ -113,6 +113,11 @@ class Settings(BaseSettings):
     # blow-up. Surfaced docs are always covered; only missing-doc backfill is
     # capped. Tuned to answer capacity, not collection size.
     per_doc_coverage_max_backfill: int = 30
+    # Per-doc coverage on /search (retrieve-only). Coverage exists for ask-AI
+    # answer comprehensiveness; agent/MCP consumers rank raw chunks themselves,
+    # and on large collection scopes coverage enumerates every member doc per
+    # query. /query is unaffected by this flag.
+    search_coverage_enabled: bool = False
 
     # Re-ranking
     rerank_enabled: bool = False
@@ -124,6 +129,12 @@ class Settings(BaseSettings):
     # collection). Input is truncated to the top-N by score before scoring; the
     # remainder is unaffected by reranking. Output still comes from the reranker.
     rerank_max_candidates: int = 80
+    # When True (default) the cross-encoder's order IS the final result order —
+    # displayed values stay composite scores, so position and score can be
+    # locally non-monotonic (two honest, different signals). False restores the
+    # legacy behavior of re-sorting by composite after rerank, which discards
+    # the cross-encoder's judgment.
+    rerank_final_order: bool = True
 
     # Query expansion for vague queries (re-query with LLM-expanded terms)
     query_expansion_enabled: bool = True
@@ -173,6 +184,10 @@ class Settings(BaseSettings):
     # retrieval_top_k=10.
     router_enabled: bool = True
     router_min_scope: int = 15      # below this many docs, router is bypassed
+    # Above this many docs, router is also bypassed: it fetches every scoped
+    # doc's registry row sequentially and puts a one-line-per-doc menu in the
+    # LLM prompt — untenable on thousands-of-docs collection scopes.
+    router_max_scope: int = 300
     router_top_k: int = 8           # how many docs router picks
     router_model: str = "gpt-4o-mini"
 
@@ -185,6 +200,17 @@ class Settings(BaseSettings):
     # visualization AND retrieval (composite graph_score + graph expansion).
     graph_similar_min_score: float = 0.7
     graph_similar_min_pairs: int = 2
+    # How graph-expanded chunks are scored at retrieval time:
+    #   "decay"  (default): parent_score x decay x edge_score — query-linked,
+    #            mathematically always below the parent chunk.
+    #   "legacy": raw static edge.score when present — query-INDEPENDENT, lets
+    #            high-edge hub docs enter any query's results at a fixed high
+    #            score (the constant-top-3 bug this replaces).
+    graph_expansion_score_mode: str = "decay"
+
+    # Per-stage score provenance logging ([SCORE-TRACE] lines, top-10 per
+    # stage). Diagnostic for "where did this score come from" — off by default.
+    retrieval_debug_trace: bool = False
 
     # Context window management — protects against overflow when passing chunks to LLM.
     # Effective budget = min(max_context_tokens or inf, model_window * context_budget_ratio).

@@ -81,8 +81,13 @@ class ChromaStoreManager(VectorStoreManager):
     def persist(self) -> None:
         pass  # Chroma auto-persists with persist_directory
 
-    def update_document_metadata(self, doc_id: str, metadata_updates: dict) -> None:
-        """Update metadata on all chunks belonging to a document via ChromaDB's update()."""
+    def update_document_metadata(
+        self, doc_id: str, metadata_updates: dict, persist: bool = True,
+    ) -> None:
+        """Update metadata on all chunks belonging to a document via ChromaDB's update().
+
+        ``persist`` is ignored — Chroma writes are immediately durable.
+        """
         results = self._store.get(where={"doc_id": doc_id}, include=["metadatas"])
         if not results or not results["ids"]:
             return

@@ -252,6 +252,13 @@ Per-deployment env vars: `TAXONOMY_PATH`, `CLASSIFICATION_ENABLED`, `DATABASE_UR
   curated source folders) should set `CLASSIFICATION_ENABLED=false` so the
   probabilistic classifier never runs.
 
+A legal deployment plans its ingest with `scripts/ingest_legal_corpus.py` (dry-run by
+default; `data/legal_corpus_map.json` holds the curated folder→`doc_type` rules,
+file-type whitelist, `*_files/` web-asset exclusion, and filename-level PII triage).
+`--execute` POSTs each included file to a running server's `/upload` with the
+deterministic `primary_category`/`subtags` override (stays human-gated until the PII
+unfreeze). doc_type is folder-derived, never classifier-guessed.
+
 ---
 
 ## Enabling Anonymization (Optional)
@@ -356,8 +363,16 @@ store + embedding API logs) is covered.
 - `GET /documents/{id}/mindmap` — LLM-derived concept tree (recursive, up to 4 levels)
 - `PATCH /documents/{id}` — update primary_category, subtags, or collections
 - `POST /documents/{id}/reclassify` — re-run AI classification
+- `POST /documents/backfill-metadata` — bulk classification backfill (`{items: [{doc_id, primary_category?, subtags?}], dry_run?}`); writes registry + chunk metadata with a single vector-store persist
 - `POST /documents/collections/save` — save a multi-select collection by name
 - `DELETE /documents/{id}`
+
+> **How `collection` filtering resolves:** a document belongs to a collection via the
+> `document_collections` junction table — populated by the `?collections=` upload
+> parameter, `PATCH /documents/{id}`, or `POST /documents/collections/save`. The
+> `collection` parameter on `/query` and `/search` resolves **only** against that
+> table; `primary_category`/classification is a separate axis and is never consulted
+> for collection scoping.
 
 ### Query
 - `POST /query` — non-streaming, returns full response with sources + telemetry (`chunks_included`, `chunks_available`, `context_used_tokens`, `confidence_tier`, etc.)

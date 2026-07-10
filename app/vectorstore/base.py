@@ -72,6 +72,14 @@ class VectorStoreManager(ABC):
         ...
 
     @abstractmethod
-    def update_document_metadata(self, doc_id: str, metadata_updates: dict) -> None:
-        """Update metadata fields on all chunks belonging to a document."""
+    def update_document_metadata(
+        self, doc_id: str, metadata_updates: dict, persist: bool = True,
+    ) -> None:
+        """Update metadata fields on all chunks belonging to a document.
+
+        ``persist=False`` lets bulk callers batch many updates and call
+        ``persist()`` once at the end (a FAISS persist rewrites the whole
+        index file; per-doc persists make a 2,000-doc backfill unusable).
+        Implementations that auto-persist may ignore the flag.
+        """
         ...

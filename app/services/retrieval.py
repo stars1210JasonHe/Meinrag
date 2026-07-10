@@ -106,7 +106,11 @@ async def _maybe_expand_query(
     if not settings.query_expansion_enabled or not retrieved:
         return question, retrieved
 
-    max_score = max(score for _, score in retrieved) if retrieved else 0
+    # Gate on the carried cosine, not the tuple score: post-RRF tuple scores are
+    # max-normalized (top is always 1.0), which made this gate permanently cold.
+    max_score = max(
+        doc.metadata.get("_query_sim", score) for doc, score in retrieved
+    ) if retrieved else 0
     if max_score >= settings.query_expansion_score_threshold:
         return question, retrieved
 
@@ -129,6 +133,8 @@ async def _maybe_expand_query(
 
         # Only use expanded results if they're actually better
         if new_max > max_score:
+            for doc, score in new_retrieved:
+                _stamp_query_sim(doc, score, "raw_expanded")
             return expanded, new_retrieved
     except Exception as e:
         logger.warning("Query expansion failed: %s", e)
@@ -183,6 +189,8 @@ async def _fact_keyword_expand(
             key = (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index"))
             if key not in seen:
                 seen.add(key)
+                # augmented-query cosine — the honest magnitude for these chunks
+                _stamp_query_sim(doc, score, "fact_expand")
                 merged.append((doc, score))
         for doc, score in retrieved:
             key = (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index"))
@@ -199,6 +207,50 @@ async def _fact_keyword_expand(
 # Scoring helpers
 # ---------------------------------------------------------------------------
 
+def _stamp_query_sim(doc, value: float, source: str) -> None:
+    """Record the chunk's honest query-similarity magnitude for THIS query.
+
+    The RRF merges replace tuple scores with rank-ladder values (scale-agnostic
+    fusion — correct for ordering, meaningless as magnitude). `_query_sim`
+    carries the true cosine alongside so composite scoring and the displayed
+    score stay query-dependent. FAISS hands out SHARED Document objects across
+    queries, so every entry path must overwrite unconditionally — a value left
+    over from a previous query is never trustworthy.
+    """
+    doc.metadata["_query_sim"] = float(value)
+    doc.metadata["_sim_source"] = source
+
+
+def _scale_query_sim(doc, factor: float) -> None:
+    """Apply a penalty factor to the carried magnitude (mirrors tuple-score penalties)."""
+    if "_query_sim" in doc.metadata:
+        doc.metadata["_query_sim"] *= factor
+
+
+def _trace(settings, stage: str, retrieved: list) -> None:
+    """[SCORE-TRACE] per-stage score provenance (retrieval_debug_trace knob).
+
+    Ops diagnostic: shows, for the top-10 at each stage, the tuple score, the
+    carried query-similarity, and which path stamped it — enough to see where
+    a score stopped (or started) tracking the query.
+    """
+    if not getattr(settings, "retrieval_debug_trace", False):
+        return
+    top = sorted(retrieved, key=lambda x: x[1], reverse=True)[:10]
+    for doc, score in top:
+        meta = doc.metadata
+        qsim = meta.get("_query_sim")
+        logger.info(
+            "[SCORE-TRACE] %-16s %s:%s tuple=%.4f qsim=%s src=%s%s",
+            stage,
+            meta.get("doc_id"), meta.get("chunk_index"),
+            score,
+            f"{qsim:.4f}" if isinstance(qsim, (int, float)) else "-",
+            meta.get("_sim_source", "-"),
+            " [mandatory]" if meta.get("_mandatory") else "",
+        )
+
+
 def _demote_reference_results(
     results: list[tuple], top_k: int
 ) -> list[tuple]:
@@ -214,10 +266,14 @@ def _demote_reference_results(
 def _apply_reference_penalty(results: list[tuple], profile: ResolvedScoring) -> list[tuple]:
     """Multiply score by penalty factor for chunks tagged as reference section."""
     penalty = profile.reference_penalty
-    return [
-        (doc, score * penalty) if doc.metadata.get("section") == "references" else (doc, score)
-        for doc, score in results
-    ]
+    out = []
+    for doc, score in results:
+        if doc.metadata.get("section") == "references":
+            _scale_query_sim(doc, penalty)
+            out.append((doc, score * penalty))
+        else:
+            out.append((doc, score))
+    return out
 
 
 def _apply_section_weights(results: list[tuple], profile: ResolvedScoring) -> list[tuple]:
@@ -234,6 +290,8 @@ def _apply_section_weights(results: list[tuple], profile: ResolvedScoring) -> li
             weighted.append((doc, score))
             continue
         weight = section_weights.get(section, 1.0)
+        if weight != 1.0:
+            _scale_query_sim(doc, weight)
         weighted.append((doc, score * weight))
     return weighted
 
@@ -243,12 +301,14 @@ def _apply_boilerplate_penalty(results: list[tuple], profile: ResolvedScoring) -
     from app.services.chunk_utils import is_boilerplate_chunk
 
     penalty = profile.boilerplate_penalty
-    return [
-        (doc, score * penalty)
-        if is_boilerplate_chunk(doc.page_content)
-        else (doc, score)
-        for doc, score in results
-    ]
+    out = []
+    for doc, score in results:
+        if is_boilerplate_chunk(doc.page_content):
+            _scale_query_sim(doc, penalty)
+            out.append((doc, score * penalty))
+        else:
+            out.append((doc, score))
+    return out
 
 
 def _section_aware_sample(
@@ -371,8 +431,16 @@ async def _apply_composite_scoring(
     debug_enabled = logger.isEnabledFor(logging.DEBUG)
     breakdown_rows: list[dict] = []
 
-    for doc, similarity in retrieved:
+    for doc, tuple_score in retrieved:
         key = (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index"))
+        # Prefer the carried true cosine over the tuple score: post-RRF tuple
+        # scores are rank-ladder values with the top max-normalized to exactly
+        # 1.0 — a pure function of rank, not of the query. Using them here is
+        # what made scores byte-identical across unrelated queries (P1).
+        # Fallback keeps paths that never stamped (and older tests) working.
+        similarity = doc.metadata.get("_query_sim", tuple_score)
+        if not isinstance(similarity, (int, float)):
+            similarity = tuple_score
         rel_counts = edge_type_counts.get(key, {})
         weighted_edge_sum = sum(
             edge_type_weights.get(rel, 1.0) * count
@@ -392,6 +460,7 @@ async def _apply_composite_scoring(
             breakdown_rows.append({
                 "doc_id": key[0],
                 "chunk_idx": key[1],
+                "sim_source": doc.metadata.get("_sim_source", "tuple"),
                 "similarity": round(similarity, 4),
                 "graph_score": round(graph_score, 4),
                 "edge_sum": round(weighted_edge_sum, 2),
@@ -481,11 +550,17 @@ async def _expand_via_edges(
     profile: ResolvedScoring,
     relations: list[str] | None = None,
     max_expansion: int = 5,
+    score_mode: str = "decay",
 ) -> list[tuple]:
     """Expand retrieved results by traversing graph edges.
 
     For each retrieved chunk, find connected chunks via edges
     and add them to the result set.
+
+    score_mode "decay" (default): expanded = parent_score x decay x edge_score
+    — query-linked, strictly below the parent for any edge. "legacy" restores
+    the raw static edge.score, which is query-INDEPENDENT and let high-edge hub
+    docs enter every query's results at a fixed high value (constant-top-3 bug).
     """
     if not retrieved:
         return retrieved
@@ -514,7 +589,14 @@ async def _expand_via_edges(
             target_chunks = vector_store.get_chunks_by_doc(edge["target_doc_id"])
             for tc in target_chunks:
                 if tc.metadata.get("chunk_index") == edge["target_chunk_index"]:
-                    edge_score = edge.get("score") or score * decay
+                    edge_sim = edge.get("score") or 1.0
+                    if score_mode == "legacy":
+                        edge_score = edge.get("score") or score * decay
+                    else:
+                        edge_score = score * decay * edge_sim
+                    parent_qsim = doc.metadata.get("_query_sim", score)
+                    _stamp_query_sim(tc, parent_qsim * decay * edge_sim, "graph_expand")
+                    tc.metadata.pop("_mandatory", None)  # shared docstore object — never inherit
                     expanded.append((tc, edge_score))
                     break
 
@@ -579,7 +661,7 @@ async def _rerank_results(
             original_score = score_map.get(key, 0.0)
             reranked.append((cdoc, original_score))
 
-        logger.info("Reranked %d → %d results (reordered, original scores preserved)", len(retrieved), len(reranked))
+        logger.info("Reranked %d → %d results (cross-encoder order; input score values preserved)", len(retrieved), len(reranked))
         return reranked if reranked else retrieved
     except Exception as e:
         logger.warning("Reranking failed, using original order: %s", e)
@@ -658,12 +740,21 @@ def _link_nearby_visuals(
             for doc, emb in zip(extra_docs, doc_embs):
                 doc_vec = np.array(emb)
                 cosine = float(np.dot(query_vec, doc_vec) / (np.linalg.norm(query_vec) * np.linalg.norm(doc_vec) + 1e-10))
-                extra_with_scores.append((doc, max(0.0, cosine)))
+                cosine = max(0.0, cosine)
+                _stamp_query_sim(doc, cosine, "visual")
+                doc.metadata.pop("_mandatory", None)  # shared docstore object — never inherit
+                extra_with_scores.append((doc, cosine))
         except Exception as e:
             logger.warning(f"Failed to compute proximity scores: {e}")
             extra_with_scores = [(doc, 0.0) for doc in extra_docs]
+            for doc in extra_docs:
+                _stamp_query_sim(doc, 0.0, "visual")
+                doc.metadata.pop("_mandatory", None)
     else:
         extra_with_scores = [(doc, 0.0) for doc in extra_docs]
+        for doc in extra_docs:
+            _stamp_query_sim(doc, 0.0, "visual")
+            doc.metadata.pop("_mandatory", None)
 
     if extra_with_scores:
         logger.info(f"Linked {len(extra_with_scores)} visual chunks from nearby pages")
@@ -806,6 +897,12 @@ def _rrf_merge_bm25(
 
     RRF_score(d) = sum 1/(k + rank) for each retriever that found d.
     Output is re-normalized to 0-1 for downstream threshold compatibility.
+
+    BM25-only entrants have no cosine; their `_query_sim` gets a conservative
+    floor — the weakest vector-found similarity in this merge ("at most as
+    similar as the weakest embedding match"). Still query-dependent; a truly
+    relevant keyword hit earns its position via rank/cross-encoder, not via an
+    invented magnitude.
     """
     rrf: dict[tuple, list] = {}
 
@@ -813,12 +910,20 @@ def _rrf_merge_bm25(
         key = (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index"))
         rrf[key] = [doc, 1.0 / (k + rank)]
 
+    vector_sims = [
+        doc.metadata["_query_sim"]
+        for doc, _ in vector_results
+        if isinstance(doc.metadata.get("_query_sim"), (int, float))
+    ]
+    bm25_floor = min(vector_sims) if vector_sims else 0.0
+
     for rank, doc in enumerate(bm25_docs, 1):
         key = (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index"))
         bm25_rrf = 1.0 / (k + rank)
         if key in rrf:
             rrf[key][1] += bm25_rrf
         else:
+            _stamp_query_sim(doc, bm25_floor, "bm25_floor")
             rrf[key] = [doc, bm25_rrf]
 
     merged = [(doc, score) for doc, score in rrf.values()]
@@ -950,11 +1055,13 @@ def _ensure_per_doc_coverage(
     if not scope_doc_ids or len(scope_doc_ids) <= 1:
         return retrieved
 
+    scope_set = set(scope_doc_ids)  # collection scopes reach thousands of ids
+
     # Find the highest-scored existing chunk per scope doc and mark it mandatory.
     best_index_per_doc: dict[str, int] = {}
     for i, (doc, score) in enumerate(retrieved):
         did = doc.metadata.get("doc_id")
-        if did not in scope_doc_ids:
+        if did not in scope_set:
             continue
         if did not in best_index_per_doc or score > retrieved[best_index_per_doc[did]][1]:
             best_index_per_doc[did] = i
@@ -969,16 +1076,22 @@ def _ensure_per_doc_coverage(
     appended_from_pool = 0
     still_missing: list[str] = []
 
-    # Step 1: try pre-narrow pool (capped at max_backfill)
+    # Step 1: try pre-narrow pool (capped at max_backfill).
+    # Single pass over the pool building best-per-missing-doc, instead of one
+    # pool scan per missing doc (missing can be thousands on collection scope).
+    missing_set = set(missing)
+    best_in_pool: dict[str, tuple] = {}
+    for doc, score in all_candidates:
+        did = doc.metadata.get("doc_id")
+        if did in missing_set:
+            cur = best_in_pool.get(did)
+            if cur is None or score > cur[1]:
+                best_in_pool[did] = (doc, score)
     for did in missing:
         if appended_from_pool >= max_backfill:
             still_missing.append(did)
             continue
-        best = None
-        for doc, score in all_candidates:
-            if doc.metadata.get("doc_id") == did:
-                if best is None or score > best[1]:
-                    best = (doc, score)
+        best = best_in_pool.get(did)
         if best is not None:
             best[0].metadata["_mandatory"] = True
             result.append(best)
@@ -1004,6 +1117,8 @@ def _ensure_per_doc_coverage(
                 if chunks:
                     representative = chunks[0]
                     representative.metadata["_mandatory"] = True
+                    # not retrieved by any query signal — magnitude is honestly zero
+                    _stamp_query_sim(representative, 0.0, "coverage_backfill")
                     result.append((representative, 0.0))
                     appended_from_search += 1
             except Exception as e:
@@ -1172,6 +1287,11 @@ def _rrf_merge_dual(
 
     When a chunk is found by both retrievers, the raw Document object is kept
     (has full content); the score is the RRF sum.
+
+    `_query_sim` carry: raw hits are stamped upstream (orchestrator, right
+    after vector search). Summary-only entrants get the summary cosine — an
+    honest query-dependent magnitude; the compression skew is an ORDERING
+    fairness problem, which RRF (not magnitude) handles.
     """
     rrf: dict[tuple, list] = {}  # (doc_id, chunk_index) -> [doc, rrf_score]
 
@@ -1179,12 +1299,13 @@ def _rrf_merge_dual(
         key = (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index"))
         rrf[key] = [doc, 1.0 / (k + rank)]
 
-    for rank, (doc, _cosine) in enumerate(summary_results, 1):
+    for rank, (doc, cosine) in enumerate(summary_results, 1):
         key = (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index"))
         contribution = 1.0 / (k + rank)
         if key in rrf:
-            rrf[key][1] += contribution  # consensus — keep raw doc object
+            rrf[key][1] += contribution  # consensus — keep raw doc object (+ its raw cosine)
         else:
+            _stamp_query_sim(doc, cosine, "summary")
             rrf[key] = [doc, contribution]
 
     merged = [(doc, score) for doc, score in rrf.values()]
@@ -1218,12 +1339,32 @@ async def retrieve_and_rank(
     audit_repo=None,
     user_id: str | None = None,
     source_truncate_chars: int | None = 500,
+    ensure_coverage: bool = True,
+    reorder_for_attention: bool = True,
 ) -> RetrievalResult:
     """Full retrieval pipeline — single source of truth.
 
     Scoring constants come from the scoring profile (data/scoring_profiles/).
     Composite weights come from query_types.json.
     Feature flags come from .env / Settings.
+
+    ``ensure_coverage=False`` skips the per-doc coverage backfill — it exists
+    for ask-AI answer comprehensiveness; retrieve-only consumers (/search)
+    don't need it and on large collection scopes it enumerates every member
+    doc per query.
+
+    ``reorder_for_attention=False`` skips the lost-in-the-middle U-shape
+    placement (best first, SECOND-BEST LAST) — that layout optimizes LLM
+    context reading, but for retrieve-only consumers it buries the #2 result
+    at the bottom of the response. /search passes False: its order is pure
+    ranking.
+
+    Score semantics: tuple scores flow through RRF merges (rank fusion — order
+    signal), while each chunk's TRUE query cosine is carried in
+    ``metadata["_query_sim"]`` (see _stamp_query_sim). Composite scoring reads
+    the carried cosine, so the displayed 0-100 score is query-dependent:
+    100 x clamp01(w_sim * query_cosine + w_graph * graph_authority). Final
+    ORDER comes from the cross-encoder when rerank_enabled + rerank_final_order.
 
     Returns a RetrievalResult with web_search_needed=True when the caller
     should fall back to web search (no retrieval results are populated in
@@ -1245,7 +1386,20 @@ async def retrieve_and_rank(
 
     # 1b. Router prefix — narrow broad scope before retrieval when enabled.
     # Fail-safe: router internally falls back to full scope on any error.
+    # Upper bound: the router fetches every scoped doc's registry row and puts
+    # a one-line-per-doc menu in the LLM prompt — a thousands-of-docs
+    # collection is neither a sane prompt nor a sane N sequential DB reads.
     if (
+        settings.router_enabled
+        and registry is not None
+        and doc_ids
+        and len(doc_ids) > settings.router_max_scope
+    ):
+        logger.info(
+            "Router skipped: scope %d > router_max_scope %d",
+            len(doc_ids), settings.router_max_scope,
+        )
+    elif (
         settings.router_enabled
         and registry is not None
         and doc_ids
@@ -1284,7 +1438,15 @@ async def retrieve_and_rank(
     retrieved = vector_store.similarity_search_with_scores(
         question, k=fetch_k, doc_ids=doc_ids,
     )
+    # Tuple scores ARE raw cosines at this point — carry them as _query_sim
+    # before the RRF merges replace tuple scores with rank-ladder values.
+    # Also clear stale _mandatory flags: FAISS returns shared Document objects,
+    # so a flag set by a previous query would otherwise leak into this one.
+    for doc, score in retrieved:
+        _stamp_query_sim(doc, score, "raw")
+        doc.metadata.pop("_mandatory", None)
     logger.debug("[TRACE] after vector_search: %d chunks", len(retrieved))
+    _trace(settings, "vector_search", retrieved)
 
     # 4b. Summary index search (dual-index)
     if summary_store:
@@ -1298,6 +1460,7 @@ async def retrieve_and_rank(
                                             k=settings.rrf_k)
                 logger.info("Dual-index: merged %d raw + %d summary -> %d results",
                            before, len(summary_results), len(retrieved))
+                _trace(settings, "dual_merge", retrieved)
         except Exception as e:
             logger.warning("Summary search failed: %s", e)
 
@@ -1306,23 +1469,31 @@ async def retrieve_and_rank(
         try:
             from langchain_community.retrievers import BM25Retriever
             from app.rag.chain import _bm25_cache
-            all_docs = vector_store.get_all_documents()
-            if doc_ids:
-                all_docs = [d for d in all_docs if d.metadata.get("doc_id") in doc_ids]
-            if all_docs:
-                cache_key = tuple(sorted(doc_ids)) if doc_ids else None
-                if (_bm25_cache["retriever"] is not None
-                        and _bm25_cache["doc_count"] == len(all_docs)
-                        and _bm25_cache["doc_ids_key"] == cache_key):
-                    bm25 = _bm25_cache["retriever"]
-                    bm25.k = fetch_k
-                else:
+            # Cache check FIRST — get_all_documents() materializes every chunk
+            # in the corpus and the scope filter walks all of them; paying that
+            # per query made large collection scopes 10s+ slower. Correctness
+            # relies on invalidate_bm25_cache() running on every document
+            # add/delete (documents.py), which resets the key below.
+            cache_key = tuple(sorted(doc_ids)) if doc_ids else None
+            bm25 = None
+            if (_bm25_cache["retriever"] is not None
+                    and _bm25_cache["doc_ids_key"] == cache_key):
+                bm25 = _bm25_cache["retriever"]
+                bm25.k = fetch_k
+            else:
+                all_docs = vector_store.get_all_documents()
+                if doc_ids:
+                    idset = set(doc_ids)
+                    all_docs = [d for d in all_docs if d.metadata.get("doc_id") in idset]
+                if all_docs:
                     bm25 = BM25Retriever.from_documents(all_docs, k=fetch_k)
                     _bm25_cache["retriever"] = bm25
                     _bm25_cache["doc_count"] = len(all_docs)
                     _bm25_cache["doc_ids_key"] = cache_key
+            if bm25 is not None:
                 bm25_docs = bm25.invoke(question)
                 retrieved = _rrf_merge_bm25(retrieved, bm25_docs, k=settings.rrf_k)
+                _trace(settings, "bm25_merge", retrieved)
         except Exception as e:
             logger.warning("BM25 hybrid search failed: %s", e)
 
@@ -1359,21 +1530,76 @@ async def retrieve_and_rank(
     # auto-fills doc_ids from the user's entire corpus, we must not force
     # coverage for every doc — that would flood the context with chunks from
     # unrelated docs and break single-topic queries.
-    if user_scoped:
+    if user_scoped and ensure_coverage:
         retrieved = _ensure_per_doc_coverage(
             retrieved, pre_narrow_candidates, doc_ids,
             question=question, vector_store=vector_store,
             max_backfill=settings.per_doc_coverage_max_backfill,
         )
         logger.debug("[TRACE] after per_doc_coverage: %d chunks", len(retrieved))
+        _trace(settings, "coverage", retrieved)
 
     # Scoring stage — constants from scoring profile, resolved for query type
     retrieved = _apply_reference_penalty(retrieved, scoring)
     retrieved = _apply_section_weights(retrieved, scoring)
     retrieved = _apply_boilerplate_penalty(retrieved, scoring)
     logger.debug("[TRACE] after scoring penalties: %d chunks", len(retrieved))
+    _trace(settings, "penalties", retrieved)
 
-    # 6b. Reranking (if enabled — Settings flag)
+    # (6b reranking moved AFTER graph expansion + composite scoring — the
+    # cross-encoder must judge expanded chunks too, and its order must not be
+    # thrown away by a later sort. See step 12b.)
+
+    # 7. Check web search.
+    # force_corpus_only (set by /search) suppresses the web-search gate so the
+    # caller always gets best-effort corpus chunks instead of an early empty
+    # return — but only the gate is suppressed; user_scoped is still honest, so
+    # per-doc coverage (step 6a) still applies when docs/a collection are named.
+    if not force_corpus_only and (force_web_search or _needs_web_search(user_scoped, retrieved, settings)):
+        return RetrievalResult(
+            sources=[], retrieved=[], query_types=query_types,
+            query_label=query_label, web_search_needed=True,
+            chat_history=chat_history,
+        )
+
+    # 8. Visual proximity linking
+    if settings.visual_proximity_enabled:
+        retrieved = _link_nearby_visuals(
+            retrieved, vector_store, doc_ids,
+            question=question, embeddings=embeddings,
+            proximity_pages=settings.visual_proximity_pages,
+        )
+        logger.debug("[TRACE] after visual_proximity: %d chunks", len(retrieved))
+
+    # 9. Graph expansion (decay from scoring profile)
+    retrieved = await _expand_via_edges(
+        retrieved, edge_repo, vector_store, scoring,
+        relations=["describes", "references"],
+        score_mode=getattr(settings, "graph_expansion_score_mode", "decay"),
+    )
+    logger.debug("[TRACE] after graph_expansion: %d chunks", len(retrieved))
+    _trace(settings, "graph_expansion", retrieved)
+
+    # 10. Composite scoring (weights from query_types.json, graph math from profile)
+    retrieved = await _apply_composite_scoring(
+        retrieved, edge_repo, primary_type, settings, scoring,
+    )
+    logger.debug("[TRACE] after composite_scoring: %d chunks", len(retrieved))
+    _trace(settings, "composite", retrieved)
+
+    # 11. Confidence tier (from raw scores, before normalization)
+    confidence_tier = _compute_confidence_tier(retrieved, profile)
+
+    # 12. Sort by composite — deterministic order for the reranker's input cap,
+    # and the final order when reranking is disabled.
+    retrieved.sort(key=lambda x: x[1], reverse=True)
+
+    # 12b. Reranking — runs LAST among ranking stages, on composite-sorted
+    # candidates (so the rerank_max_candidates cap keeps the best by composite,
+    # and graph-expanded/visual chunks face cross-encoder judgment too).
+    # With rerank_final_order (default) the cross-encoder's order IS the final
+    # order; score values remain composite, so position and score can be
+    # locally non-monotonic — two honest, different signals.
     if settings.rerank_enabled:
         # Pass top_k so rerank doesn't throttle multi-doc queries.
         # For multi-doc scope: ensure at least ~3 chunks per selected doc so the
@@ -1407,45 +1633,11 @@ async def retrieve_and_rank(
             logger.info("Restored %d mandatory chunks dropped by reranker", restored)
         logger.debug("[TRACE] after rerank (top_n=%d): %d chunks", effective_top_n, len(retrieved))
 
-    # 7. Check web search.
-    # force_corpus_only (set by /search) suppresses the web-search gate so the
-    # caller always gets best-effort corpus chunks instead of an early empty
-    # return — but only the gate is suppressed; user_scoped is still honest, so
-    # per-doc coverage (step 6a) still applies when docs/a collection are named.
-    if not force_corpus_only and (force_web_search or _needs_web_search(user_scoped, retrieved, settings)):
-        return RetrievalResult(
-            sources=[], retrieved=[], query_types=query_types,
-            query_label=query_label, web_search_needed=True,
-            chat_history=chat_history,
-        )
+        if not getattr(settings, "rerank_final_order", True):
+            # Legacy behavior: discard the cross-encoder's order again.
+            retrieved.sort(key=lambda x: x[1], reverse=True)
+        _trace(settings, "rerank_final", retrieved)
 
-    # 8. Visual proximity linking
-    if settings.visual_proximity_enabled:
-        retrieved = _link_nearby_visuals(
-            retrieved, vector_store, doc_ids,
-            question=question, embeddings=embeddings,
-            proximity_pages=settings.visual_proximity_pages,
-        )
-        logger.debug("[TRACE] after visual_proximity: %d chunks", len(retrieved))
-
-    # 9. Graph expansion (decay from scoring profile)
-    retrieved = await _expand_via_edges(
-        retrieved, edge_repo, vector_store, scoring,
-        relations=["describes", "references"],
-    )
-    logger.debug("[TRACE] after graph_expansion: %d chunks", len(retrieved))
-
-    # 10. Composite scoring (weights from query_types.json, graph math from profile)
-    retrieved = await _apply_composite_scoring(
-        retrieved, edge_repo, primary_type, settings, scoring,
-    )
-    logger.debug("[TRACE] after composite_scoring: %d chunks", len(retrieved))
-
-    # 11. Confidence tier (from raw scores, before normalization)
-    confidence_tier = _compute_confidence_tier(retrieved, profile)
-
-    # 12. Sort + normalize
-    retrieved.sort(key=lambda x: x[1], reverse=True)
     retrieved = _normalize_scores(retrieved, profile)
 
     # 13. Prepend label chunks
@@ -1475,7 +1667,9 @@ async def retrieve_and_rank(
 
     # 16. Strategic placement — mitigate "lost in the middle"
     # (Apply only to non-label chunks; labels stay at front for priority)
-    if label_chunks and retrieved:
+    if not reorder_for_attention:
+        pass  # retrieve-only callers keep pure ranking order
+    elif label_chunks and retrieved:
         # Keep label chunks at front, reorder the rest
         n_label = sum(1 for doc, _ in retrieved
                       if (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index"))
@@ -1572,5 +1766,10 @@ def _needs_web_search(
         return False
     if not retrieved:
         return True
-    best_score = max(score for _, score in retrieved)
+    # Judge corpus quality by the carried cosine, not the tuple score: post-RRF
+    # tuple scores are max-normalized (top always 1.0), which made any non-empty
+    # result pass the threshold regardless of actual match quality.
+    best_score = max(
+        doc.metadata.get("_query_sim", score) for doc, score in retrieved
+    )
     return best_score < settings.web_search_score_threshold

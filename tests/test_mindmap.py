@@ -940,6 +940,7 @@ async def test_delete_document_removes_mindmap_cache(tmp_path, monkeypatch):
     registry.get = AsyncMock(return_value={"doc_id": doc_id})
     registry.remove = AsyncMock()
     db = MagicMock()
+    db.commit = AsyncMock()  # delete_document commits before responding (P5)
     summary_store = None
 
     # EdgeRepository is imported inside the function body; patch the source.
