@@ -21,6 +21,7 @@ from app.rag.prompts import (
     QUERY_ANALYZE_PROMPT,
     QUERY_EXPANSION_PROMPT,
     FACT_KEYWORD_EXPANSION_PROMPT,
+    HYDE_PROMPT,
 )
 from app.services.chunk_utils import is_garbage_table
 from app.services.scoring_profile import ResolvedScoring, load_scoring_profile
@@ -140,6 +141,21 @@ async def _maybe_expand_query(
         logger.warning("Query expansion failed: %s", e)
 
     return question, retrieved
+
+
+async def _hyde_generate(question: str, llm: BaseChatModel) -> str | None:
+    """LLM writes a hypothetical answer document to embed as a retrieval probe.
+
+    Closes the register gap between colloquial/narrative queries and formal
+    corpus text (a case description vs the actual filing) — the probe lives in
+    the corpus's own language register, so embedding distance stops hiding the
+    right documents. Returns None on empty/degenerate output; callers no-op.
+    """
+    chain = HYDE_PROMPT | llm | StrOutputParser()
+    hypo = (await chain.ainvoke({"question": question})).strip()
+    if not hypo or len(hypo) < 20:
+        return None
+    return hypo[:2000]  # embedding-input safety cap
 
 
 async def _fact_keyword_expand(
@@ -1273,6 +1289,7 @@ def _rrf_merge_dual(
     raw_results: list[tuple],
     summary_results: list[tuple],
     k: int = 60,
+    entrant_source: str = "summary",
 ) -> list[tuple]:
     """Merge raw-chunk and summary-chunk vector search results via Reciprocal Rank Fusion.
 
@@ -1289,9 +1306,11 @@ def _rrf_merge_dual(
     (has full content); the score is the RRF sum.
 
     `_query_sim` carry: raw hits are stamped upstream (orchestrator, right
-    after vector search). Summary-only entrants get the summary cosine — an
-    honest query-dependent magnitude; the compression skew is an ORDERING
-    fairness problem, which RRF (not magnitude) handles.
+    after vector search). Entrants found only by the second retriever get its
+    cosine stamped with `entrant_source` ("summary", or "hyde" when the second
+    retriever is the hypothetical-document probe) — an honest query-dependent
+    magnitude; the compression skew is an ORDERING fairness problem, which RRF
+    (not magnitude) handles.
     """
     rrf: dict[tuple, list] = {}  # (doc_id, chunk_index) -> [doc, rrf_score]
 
@@ -1305,7 +1324,7 @@ def _rrf_merge_dual(
         if key in rrf:
             rrf[key][1] += contribution  # consensus — keep raw doc object (+ its raw cosine)
         else:
-            _stamp_query_sim(doc, cosine, "summary")
+            _stamp_query_sim(doc, cosine, entrant_source)
             rrf[key] = [doc, contribution]
 
     merged = [(doc, score) for doc, score in rrf.values()]
@@ -1463,6 +1482,30 @@ async def retrieve_and_rank(
                 _trace(settings, "dual_merge", retrieved)
         except Exception as e:
             logger.warning("Summary search failed: %s", e)
+
+    # 4b2. HyDE probe (if enabled — Settings flag). The LLM writes a
+    # hypothetical answer document; its embedding retrieves in the CORPUS's
+    # register, catching documents a colloquial query's embedding misses.
+    # RRF fusion with the direct results — a bad hypothesis can't evict
+    # direct hits, it can only add candidates.
+    if settings.hyde_enabled:
+        try:
+            hypo = await _hyde_generate(question, llm)
+            if hypo:
+                hyde_results = vector_store.similarity_search_with_scores(
+                    hypo, k=fetch_k, doc_ids=doc_ids,
+                )
+                if hyde_results:
+                    before = len(retrieved)
+                    retrieved = _rrf_merge_dual(
+                        retrieved, hyde_results,
+                        k=settings.rrf_k, entrant_source="hyde",
+                    )
+                    logger.info("HyDE: merged %d + %d hypothetical-doc hits -> %d results",
+                                before, len(hyde_results), len(retrieved))
+                    _trace(settings, "hyde_merge", retrieved)
+        except Exception as e:
+            logger.warning("HyDE expansion failed: %s", e)
 
     # 4c. BM25 hybrid search (if enabled — Settings flag)
     if settings.hybrid_search_enabled:

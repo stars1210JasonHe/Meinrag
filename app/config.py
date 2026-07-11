@@ -140,6 +140,14 @@ class Settings(BaseSettings):
     query_expansion_enabled: bool = True
     query_expansion_score_threshold: float = 0.3  # trigger when all scores below this
 
+    # HyDE (Hypothetical Document Embeddings): LLM writes a hypothetical
+    # answer document, which is embedded and searched ALONGSIDE the original
+    # query (RRF fusion — a bad hypothesis can't evict direct hits). Closes
+    # the register gap between colloquial/narrative queries and formal corpus
+    # text (case-description -> legal filing). Adds one LLM call + one vector
+    # search per query; off by default.
+    hyde_enabled: bool = False
+
     # Open question detection (section-aware sampling for broad queries)
     open_question_detection: bool = False
 

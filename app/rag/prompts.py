@@ -81,6 +81,24 @@ FACT_KEYWORD_EXPANSION_PROMPT = ChatPromptTemplate.from_messages([
     ("human", "{question}"),
 ])
 
+# HyDE (Hypothetical Document Embeddings, Gao et al. 2022): colloquial or
+# narrative queries (e.g. a case description) sit far from formal document
+# text in embedding space, so the right documents never reach the candidate
+# pool. Embedding a HYPOTHETICAL answer document instead of the query closes
+# that register gap. The generated text is used ONLY as a retrieval probe —
+# it is never shown to the user or the answering LLM.
+HYDE_PROMPT = ChatPromptTemplate.from_messages([
+    ("system",
+     "Write a short passage (3-6 sentences) from a HYPOTHETICAL document that "
+     "would directly answer the user's question — as if quoting the ideal "
+     "source document itself, in the formal register such a document would "
+     "use (e.g. a legal filing, technical spec, or report). "
+     "Write in the SAME language as the question. Invented specifics are fine; "
+     "the text is used only as a search probe, never shown to anyone. "
+     "Return ONLY the passage, no preamble."),
+    ("human", "{question}"),
+])
+
 WEB_SEARCH_SYSTEM_PROMPT = """\
 You are a helpful assistant. The user's question could not be answered from their uploaded documents,
 so web search results are provided below.
