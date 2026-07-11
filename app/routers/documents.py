@@ -128,6 +128,21 @@ async def upload_document(
         # Process and index
         processor = DocumentProcessor(settings)
         chunks = await processor.load_and_split(upload_path, doc_id=doc_id, llm=llm)
+        if not chunks:
+            # Zero chunks used to travel all the way to the vector add and
+            # crash inside faiss (replacement_add unpacks x.shape as (n, d);
+            # an empty batch is 1-D -> 'expected 2, got 1'). No extractable
+            # text is a FILE problem — say so instead of 500ing downstream.
+            # Seen with scanned/no-text-layer PDFs and converted docx whose
+            # content lives in text frames that plain extraction can't reach.
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Ingest failed at stage 'parse': the file yielded no "
+                    "extractable text (scanned/image-only, empty, or "
+                    "frame-based document)"
+                ),
+            )
 
         stage = "clean"
         # Strip export/portal noise (北大法宝 etc.) per-chunk before embedding.
@@ -139,6 +154,15 @@ async def upload_document(
                 if c.page_content.strip():      # drop chunks that were pure noise
                     cleaned.append(c)
             chunks = cleaned
+            if not chunks:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Ingest failed at stage 'clean': every chunk was "
+                        "export/portal noise after cleaning — nothing left "
+                        "to index"
+                    ),
+                )
 
         stage = "dedup"
         # Drop intra-doc duplicate paragraphs (PDF extraction artifacts).

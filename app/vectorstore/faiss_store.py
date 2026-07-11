@@ -52,6 +52,10 @@ class FAISSStoreManager(VectorStoreManager):
             self._gpu_enabled = _try_gpu_index(self._store)
 
     def add_documents(self, documents: list[Document], doc_id: str) -> list[str]:
+        if not documents:
+            # An empty batch reaches faiss as a 1-D array and crashes its
+            # (n, d) shape unpack — refuse it here, callers get a no-op.
+            return []
         for doc in documents:
             doc.metadata["doc_id"] = doc_id
 

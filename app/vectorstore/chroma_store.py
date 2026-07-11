@@ -21,6 +21,8 @@ class ChromaStoreManager(VectorStoreManager):
         )
 
     def add_documents(self, documents: list[Document], doc_id: str) -> list[str]:
+        if not documents:
+            return []  # keep the empty-batch no-op contract in sync with FAISS
         for doc in documents:
             doc.metadata["doc_id"] = doc_id
         return self._store.add_documents(documents)
