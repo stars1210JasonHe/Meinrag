@@ -235,11 +235,24 @@ def _build_hybrid_retriever(
     return RunnableLambda(_search)
 
 
+# Heavy reranker backends (flashrank ONNX Ranker, HF cross-encoder), keyed by
+# (provider, model). Loading the model is the expensive part — a fresh
+# instance per query reloads it every time (MultiBERT ~98MB: collection
+# searches went 8-9s -> 26-53s). The pydantic compressor wrappers around the
+# backend are cheap and are built per call, so each caller gets its own top_n
+# (it varies per query: multi-doc scopes pass n_docs*3) without shared
+# mutable state. A deployment uses one or two models -> no eviction needed.
+_reranker_client_cache: dict = {}
+
+
 def _get_reranker(settings: Settings, llm: BaseChatModel | None = None, top_n_override: int | None = None):
     """Create a document compressor based on the configured rerank provider.
 
     Supported providers: flashrank (default, local CPU), cross-encoder (local GPU),
     jina (API), cohere (API), llm (uses chat model).
+
+    The heavy model backends are cached process-wide (see
+    _reranker_client_cache); only the thin compressor wrapper is per-call.
 
     Args:
         top_n_override: If set, overrides settings.rerank_top_n. Used when the
@@ -252,18 +265,29 @@ def _get_reranker(settings: Settings, llm: BaseChatModel | None = None, top_n_ov
 
     try:
         if provider == "flashrank":
+            from flashrank import Ranker
             from langchain_community.document_compressors.flashrank_rerank import FlashrankRerank
-            return FlashrankRerank(
-                model=model or "ms-marco-MiniLM-L-12-v2",
-                top_n=top_n,
-            )
+            model_name = model or "ms-marco-MiniLM-L-12-v2"
+            key = ("flashrank", model_name)
+            client = _reranker_client_cache.get(key)
+            if client is None:
+                logger.info("Loading flashrank reranker model %s (cached process-wide after this)", model_name)
+                client = Ranker(model_name=model_name)
+                _reranker_client_cache[key] = client
+            # Passing client= skips FlashrankRerank's validator, which would
+            # otherwise build a fresh Ranker (the reload this cache prevents).
+            return FlashrankRerank(client=client, model=model_name, top_n=top_n)
 
         elif provider == "cross-encoder":
             from langchain_community.cross_encoders import HuggingFaceCrossEncoder
             from langchain_classic.retrievers.document_compressors.cross_encoder_rerank import CrossEncoderReranker
-            encoder = HuggingFaceCrossEncoder(
-                model_name=model or "BAAI/bge-reranker-v2-m3",
-            )
+            model_name = model or "BAAI/bge-reranker-v2-m3"
+            key = ("cross-encoder", model_name)
+            encoder = _reranker_client_cache.get(key)
+            if encoder is None:
+                logger.info("Loading cross-encoder reranker model %s (cached process-wide after this)", model_name)
+                encoder = HuggingFaceCrossEncoder(model_name=model_name)
+                _reranker_client_cache[key] = encoder
             return CrossEncoderReranker(model=encoder, top_n=top_n)
 
         elif provider == "jina":
