@@ -111,7 +111,7 @@ class DocumentRepository:
         # CJK LIKE never matches what was stored. Match BOTH the raw and the escaped JSON
         # form (ASCII is identical in both) so a CJK matter/case tag is filterable too.
         raw = f"%{subtag.lower()}%"
-        esc = f"%{_json.dumps(subtag)[1:-1].lower()}%"
+        esc = f"%{_json.dumps(subtag)[1:-1].replace(chr(92), chr(92) * 2).lower()}%"
         col = func.lower(cast(DocumentModel.subtags, String))
         stmt = (
             select(DocumentModel)
