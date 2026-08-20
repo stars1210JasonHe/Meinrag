@@ -99,6 +99,24 @@ class DocumentRepository:
         result = await self._session.execute(stmt)
         return [doc.to_dict() for doc in result.unique().scalars().all()]
 
+    async def list_by_subtag(
+        self, subtag: str, user_id: str | None = None
+    ) -> list[dict]:
+        """Docs whose subtags JSON contains `subtag` (case-insensitive substring,
+        the same match used by the subtag branch of search_by_text). Parallels
+        list_by_collection so the query router can resolve a subtag filter to
+        doc_ids exactly the way it resolves a collection filter."""
+        pattern = f"%{subtag.lower()}%"
+        stmt = (
+            select(DocumentModel)
+            .options(selectinload(DocumentModel.collections))
+            .where(func.lower(cast(DocumentModel.subtags, String)).like(pattern))
+        )
+        if user_id:
+            stmt = stmt.where(DocumentModel.user_id == user_id)
+        result = await self._session.execute(stmt)
+        return [doc.to_dict() for doc in result.unique().scalars().all()]
+
     async def search_by_text(
         self,
         query: str,
