@@ -22,7 +22,13 @@ jobs:
         run: uv python install 3.13
 
       - name: Install dependencies
-        run: uv sync --group dev
+        # --extra anonymization is required, not optional-for-completeness: 17 test
+        # files import app.anonymization.*, which pulls cryptography (directly) and
+        # presidio/spacy (via app.anonymization.engine). Without it every one of them
+        # raises at COLLECTION time, and pytest aborts the whole run — so the other
+        # 735 tests never execute and the red check says nothing about the change
+        # being tested. Red since at least 2026-06-13 for exactly this reason.
+        run: uv sync --group dev --extra anonymization
 
       - name: Run offline tests
         run: |
