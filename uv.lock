@@ -2370,9 +2370,13 @@ docling = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "cryptography" },
     { name = "fpdf2" },
     { name = "httpx" },
+    { name = "langdetect" },
     { name = "playwright" },
+    { name = "presidio-analyzer" },
+    { name = "presidio-anonymizer" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
@@ -2423,9 +2427,13 @@ provides-extras = ["docling", "anonymization"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "cryptography", specifier = ">=42.0" },
     { name = "fpdf2", specifier = ">=2.8.5" },
     { name = "httpx", specifier = ">=0.27.0" },
+    { name = "langdetect", specifier = ">=1.0.9" },
     { name = "playwright", specifier = ">=1.58.0" },
+    { name = "presidio-analyzer", specifier = ">=2.2.354" },
+    { name = "presidio-anonymizer", specifier = ">=2.2.354" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.24.0" },
 ]
