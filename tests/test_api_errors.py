@@ -19,12 +19,31 @@ from app.main import create_app
 
 
 @pytest.fixture
-def mock_settings():
-    """Minimal settings that don't need a real API key."""
+def mock_settings(tmp_path):
+    """Minimal settings that don't need a real API key.
+
+    upload_dir/vectorstore_dir point at tmp_path, matching what the anonymization
+    tests already do. Two reasons, and the first one was actively breaking a test:
+
+    The app creates these directories in its lifespan (app/main.py), but the client
+    fixture below substitutes its own lifespan for the DB setup and does not recreate
+    that step. With the default `data/uploads`, any test that gets far enough to write
+    an uploaded file died with FileNotFoundError and a 500 — including
+    test_corrupt_docx_returns_422_with_stage, which then never reached the parse stage
+    it exists to check. It looked like the 422 handling was broken; it was not.
+
+    Second, tests should not write into the working tree at all.
+    """
+    upload_dir = tmp_path / "uploads"
+    vs_dir = tmp_path / "vs"
+    upload_dir.mkdir()
+    vs_dir.mkdir()
     return Settings(
         openai_api_key="fake-key-for-testing",
         llm_provider=LLMProvider.OPENAI,
         vector_store=VectorStoreType.CHROMA,
+        upload_dir=upload_dir,
+        vectorstore_dir=vs_dir,
     )
 
 
