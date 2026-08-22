@@ -1389,6 +1389,33 @@ async def retrieve_and_rank(
     should fall back to web search (no retrieval results are populated in
     that case).
     """
+    # An explicitly scoped query whose scope resolved to nothing must return nothing.
+    #
+    # Without this, ``doc_ids == []`` is falsy at every downstream test — ``if not
+    # doc_ids`` appears five more times in this module and again in the vector store —
+    # so "scoped to zero documents" and "not scoped at all" collapse into one case and
+    # the query is answered from the entire corpus. ``doc_ids is None`` genuinely means
+    # "no scope requested" and must keep falling through, which is why this checks the
+    # two apart rather than testing truthiness.
+    #
+    # Measured on the live backend 2026-08-22: a nonexistent collection, a nonexistent
+    # subtag, an AND of two subtags with an empty intersection, and an explicit list of
+    # non-existent doc_ids each returned five unrelated documents instead of zero. The
+    # response is well formed and carries no indication the scope was dropped, so the
+    # caller cannot tell. On a legal corpus "no results" and "another matter's documents"
+    # are different answers, and only one of them is safe to show.
+    #
+    # This predates the subtag filter (#3) — collection and doc_ids scoping fail the same
+    # way, so the subtag path inherited the behaviour rather than introducing it.
+    #
+    # Acceptance: neo/tools/meinrag_scope_acceptance.py in the supervisor repo — six
+    # negative cases, each paired with a positive control, all six failing before this
+    # guard existed. The original review missed this because it only exercised scopes
+    # that MATCH something.
+    if user_scoped and doc_ids is not None and not doc_ids:
+        logger.info("Scope resolved to zero documents — returning empty result")
+        return RetrievalResult(sources=[], retrieved=[])
+
     # Load scoring profile (cached), resolve after query analysis
     profile = load_scoring_profile(settings.scoring_profile)
 
