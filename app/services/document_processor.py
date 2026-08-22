@@ -27,7 +27,11 @@ logger = logging.getLogger(__name__)
 LOADER_MAP: dict[str, type | None] = {
     ".pdf": PyPDFLoader,
     ".txt": TextLoader,
-    ".md": UnstructuredMarkdownLoader,
+    # TextLoader, NOT UnstructuredMarkdownLoader: `unstructured` pkg was never in the
+    # deployed image so every .md upload 500'd (ModuleNotFoundError, found 2026-06-11,
+    # 278/280 md failed; same files as .txt ingested fine). Markdown is plain text;
+    # element-aware parsing adds nothing downstream of the splitter. Zero-dep fix (Neo).
+    ".md": TextLoader,
     ".html": MarkdownifyHTMLLoader,
     ".htm": MarkdownifyHTMLLoader,
     ".docx": Docx2txtLoader,
