@@ -379,7 +379,7 @@ store + embedding API logs) is covered.
 - `POST /query/stream` — same but SSE: `sources` → `tokens` → `done`
 - `POST /query/chunk-context` — ask about a specific source chunk
 - `POST /query/ask-ai` / `POST /query/ask-ai/stream` — pure LLM, no retrieval
-- `POST /search` — retrieve-only: ranked corpus chunks (full text), **no LLM answer**, no web fallback. For MCP / agent consumers that reason over raw results themselves. Body: `query`, optional `top_k` / `doc_ids` / `collection`. Returns `results` (deanonymized `SourceChunk[]`) + `confidence_tier` + `total_available` + `query_types`.
+- `POST /search` — retrieve-only: ranked corpus chunks (full text), **no LLM answer**, no web fallback. For MCP / agent consumers that reason over raw results themselves. Body: `query`, optional `top_k` / `doc_ids` / `collection` / `subtags`. Returns `results` (deanonymized `SourceChunk[]`) + `confidence_tier` + `total_available` + `query_types`.
 
 Common request body fields:
 ```json
@@ -387,12 +387,32 @@ Common request body fields:
   "question": "What is this about?",
   "doc_ids": ["abc123", "def456"],
   "collection": "legal-compliance",
+  "subtags": ["matter:acme-v-globex", "stage:discovery"],
   "primary_category": "research-scientific",
   "session_id": "session-123",
   "top_k": 10,
   "force_web_search": false
 }
 ```
+
+#### Scoping a query
+
+`collection`, `subtags` and `doc_ids` all narrow which documents a query may draw on, and
+they intersect: `collection` AND every value in `subtags` AND `doc_ids`. `subtags` matches
+as a **case-insensitive substring** of a document's stored tags, so `matter:acme` selects
+`matter:acme-v-globex` — and, since there is no boundary check, a short value like `acme`
+will also match anything else containing it. Prefix your tags (`matter:`, `stage:`) and
+pass them in full to keep a filter precise.
+
+**A scope that resolves to zero documents returns zero results.** A collection that does
+not exist, a subtag nothing carries, an AND whose intersection is empty, or a list of
+doc_ids that were since deleted all produce an empty answer — not a corpus-wide one.
+That distinction matters most on corpora where documents belong to different clients or
+matters: "nothing matched" and "here is someone else's document" are different answers,
+and before #4 the API returned the second one silently.
+
+`doc_ids: []` means "no documents", not "no filter". Omit the field to leave the query
+unscoped.
 
 ### Graph
 - `GET /graph/documents` — corpus-level graph: doc nodes + aggregated cross-doc similarity edges (with `supporting_pairs` + `mean_score`)
