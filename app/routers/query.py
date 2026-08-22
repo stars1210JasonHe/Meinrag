@@ -95,12 +95,18 @@ async def _resolve_doc_ids(
         if request.collection:
             collection_docs = await registry.list_by_collection(request.collection, user_id=current_user)
             collection_doc_ids = [d["doc_id"] for d in collection_docs]
-            if doc_ids:
+            # `is not None`, not truthiness: an explicitly supplied EMPTY doc_ids list
+            # means "restrict to no documents" and must stay empty. Treating it as falsy
+            # sends it down the else branch, which replaces it with the whole collection
+            # (or, below, the user's entire corpus) — the caller asked for nothing and
+            # would be handed everything. Measured 2026-08-22: doc_ids=[] returned five
+            # unrelated documents.
+            if doc_ids is not None:
                 collection_set = set(collection_doc_ids)  # collections reach thousands of ids
                 doc_ids = [d for d in doc_ids if d in collection_set and d in user_doc_ids]
             else:
                 doc_ids = collection_doc_ids
-        elif doc_ids:
+        elif doc_ids is not None:
             doc_ids = [d for d in doc_ids if d in user_doc_ids]
         else:
             doc_ids = list(user_doc_ids) if user_doc_ids else []
