@@ -86,6 +86,7 @@ class QueryRequest(BaseModel):
     top_k: int = Field(default=4, ge=1, le=20)
     doc_ids: list[str] | None = Field(default=None, description="Filter by document IDs")
     collection: str | None = Field(default=None, description="Filter by collection name")
+    subtags: list[str] | None = Field(default=None, description="Filter by subtags (AND across values, case-insensitive substring match)")
     session_id: str | None = Field(default=None, description="Chat session ID for memory")
     force_web_search: bool = Field(default=False, description="Skip docs, go straight to web search")
 
@@ -139,6 +140,7 @@ class SearchRequest(BaseModel):
     top_k: int | None = Field(default=None, ge=1, le=50, description="Max chunks to return; None -> settings.retrieval_top_k")
     doc_ids: list[str] | None = Field(default=None, description="Restrict to these document IDs")
     collection: str | None = Field(default=None, description="Restrict to this collection")
+    subtags: list[str] | None = Field(default=None, description="Restrict to docs matching these subtags (AND across values, case-insensitive substring match)")
 
 
 class SearchResponse(BaseModel):

@@ -99,6 +99,30 @@ class DocumentRepository:
         result = await self._session.execute(stmt)
         return [doc.to_dict() for doc in result.unique().scalars().all()]
 
+    async def list_by_subtag(
+        self, subtag: str, user_id: str | None = None
+    ) -> list[dict]:
+        """Docs whose subtags JSON contains `subtag` (case-insensitive substring,
+        the same match used by the subtag branch of search_by_text). Parallels
+        list_by_collection so the query router can resolve a subtag filter to
+        doc_ids exactly the way it resolves a collection filter."""
+        import json as _json
+        # subtags is a JSON column whose ::text is unicode-escaped (ensure_ascii), so a raw
+        # CJK LIKE never matches what was stored. Match BOTH the raw and the escaped JSON
+        # form (ASCII is identical in both) so a CJK matter/case tag is filterable too.
+        raw = f"%{subtag.lower()}%"
+        esc = f"%{_json.dumps(subtag)[1:-1].replace(chr(92), chr(92) * 2).lower()}%"
+        col = func.lower(cast(DocumentModel.subtags, String))
+        stmt = (
+            select(DocumentModel)
+            .options(selectinload(DocumentModel.collections))
+            .where(or_(col.like(raw), col.like(esc)))
+        )
+        if user_id:
+            stmt = stmt.where(DocumentModel.user_id == user_id)
+        result = await self._session.execute(stmt)
+        return [doc.to_dict() for doc in result.unique().scalars().all()]
+
     async def search_by_text(
         self,
         query: str,

@@ -108,6 +108,20 @@ async def _resolve_doc_ids(
         collection_docs = await registry.list_by_collection(request.collection)
         doc_ids = [d["doc_id"] for d in collection_docs]
 
+    # Subtag filter: AND across values, each resolved to doc_ids the same way a
+    # collection is (list_by_subtag mirrors list_by_collection). Intersects with
+    # whatever collection/user scoping already produced above.
+    if getattr(request, "subtags", None):
+        scope_user = current_user if settings.user_isolation in ("all", "documents") else None
+        subtag_ids: set[str] | None = None
+        for st in request.subtags:
+            st_docs = await registry.list_by_subtag(st, user_id=scope_user)
+            st_ids = {d["doc_id"] for d in st_docs}
+            subtag_ids = st_ids if subtag_ids is None else (subtag_ids & st_ids)
+        subtag_ids = subtag_ids or set()
+        doc_ids = list(subtag_ids) if doc_ids is None else [d for d in doc_ids if d in subtag_ids]
+        user_scoped = True
+
     return doc_ids, user_scoped
 
 
