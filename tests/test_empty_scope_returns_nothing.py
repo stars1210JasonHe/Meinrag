@@ -121,6 +121,33 @@ class TestEmptyScope:
         assert result.sources == []
         assert result.retrieved == []
 
+    async def test_empty_scope_reports_zero_not_unknown(self):
+        """The counts are KNOWN to be zero here, so they must not come back as None.
+
+        /search maps chunks_available to total_available. Returning null there makes a
+        client unable to tell "no candidates" from "we did not measure" — in the one
+        case where the answer is certain. Missed on the first pass because the guard was
+        judged on whether documents leaked, not on what the response body says; found by
+        an independent review afterwards.
+        """
+        vs, llm = _vector_store(), _CountingLLM()
+        result = await _run(doc_ids=[], user_scoped=True, vs=vs, llm=llm)
+        assert result.chunks_available == 0
+        assert result.chunks_included == 0
+        assert result.context_used_tokens == 0
+
+    async def test_empty_scope_leaves_uncomputed_fields_unset(self):
+        """Counterpart to the above: do NOT invent values this path never computed.
+
+        The budget and the context mode are only decided while assembling context, which
+        an empty scope skips entirely. Reporting 0 for a budget that was never chosen
+        would be the same lie in the other direction.
+        """
+        vs, llm = _vector_store(), _CountingLLM()
+        result = await _run(doc_ids=[], user_scoped=True, vs=vs, llm=llm)
+        assert result.context_budget_tokens is None
+        assert result.context_mode is None
+
     async def test_empty_scope_never_searches_the_corpus(self):
         """Returning nothing is not enough — it must not have LOOKED either.
 

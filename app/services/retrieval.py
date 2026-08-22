@@ -1414,7 +1414,18 @@ async def retrieve_and_rank(
     # that MATCH something.
     if user_scoped and doc_ids is not None and not doc_ids:
         logger.info("Scope resolved to zero documents — returning empty result")
-        return RetrievalResult(sources=[], retrieved=[])
+        # Counts that are KNOWN to be zero are set to zero; the ones this path never
+        # computed stay None. /search maps chunks_available to total_available, so
+        # leaving it unset would answer "unknown" for the one case where the count is
+        # certain — which is the same conflation of "zero" and "not applicable" that
+        # the guard above exists to fix, one layer up in the response body.
+        return RetrievalResult(
+            sources=[],
+            retrieved=[],
+            chunks_included=0,
+            chunks_available=0,
+            context_used_tokens=0,
+        )
 
     # Load scoring profile (cached), resolve after query analysis
     profile = load_scoring_profile(settings.scoring_profile)
