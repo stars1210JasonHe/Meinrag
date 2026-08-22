@@ -19,7 +19,25 @@ import pytest
 # Skip the entire module on CI runners that don't have the anonymization
 # extras installed. importorskip raises pytest.skip on missing module.
 pytest.importorskip("presidio_analyzer")
-pytest.importorskip("spacy")
+spacy = pytest.importorskip("spacy")
+
+# The libraries importing is not the same thing as the MODELS being present, and these
+# tests build a real AnonymizationEngine, which loads them. The two importorskip calls
+# above only prove presidio and spacy are installed; on a runner that has the libraries
+# and not the models, every test in this file fails at fixture setup with spaCy E970
+# instead of skipping — measured 2026-08-22, 12 failures, which is what the module
+# docstring above was already trying to prevent.
+#
+# zh_core_web_trf additionally needs spacy-curated-transformers, whose curated-tokenizers
+# dependency has no wheel for Python 3.13 and does not cythonize against current Cython —
+# so on 3.13 this skip is not a temporary state, it is the only reachable one.
+for _model in ("en_core_web_lg", "zh_core_web_trf"):
+    if not spacy.util.is_package(_model):
+        pytest.skip(
+            "spaCy model %s is not installed — the anonymization engine cannot be "
+            "constructed, so these end-to-end tests cannot run here" % _model,
+            allow_module_level=True,
+        )
 
 from app.anonymization.engine import AnonymizationEngine
 from app.anonymization.registry import EntityRegistry
