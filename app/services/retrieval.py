@@ -687,15 +687,21 @@ async def _rerank_results(
     settings,
     llm=None,
     top_n: int | None = None,
-) -> list[tuple]:
+) -> tuple[list[tuple], bool]:
     """Apply cross-encoder reranking to retrieved results.
+
+    Returns (results, ran). `ran` is False whenever the reranker did not actually order
+    anything - disabled, or it raised and we fell back to the original list. The caller needs
+    that distinction to report stage counts truthfully: without it a failed reranker is
+    indistinguishable from one that ran and kept every candidate, which is the precise
+    confusion the stage_counts field exists to remove. Found by independent review.
 
     top_n: how many to keep after reranking. Defaults to settings.rerank_top_n
     (currently 4), which is fine for single-doc but starves multi-doc queries.
     Callers should pass the effective top_k so per-doc distribution works.
     """
     if not retrieved:
-        return retrieved
+        return retrieved, False
     try:
         from app.rag.chain import _get_reranker
         # Use max of setting and caller's request so a small setting doesn't cap large queries
@@ -728,10 +734,11 @@ async def _rerank_results(
             reranked.append((cdoc, original_score))
 
         logger.info("Reranked %d → %d results (cross-encoder order; input score values preserved)", len(retrieved), len(reranked))
-        return reranked if reranked else retrieved
+        # An empty compressor result is a fallback too, not a rerank that kept nothing.
+        return (reranked, True) if reranked else (retrieved, False)
     except Exception as e:
         logger.warning("Reranking failed, using original order: %s", e)
-        return retrieved
+        return retrieved, False
 
 
 # ---------------------------------------------------------------------------
@@ -1209,13 +1216,34 @@ def _ensure_per_doc_coverage(
 def _apply_caller_size_limit(retrieved: list[tuple], top_k: int) -> list[tuple]:
     """The CALLER's size bound, used when the model-window token budget was declined.
 
-    A named function rather than an inline slice for one reason: an inline slice could not
-    be tested. The integration fixture in tests/test_stage_counts_reported.py holds too few
-    documents for any stage to exceed top_k, so a mutation DELETING the cap left the entire
-    suite green - the test asserted "at most top_k" on a path that could never produce more.
-    Extracted so the guarantee has somewhere to be tested that can actually fail.
+    MANDATORY-AWARE, and that is not decoration. `_ensure_per_doc_coverage` marks one chunk
+    per scoped document `_mandatory` precisely so every selected document keeps a voice, and
+    `_apply_token_budget` honours that even when the mandatory set exceeds the whole budget.
+    A plain retrieved[:top_k] here silently undid it: on a scoped /search spanning more
+    documents than top_k, the low-ranked mandatory chunks sat past the cut and whole
+    documents vanished from a result set that had deliberately included them - a regression
+    against an existing guarantee, in exactly the coverage mode that exists to prevent it.
+    Found by independent review.
+
+    So: keep every mandatory chunk, then fill the remainder in rank order. Retrieval order is
+    preserved within each group, and the result can exceed top_k only when the mandatory set
+    alone does - the same trade _apply_token_budget already makes, for the same reason.
+
+    A named function rather than an inline slice for one reason: an inline slice could not be
+    tested. The integration fixture holds too few documents for any stage to exceed top_k, so
+    a mutation DELETING the cap left the entire suite green.
     """
-    return retrieved[:top_k]
+    if len(retrieved) <= top_k:
+        return retrieved
+    mandatory = [t for t in retrieved if (t[0].metadata or {}).get("_mandatory")]
+    if not mandatory:
+        return retrieved[:top_k]
+    rest = [t for t in retrieved if not (t[0].metadata or {}).get("_mandatory")]
+    room = max(0, top_k - len(mandatory))
+    kept = mandatory + rest[:room]
+    # Restore the caller-visible ordering rather than emitting mandatory-first.
+    order = {id(t[0]): i for i, t in enumerate(retrieved)}
+    return sorted(kept, key=lambda t: order[id(t[0])])
 
 
 def _apply_per_doc_cap(
@@ -1763,6 +1791,9 @@ async def retrieve_and_rank(
     # With rerank_final_order (default) the cross-encoder's order IS the final
     # order; score values remain composite, so position and score can be
     # locally non-monotonic — two honest, different signals.
+    # Initialised before the branch: when reranking is disabled the call below never
+    # happens, and the stage-count line further down reads this unconditionally.
+    _rerank_ran = False
     if settings.rerank_enabled:
         # Pass top_k so rerank doesn't throttle multi-doc queries.
         # For multi-doc scope: ensure at least ~3 chunks per selected doc so the
@@ -1778,7 +1809,7 @@ async def retrieve_and_rank(
             if doc.metadata.get("_mandatory")
         }
 
-        retrieved = await _rerank_results(
+        retrieved, _rerank_ran = await _rerank_results(
             retrieved, question, settings, llm, top_n=effective_top_n,
         )
 
@@ -1807,9 +1838,15 @@ async def retrieve_and_rank(
     # this field exists to remove. I originally captured it unconditionally and defended
     # that as 'it correctly equals after_composite'; equalling the previous stage IS the
     # ambiguity, and an independent review caught it.
-    stage_counts["after_rerank"] = len(retrieved) if settings.rerank_enabled else None
+    # `_rerank_ran` and not merely `rerank_enabled`: the reranker catches its own failures
+    # and returns the input list, so an enabled-but-broken reranker (missing model, provider
+    # error, OOM) would otherwise be reported as "ran and kept every candidate" - the exact
+    # confusion this field exists to remove, in its own failure mode. Found by review.
+    stage_counts["after_rerank"] = len(retrieved) if _rerank_ran else None
     if not settings.rerank_enabled:
         stage_counts["basis"] += "; rerank SKIPPED (rerank_enabled=false)"
+    elif not _rerank_ran:
+        stage_counts["basis"] += "; rerank ATTEMPTED BUT FELL BACK (original order kept)"
 
     retrieved = _normalize_scores(retrieved, profile)
 

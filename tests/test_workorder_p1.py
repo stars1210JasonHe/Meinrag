@@ -263,7 +263,9 @@ class TestRerankFinalOrder:
         from app.services import retrieval as retrieval_mod
 
         async def fake_rerank(retrieved, question, settings, llm, top_n=4):
-            return list(reversed(retrieved))  # cross-encoder disagrees with composite
+            # (results, ran) - the second element tells the caller whether reranking
+            # actually happened, so a failed reranker is not reported as a successful one.
+            return list(reversed(retrieved)), True  # cross-encoder disagrees with composite
 
         monkeypatch.setattr(retrieval_mod, "_rerank_results", fake_rerank)
         scores = {"q": [("a", 0, 0.9), ("b", 0, 0.5), ("c", 0, 0.2)]}

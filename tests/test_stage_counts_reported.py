@@ -354,6 +354,34 @@ class TestCallerSizeLimit:
         over = _apply_per_doc_cap(self._items(12), n_docs_in_scope=12, top_k=4)
         assert len(_apply_caller_size_limit(over, 4)) == 4
 
+    def test_the_cap_KEEPS_mandatory_coverage_chunks(self):
+        """Regression guard. `_ensure_per_doc_coverage` marks one chunk per scoped document
+        _mandatory so every selected document keeps a voice, and `_apply_token_budget` honours
+        that even over budget. My first version of this cap was a plain retrieved[:top_k],
+        which silently dropped the low-ranked mandatory chunks - so on a scoped /search
+        spanning more documents than top_k, whole documents disappeared from a result set that
+        had deliberately included them. Found by independent review, not by this suite."""
+        from app.vectorstore import base  # noqa: F401  (import parity with the module)
+        from app.services.retrieval import _apply_caller_size_limit
+        items = self._items(12)
+        # mark the WORST-ranked two as mandatory - exactly the ones a plain slice discards
+        items[10][0].metadata["_mandatory"] = True
+        items[11][0].metadata["_mandatory"] = True
+        kept = _apply_caller_size_limit(items, 4)
+        kept_ids = {d.metadata["doc_id"] for d, _ in kept}
+        assert "d10" in kept_ids and "d11" in kept_ids, (
+            "mandatory coverage chunks were dropped by the cap: %r" % sorted(kept_ids))
+        assert len(kept) <= 4, "cap still bounds the total: %d" % len(kept)
+
+    def test_mandatory_chunks_do_not_disable_the_cap(self):
+        """Negative half: keeping mandatory chunks must not turn the cap into a no-op for
+        everything else."""
+        from app.services.retrieval import _apply_caller_size_limit
+        items = self._items(12)
+        items[11][0].metadata["_mandatory"] = True
+        kept = _apply_caller_size_limit(items, 4)
+        assert len(kept) == 4, "expected exactly top_k when one mandatory fits, got %d" % len(kept)
+
     def test_the_cap_does_not_pad(self):
         """Negative half: a limiter that also GREW a short list would pass the test above."""
         from app.services.retrieval import _apply_caller_size_limit
