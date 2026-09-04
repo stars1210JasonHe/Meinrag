@@ -2,6 +2,7 @@ import logging
 import os
 import shutil
 import tempfile
+import time
 from pathlib import Path
 
 from langchain_community.vectorstores import FAISS
@@ -11,6 +12,11 @@ from langchain_core.embeddings import Embeddings
 from app.vectorstore.base import VectorStoreManager, l2sq_to_score
 
 logger = logging.getLogger(__name__)
+
+# How long a `.save-*` directory must sit untouched before the startup sweep will
+# remove it. Must exceed the longest plausible save: the production index is ~2 GB
+# and writes in well under a minute. Generous on purpose - see _sweep_stale_save_dirs.
+STALE_SAVE_DIR_SECONDS = 3600
 
 
 def _try_gpu_index(store: FAISS) -> bool:
@@ -183,11 +189,28 @@ class FAISSStoreManager(VectorStoreManager):
         parent = self._persist_dir.parent
         if not parent.is_dir():
             return
+        now = time.time()
         for child in parent.iterdir():
             if not child.is_dir() or not child.name.startswith(".save-"):
                 continue
             if child.resolve() == self._persist_dir.resolve():
                 continue        # belt and braces: never the live directory
+            # AGE GATE. Without it this deletes temp dirs belonging to OTHER PROCESSES that
+            # are still writing. With TASK_BACKEND=arq every summary task constructs its own
+            # FAISSStoreManager and calls initialize() in a separate worker process
+            # (app/worker.py), so an unconditional sweep lets a worker rmtree the API
+            # process's in-flight save and turn a healthy persist into FileNotFoundError -
+            # leaving chunks added but the registry row absent. Found by independent review
+            # before this shipped.
+            #
+            # A real save writes ~2 GB and finishes in well under a minute, so anything
+            # untouched for an hour is genuinely abandoned. The gate is one-sided on purpose:
+            # skipping a stale directory costs disk, deleting a live one costs a write.
+            try:
+                if now - child.stat().st_mtime < STALE_SAVE_DIR_SECONDS:
+                    continue
+            except OSError:
+                continue        # vanished or unreadable - not ours to force
             try:
                 shutil.rmtree(child)
                 logger.info("removed stale index save directory %s", child)

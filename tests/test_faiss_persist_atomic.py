@@ -139,6 +139,12 @@ class TestStaleSaveDirsAreSwept:
         stale = m._persist_dir.parent / ".save-abcd1234"
         stale.mkdir()
         (stale / "index.faiss").write_bytes(b"x" * 100)
+        # Age it past the gate. Without this the test would pass only because the sweep was
+        # unconditional - i.e. it would have been asserting the very bug review just found.
+        import os as _os, time as _t
+        from app.vectorstore.faiss_store import STALE_SAVE_DIR_SECONDS
+        old_t = _t.time() - STALE_SAVE_DIR_SECONDS - 60
+        _os.utime(stale, (old_t, old_t))
         m.initialize(MagicMock())
         assert not stale.exists(), "the orphaned save dir was not removed"
 
@@ -155,6 +161,25 @@ class TestStaleSaveDirsAreSwept:
         assert m._persist_dir.is_dir(), "the sweep deleted the live directory itself"
         assert (m._persist_dir / "keepme.bin").read_bytes() == b"LIVE", (
             "the sweep destroyed the live directory contents")
+
+    def test_a_FRESH_save_dir_is_left_alone(self, tmp_path):
+        """The one that matters: another process may be writing into it RIGHT NOW.
+
+        With TASK_BACKEND=arq each summary task builds its own FAISSStoreManager and calls
+        initialize() in a separate worker process, so an unconditional sweep lets a worker
+        delete the API process's in-flight save - turning a healthy persist into
+        FileNotFoundError and leaving chunks added with no registry row. Found by independent
+        review before it shipped; without this test the sweep looks correct in every other
+        case."""
+        m = _manager(tmp_path)
+        live = m._persist_dir.parent / ".save-inflight"
+        live.mkdir()
+        (live / "index.faiss").write_bytes(b"HALF-WRITTEN")
+        m.initialize(MagicMock())
+        assert live.exists(), (
+            "the sweep deleted a temp dir that had just been touched - under arq that is "
+            "another process's live save")
+        assert (live / "index.faiss").read_bytes() == b"HALF-WRITTEN"
 
     def test_it_does_NOT_touch_unrelated_siblings(self, tmp_path):
         """Negative half: only .save-* is fair game. The backup dirs that saved production
