@@ -55,3 +55,9 @@ screenshots/
 
 # --- Local Claude Code settings ---
 .claude/settings.local.json
+
+# Backups written beside a source file by patch tooling. One of these was committed to main
+# on 2026-09-04: the patch script wrote it next to the file it was editing, inside the repo,
+# and `git add app/` swept it up. Ignoring the shape is the fix; remembering not to add it is not.
+*.bak-*
+*.orig
