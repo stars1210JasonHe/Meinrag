@@ -42,6 +42,10 @@ class TestSearchModels:
             confidence_tier="high",
             total_available=1,
             query_types=["fact"],
+            # stage_counts is required on this model: a caller must be able to tell
+            # "nothing was dropped" from "nobody counted". Supplied here so this test keeps
+            # testing what it tests - the assertions below are unchanged.
+            stage_counts={"returned": 1, "basis": "test fixture"},
         )
         assert not hasattr(resp, "answer")
         assert resp.results[0].content == "c"

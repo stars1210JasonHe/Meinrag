@@ -289,3 +289,31 @@ class TestTokenBudgetOptOut:
         assert used > 500, (
             "declined budget reported %d tokens, which is at or under the budget it "
             "ignored - the count is not real" % used)
+
+
+class TestSearchResponseContract:
+    """stage_counts must be REQUIRED on the response model, not defaulted to None.
+
+    Found by independent review AFTER the first attempt at this: a second annotation
+    (stage_counts: dict) had been added while the original (stage_counts: dict | None = None)
+    was still present a few lines above, so Pydantic still saw a defaulted field and the
+    generated schema still advertised the value as optional. The declaration read as required
+    and behaved as optional.
+
+    The cause was re-running a patch script over an already-patched file. It also duplicated a
+    keyword argument in query.py, which was noticed and reverted - and this second casualty was
+    not. So this test exists because a fix that LOOKED applied was not.
+    """
+
+    def test_stage_counts_is_required(self):
+        import pytest as _pytest
+        from pydantic import ValidationError
+        from app.models.schemas import SearchResponse
+        with _pytest.raises(ValidationError):
+            SearchResponse(results=[])           # no stage_counts -> must be rejected
+
+    def test_search_response_still_builds_when_given_one(self):
+        """Negative half: required must not mean unconstructable."""
+        from app.models.schemas import SearchResponse
+        r = SearchResponse(results=[], stage_counts={"returned": 0, "basis": "test"})
+        assert r.stage_counts["returned"] == 0
