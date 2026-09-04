@@ -91,7 +91,7 @@ def _vector_store():
     return vs
 
 
-async def _run(doc_ids, user_scoped):
+async def _run(doc_ids, user_scoped, force_corpus_only=True, force_web_search=False):
     from app.services import retrieval as retrieval_mod
     edge_repo = AsyncMock()
     edge_repo.get_edge_type_counts_batch = AsyncMock(return_value={})
@@ -106,7 +106,8 @@ async def _run(doc_ids, user_scoped):
         embeddings=MagicMock(),
         edge_repo=edge_repo,
         settings=_settings(),
-        force_corpus_only=True,
+        force_corpus_only=force_corpus_only,
+        force_web_search=force_web_search,
         reorder_for_attention=False,
     )
 
@@ -157,13 +158,39 @@ class TestStageCounts:
         """The pairing that the first pass of the count fields missed.
 
         Populating only the main return leaves the early exits answering null, and null is
-        indistinguishable from 'nothing was dropped'. Both scoped-to-nothing and the
-        ordinary path must carry it.
-        """
-        for doc_ids, user_scoped in ((None, False), ([], True)):
-            result = await _run(doc_ids=doc_ids, user_scoped=user_scoped)
+        indistinguishable from 'nothing was dropped'.
+
+        CORRECTED after an independent review: the first version of this test hardcoded
+        force_corpus_only=True in the helper, which gates out the web-search branch
+        entirely (retrieval.py: `if not force_corpus_only and ...`). So it covered two of
+        three paths while its NAME claimed all three - and the mutation test that seemed
+        to prove it worked had only ever mutated a covered path. A test asserting coverage
+        it does not have is worse than no test."""
+        cases = [
+            (dict(doc_ids=None, user_scoped=False), "main path"),
+            (dict(doc_ids=[], user_scoped=True), "zero-scope early return"),
+            (dict(doc_ids=None, user_scoped=False, force_corpus_only=False,
+                  force_web_search=True), "web-search early return"),
+        ]
+        for kwargs, label in cases:
+            result = await _run(**kwargs)
             assert result.stage_counts is not None, (
-                "stage_counts absent for doc_ids=%r user_scoped=%r" % (doc_ids, user_scoped))
+                "stage_counts absent on the %s (%r)" % (label, kwargs))
+
+    async def test_web_search_path_says_not_measured_rather_than_zero(self):
+        """The path that returns BEFORE the ranking stages must not claim zeros.
+
+        Its stages genuinely did not run, so reporting 0 for them would be false; but
+        `returned` is knowable because the payload is right there. This is the one place
+        the three states have to be told apart, so it gets its own case."""
+        result = await _run(doc_ids=None, user_scoped=False,
+                            force_corpus_only=False, force_web_search=True)
+        sc = result.stage_counts
+        assert sc is not None
+        assert sc["returned"] == len(result.sources)
+        assert any(sc[s] is None for s in STAGE_ORDER if s != "returned"), (
+            "stages that never ran must be None, not 0: %r" % (sc,))
+        assert "not measured" in sc.get("basis", "")
 
     async def test_returned_is_never_null_when_the_payload_is_countable(self):
         """The returned count describes the response body, so it is knowable on EVERY path.

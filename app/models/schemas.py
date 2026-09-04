@@ -157,6 +157,14 @@ class SearchResponse(BaseModel):
     # the numbers were obtained. Always present: a caller must be able to distinguish
     # 'nothing was dropped' from 'nobody counted', which an absent field cannot do.
     stage_counts: dict | None = None
+    # How many results each pipeline stage produced, plus a `basis` string saying how
+    # the numbers were obtained. REQUIRED, not optional: the whole purpose of the field
+    # is to let a caller distinguish 'nothing was dropped' from 'nobody counted', and a
+    # nullable declaration puts that ambiguity straight back into the generated schema -
+    # a schema-driven client would be told to handle absent/null and would be right to.
+    # Declaring it required also means a future return path that forgets to set it fails
+    # loudly at the response boundary instead of quietly emitting null.
+    stage_counts: dict
 
 
 class UserInfo(BaseModel):
