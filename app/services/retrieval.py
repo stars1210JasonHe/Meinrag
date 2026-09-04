@@ -253,9 +253,25 @@ STAGE_ORDER = ("after_composite", "after_rerank", "after_labels",
 
 
 def _zero_stage_counts() -> dict:
-    """All stages certainly zero (the scope matched no documents)."""
-    d = {s: 0 for s in STAGE_ORDER}
-    d["basis"] = "scope resolved to zero documents; every stage is certainly 0"
+    """Empty scope: nothing was retrieved, so NO stage ran. Stages are None; `returned` is 0.
+
+    An earlier version filled every stage with 0 and justified it as "with zero documents each
+    stage certainly produces zero". That reasoning is about what the stages WOULD have done,
+    and this field is about what they DID - the whole point of it is that None means the stage
+    did not run while 0 means it ran and kept nothing.
+
+    Reporting 0 here also made the endpoint self-contradictory: on /search reranking is off, so
+    the normal path reports after_rerank=None, while the empty-scope path reported
+    after_rerank=0. Same request, same configuration, two different answers depending only on
+    whether the scope happened to be empty. Found by independent review.
+
+    `returned` stays 0 because it is genuinely known - the response demonstrably carries zero
+    sources. That is the same rule already applied on the web-search early return.
+    """
+    d = {s: None for s in STAGE_ORDER}
+    d["returned"] = 0
+    d["basis"] = ("scope resolved to zero documents; no stage ran, so every stage is null. "
+                  "'returned' is known and is 0")
     return d
 
 

@@ -155,17 +155,32 @@ class TestStageCounts:
                     % (stage, val, prev_name, prev))
             prev_name, prev = stage, val
 
-    async def test_empty_scope_reports_zero_not_absent(self):
-        """Scope resolved to zero documents: the counts are KNOWN, so they are 0.
+    async def test_empty_scope_reports_the_field_with_nulls_not_zeros(self):
+        """Scope resolved to zero documents: no stage RAN, so stages are null and returned is 0.
 
-        Returning no field at all would be read as 'nothing was dropped', which is the
-        failure this whole field exists to prevent.
+        This test previously asserted every stage == 0, justified as "with zero documents each
+        stage certainly produces zero". That is a claim about what the stages WOULD have done;
+        the field is about what they DID. Reporting 0 also made the endpoint contradict itself:
+        on /search reranking is off, so the normal path reports after_rerank=None while this
+        path reported after_rerank=0 - same request, same configuration, different answer
+        depending only on whether the scope happened to be empty. Independent review caught it.
+
+        The original concern behind the old assertion is still covered, and asserted below: the
+        field must be PRESENT, because an absent field reads as 'nothing was dropped'. Present
+        with explicit nulls plus a basis string is not the same as absent.
         """
         result = await _run(doc_ids=[], user_scoped=True)
         sc = result.stage_counts
-        assert sc is not None
+        assert sc is not None, "the field must be present - absent reads as 'nothing dropped'"
+        assert sc["returned"] == 0, "returned is genuinely known on this path"
         for stage in STAGE_ORDER:
-            assert sc[stage] == 0, "%s should be a certain 0 on an empty scope" % stage
+            if stage == "returned":
+                continue
+            assert sc[stage] is None, (
+                "%s did not run on the empty-scope path, so it must be None, got %r"
+                % (stage, sc[stage]))
+        assert "no stage ran" in sc["basis"], (
+            "basis must say why the stages are null: %r" % sc["basis"])
 
     async def test_every_return_path_carries_the_field(self):
         """The pairing that the first pass of the count fields missed.
