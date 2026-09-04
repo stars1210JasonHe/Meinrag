@@ -153,6 +153,10 @@ class SearchResponse(BaseModel):
     confidence_tier: str | None = None
     total_available: int | None = None
     query_types: list[str] | None = None
+    # How many results each pipeline stage produced, plus a `basis` string saying how
+    # the numbers were obtained. Always present: a caller must be able to distinguish
+    # 'nothing was dropped' from 'nobody counted', which an absent field cannot do.
+    stage_counts: dict | None = None
 
 
 class UserInfo(BaseModel):

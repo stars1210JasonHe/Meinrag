@@ -49,6 +49,10 @@ class RetrievalResult:
     context_mode: str | None = None  # "chunks" (v1); "summary" (phase 3, future)
     chunks_included: int | None = None
     chunks_available: int | None = None
+    # Per-stage result counts. Always populated on every return path -- see the
+    # comment on the zero-scope guard below for why a None here is not acceptable:
+    # a caller cannot tell 'nothing was dropped' from 'nobody counted'.
+    stage_counts: dict | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +245,29 @@ def _scale_query_sim(doc, factor: float) -> None:
     """Apply a penalty factor to the carried magnitude (mirrors tuple-score penalties)."""
     if "_query_sim" in doc.metadata:
         doc.metadata["_query_sim"] *= factor
+
+
+STAGE_ORDER = ("after_composite", "after_rerank", "after_labels",
+               "after_per_doc_cap", "after_token_budget", "returned")
+
+
+def _zero_stage_counts() -> dict:
+    """All stages certainly zero (the scope matched no documents)."""
+    d = {s: 0 for s in STAGE_ORDER}
+    d["basis"] = "scope resolved to zero documents; every stage is certainly 0"
+    return d
+
+
+def _unknown_stage_counts(reason: str) -> dict:
+    """This path returned before the ranking stages ran, so nothing was counted.
+
+    Reporting 0 would be false and omitting the field would be worse: an absent
+    marker gets read as 'nothing was dropped'. The user's constraint is that the
+    field only ever makes POSITIVE assertions and that silence is never mistaken
+    for a clean result, so this says explicitly that it did not measure."""
+    d = {s: None for s in STAGE_ORDER}
+    d["basis"] = "not measured: returned before the ranking stages ran (%s)" % reason
+    return d
 
 
 def _trace(settings, stage: str, retrieved: list) -> None:
@@ -1425,6 +1452,7 @@ async def retrieve_and_rank(
             chunks_included=0,
             chunks_available=0,
             context_used_tokens=0,
+            stage_counts=_zero_stage_counts(),
         )
 
     # Load scoring profile (cached), resolve after query analysis
@@ -1641,6 +1669,7 @@ async def retrieve_and_rank(
             sources=[], retrieved=[], query_types=query_types,
             query_label=query_label, web_search_needed=True,
             chat_history=chat_history,
+            stage_counts=_unknown_stage_counts("web_search_path"),
         )
 
     # 8. Visual proximity linking
@@ -1674,6 +1703,9 @@ async def retrieve_and_rank(
     # 12. Sort by composite — deterministic order for the reranker's input cap,
     # and the final order when reranking is disabled.
     retrieved.sort(key=lambda x: x[1], reverse=True)
+    stage_counts = {s: None for s in STAGE_ORDER}
+    stage_counts["basis"] = "measured per stage in retrieve_and_rank"
+    stage_counts["after_composite"] = len(retrieved)
 
     # 12b. Reranking — runs LAST among ranking stages, on composite-sorted
     # candidates (so the rerank_max_candidates cap keeps the best by composite,
@@ -1719,6 +1751,8 @@ async def retrieve_and_rank(
             retrieved.sort(key=lambda x: x[1], reverse=True)
         _trace(settings, "rerank_final", retrieved)
 
+    stage_counts["after_rerank"] = len(retrieved)
+
     retrieved = _normalize_scores(retrieved, profile)
 
     # 13. Prepend label chunks
@@ -1734,17 +1768,22 @@ async def retrieve_and_rank(
         retrieved = label_results + retrieved
 
     chunks_available = len(retrieved)
+    # NB: this is after rerank AND after label prepending (step 13), which can ADD
+    # chunks. It is not 'the count after reranking'.
+    stage_counts["after_labels"] = chunks_available
 
     # 14. Per-doc cap (multi-doc scope only)
     # Count unique docs in retrieved set
     unique_docs = len({doc.metadata.get("doc_id") for doc, _ in retrieved})
     retrieved = _apply_per_doc_cap(retrieved, unique_docs, top_k)
+    stage_counts["after_per_doc_cap"] = len(retrieved)
 
     # 15. Token budget enforcement — greedy fill until budget reached
     chunk_budget, history_budget, total_input_budget = _compute_context_budget(
         question, chat_history, primary_type, settings,
     )
     retrieved, tokens_used = _apply_token_budget(retrieved, chunk_budget)
+    stage_counts["after_token_budget"] = len(retrieved)
 
     # 16. Strategic placement — mitigate "lost in the middle"
     # (Apply only to non-label chunks; labels stay at front for priority)
@@ -1828,6 +1867,7 @@ async def retrieve_and_rank(
         context_mode="chunks",  # phase 3 will add "summary" fallback
         chunks_included=len(retrieved),
         chunks_available=chunks_available,
+        stage_counts=dict(stage_counts, returned=len(sources)),
     )
 
 

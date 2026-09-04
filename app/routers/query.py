@@ -557,6 +557,7 @@ async def search_documents(
             results=result.sources,
             confidence_tier=result.confidence_tier,
             total_available=result.chunks_available,
+            stage_counts=result.stage_counts,
             query_types=result.query_types,
         )
     except Exception as e:
