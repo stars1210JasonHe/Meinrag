@@ -130,6 +130,44 @@ class TestPersistIsAtomic:
 
 
 
+
+class TestStaleSaveDirsAreSwept:
+    """A SIGKILLed save leaves its temp dir behind - measured at 1.9 GB on the NAS."""
+
+    def test_startup_removes_a_leftover_save_dir(self, tmp_path):
+        m = _manager(tmp_path)
+        stale = m._persist_dir.parent / ".save-abcd1234"
+        stale.mkdir()
+        (stale / "index.faiss").write_bytes(b"x" * 100)
+        m.initialize(MagicMock())
+        assert not stale.exists(), "the orphaned save dir was not removed"
+
+    def test_it_does_NOT_touch_the_live_directory(self, tmp_path):
+        """The live dir is a SIBLING of the temp dirs. This is the test that matters: a
+        careless glob here deletes the index."""
+        m = _manager(tmp_path)
+        # NOT named index.faiss: initialize() loads that file if it exists, and fake bytes
+        # make faiss raise before the sweep is ever reached. The property under test is that
+        # the sweep leaves the live DIRECTORY and its contents alone, which this shows without
+        # requiring a real 1.5 GB index.
+        (m._persist_dir / "keepme.bin").write_bytes(b"LIVE")
+        m.initialize(MagicMock())
+        assert m._persist_dir.is_dir(), "the sweep deleted the live directory itself"
+        assert (m._persist_dir / "keepme.bin").read_bytes() == b"LIVE", (
+            "the sweep destroyed the live directory contents")
+
+    def test_it_does_NOT_touch_unrelated_siblings(self, tmp_path):
+        """Negative half: only .save-* is fair game. The backup dirs that saved production
+        this morning are siblings too, and they are named faiss_bak_*."""
+        m = _manager(tmp_path)
+        keep = m._persist_dir.parent / "faiss_bak_20260903"
+        keep.mkdir()
+        (keep / "index.faiss").write_bytes(b"BACKUP")
+        m.initialize(MagicMock())
+        assert (keep / "index.faiss").read_bytes() == b"BACKUP", (
+            "the sweep deleted a backup directory")
+
+
 @pytest.mark.skipif(os.name != "posix",
                     reason="the directory-flush block is POSIX-only; on Windows it does not "
                            "execute at all, so these tests would pass without running the "

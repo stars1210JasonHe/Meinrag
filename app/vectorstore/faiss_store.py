@@ -44,6 +44,9 @@ class FAISSStoreManager(VectorStoreManager):
     def initialize(self, embeddings: Embeddings) -> None:
         self._embeddings = embeddings
         self._doc_id_index = None
+        # A killed save leaves ~2 GB behind; startup is the one moment we know no save of
+        # ours is in flight, so it is the safe place to clear them.
+        self._sweep_stale_save_dirs()
         index_file = self._persist_dir / "index.faiss"
         if index_file.exists():
             self._store = FAISS.load_local(
@@ -161,6 +164,36 @@ class FAISSStoreManager(VectorStoreManager):
         if self._store is None:
             return []
         return list(self._store.docstore._dict.values())
+
+    def _sweep_stale_save_dirs(self) -> None:
+        """Delete temp directories left behind by a save that was KILLED.
+
+        `_atomic_save` removes its temp dir in a `finally`, which covers an exception but not
+        a SIGKILL. Measured on the NAS 2026-09-04: a `docker-compose stop` whose timeout
+        escalated to SIGKILL during a save left `.save-b548ung1/` holding **1.9 GB** - a full
+        index.faiss plus a partial index.pkl.
+
+        That orphan is the fix working correctly (the interruption hit the temp copy and the
+        live index was untouched), but at roughly 2 GB per interrupted save it is a slow leak,
+        and the ingest saves every few seconds.
+
+        Only `.save-*` siblings of the persist directory are considered, and the persist
+        directory itself is never a candidate - it is a sibling, one careless glob away.
+        """
+        parent = self._persist_dir.parent
+        if not parent.is_dir():
+            return
+        for child in parent.iterdir():
+            if not child.is_dir() or not child.name.startswith(".save-"):
+                continue
+            if child.resolve() == self._persist_dir.resolve():
+                continue        # belt and braces: never the live directory
+            try:
+                shutil.rmtree(child)
+                logger.info("removed stale index save directory %s", child)
+            except OSError as e:
+                # A leftover we cannot delete is not a reason to refuse to start.
+                logger.warning("could not remove stale save dir %s: %s", child, e)
 
     def _atomic_save(self) -> None:
         """Write the index somewhere else, then rename it into place.
