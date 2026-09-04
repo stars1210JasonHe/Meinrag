@@ -49,6 +49,10 @@ class RetrievalResult:
     context_mode: str | None = None  # "chunks" (v1); "summary" (phase 3, future)
     chunks_included: int | None = None
     chunks_available: int | None = None
+    # Per-stage result counts. Always populated on every return path -- see the
+    # comment on the zero-scope guard below for why a None here is not acceptable:
+    # a caller cannot tell 'nothing was dropped' from 'nobody counted'.
+    stage_counts: dict | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +245,52 @@ def _scale_query_sim(doc, factor: float) -> None:
     """Apply a penalty factor to the carried magnitude (mirrors tuple-score penalties)."""
     if "_query_sim" in doc.metadata:
         doc.metadata["_query_sim"] *= factor
+
+
+STAGE_ORDER = ("after_composite", "after_rerank", "after_labels",
+               "after_per_doc_cap", "after_token_budget", "after_top_k_cap",
+               "returned")
+
+
+def _zero_stage_counts() -> dict:
+    """Empty scope: nothing was retrieved, so NO stage ran. Stages are None; `returned` is 0.
+
+    An earlier version filled every stage with 0 and justified it as "with zero documents each
+    stage certainly produces zero". That reasoning is about what the stages WOULD have done,
+    and this field is about what they DID - the whole point of it is that None means the stage
+    did not run while 0 means it ran and kept nothing.
+
+    Reporting 0 here also made the endpoint self-contradictory: on /search reranking is off, so
+    the normal path reports after_rerank=None, while the empty-scope path reported
+    after_rerank=0. Same request, same configuration, two different answers depending only on
+    whether the scope happened to be empty. Found by independent review.
+
+    `returned` stays 0 because it is genuinely known - the response demonstrably carries zero
+    sources. That is the same rule already applied on the web-search early return.
+    """
+    d = {s: None for s in STAGE_ORDER}
+    d["returned"] = 0
+    d["basis"] = ("scope resolved to zero documents; no stage ran, so every stage is null. "
+                  "'returned' is known and is 0")
+    return d
+
+
+def _unknown_stage_counts(reason: str, returned: int = 0) -> dict:
+    """This path returned before the ranking stages ran, so they were never counted.
+
+    Reporting 0 for a stage that did not run would be false, and omitting the field
+    would be worse: an absent marker gets read as 'nothing was dropped'. So the
+    pipeline stages say None and `basis` says explicitly that they were not measured.
+
+    `returned` is the exception and is NOT None: this path hands back a known number
+    of sources (zero), and reporting null for a count the response itself demonstrates
+    would be the same conflation of 'zero' and 'unknown' that this field exists to
+    prevent -- the mistake that had to be fixed once already, one layer up."""
+    d = {s: None for s in STAGE_ORDER}
+    d["returned"] = returned
+    d["basis"] = ("not measured: returned before the ranking stages ran (%s); "
+                  "'returned' is known and is not null" % reason)
+    return d
 
 
 def _trace(settings, stage: str, retrieved: list) -> None:
@@ -637,15 +687,21 @@ async def _rerank_results(
     settings,
     llm=None,
     top_n: int | None = None,
-) -> list[tuple]:
+) -> tuple[list[tuple], bool]:
     """Apply cross-encoder reranking to retrieved results.
+
+    Returns (results, ran). `ran` is False whenever the reranker did not actually order
+    anything - disabled, or it raised and we fell back to the original list. The caller needs
+    that distinction to report stage counts truthfully: without it a failed reranker is
+    indistinguishable from one that ran and kept every candidate, which is the precise
+    confusion the stage_counts field exists to remove. Found by independent review.
 
     top_n: how many to keep after reranking. Defaults to settings.rerank_top_n
     (currently 4), which is fine for single-doc but starves multi-doc queries.
     Callers should pass the effective top_k so per-doc distribution works.
     """
     if not retrieved:
-        return retrieved
+        return retrieved, False
     try:
         from app.rag.chain import _get_reranker
         # Use max of setting and caller's request so a small setting doesn't cap large queries
@@ -678,10 +734,11 @@ async def _rerank_results(
             reranked.append((cdoc, original_score))
 
         logger.info("Reranked %d → %d results (cross-encoder order; input score values preserved)", len(retrieved), len(reranked))
-        return reranked if reranked else retrieved
+        # An empty compressor result is a fallback too, not a rerank that kept nothing.
+        return (reranked, True) if reranked else (retrieved, False)
     except Exception as e:
         logger.warning("Reranking failed, using original order: %s", e)
-        return retrieved
+        return retrieved, False
 
 
 # ---------------------------------------------------------------------------
@@ -1156,6 +1213,46 @@ def _ensure_per_doc_coverage(
     return result
 
 
+def _apply_caller_size_limit(retrieved: list[tuple], top_k: int) -> list[tuple]:
+    """The CALLER's size bound, used when the model-window token budget was declined.
+
+    MANDATORY-AWARE, and that is not decoration. `_ensure_per_doc_coverage` marks one chunk
+    per scoped document `_mandatory` precisely so every selected document keeps a voice, and
+    `_apply_token_budget` honours that even when the mandatory set exceeds the whole budget.
+    A plain retrieved[:top_k] here silently undid it: on a scoped /search spanning more
+    documents than top_k, the low-ranked mandatory chunks sat past the cut and whole
+    documents vanished from a result set that had deliberately included them - a regression
+    against an existing guarantee, in exactly the coverage mode that exists to prevent it.
+    Found by independent review.
+
+    So: keep every mandatory chunk, then fill the remainder in rank order. Retrieval order is
+    preserved within each group, and the result can exceed top_k only when the mandatory set
+    alone does - the same trade _apply_token_budget already makes, for the same reason.
+
+    A named function rather than an inline slice for one reason: an inline slice could not be
+    tested. The integration fixture holds too few documents for any stage to exceed top_k, so
+    a mutation DELETING the cap left the entire suite green.
+    """
+    if len(retrieved) <= top_k:
+        return retrieved
+    mandatory = [t for t in retrieved if (t[0].metadata or {}).get("_mandatory")]
+    if not mandatory:
+        return retrieved[:top_k]
+    rest = [t for t in retrieved if not (t[0].metadata or {}).get("_mandatory")]
+    # top_k is a HARD bound, and mandatory chunks get priority INSIDE it - they do not lift it.
+    # My first version let the mandatory set exceed top_k, mirroring _apply_token_budget's
+    # "selected docs must have a voice". Review pushed back and is right: when a scope holds
+    # more documents than top_k, no arrangement gives all of them a voice, and the caller's
+    # explicit number should win over a heuristic. Twelve results for top_k=4 makes the
+    # documented maximum unusable, and an agent sizing its own context cannot absorb that.
+    # Coverage still wins the CHOICE of which chunks fill the slots; it no longer wins the
+    # count. The reduction is visible in after_top_k_cap either way.
+    kept = (mandatory + rest)[:top_k] if len(mandatory) >= top_k else            mandatory + rest[:max(0, top_k - len(mandatory))]
+    # Restore the caller-visible ordering rather than emitting mandatory-first.
+    order = {id(t[0]): i for i, t in enumerate(retrieved)}
+    return sorted(kept, key=lambda t: order[id(t[0])])
+
+
 def _apply_per_doc_cap(
     retrieved: list[tuple], n_docs_in_scope: int, top_k: int,
 ) -> list[tuple]:
@@ -1180,7 +1277,7 @@ def _apply_per_doc_cap(
 
 
 def _apply_token_budget(
-    retrieved: list[tuple], chunk_budget: int,
+    retrieved: list[tuple], chunk_budget: int, enforce: bool = True,
 ) -> tuple[list[tuple], int]:
     """Three-pass greedy fill — mandatory-aware, doc-diversity aware.
 
@@ -1194,6 +1291,11 @@ def _apply_token_budget(
     individually exceed 25% of budget (outliers) — but mandatory chunks are
     kept regardless of size.
     """
+    if not enforce:
+        # Measure without truncating. Returning a wrong token count here would swap a
+        # real number for a made-up one, which is precisely what the caller opted out
+        # of enforcement to avoid - the enforcement is what is declined, not the count.
+        return retrieved, sum(_count_tokens(d.page_content or "") for d, _ in retrieved)
     if chunk_budget <= 0:
         return [], 0
     max_single_chunk = chunk_budget // 4
@@ -1360,6 +1462,7 @@ async def retrieve_and_rank(
     source_truncate_chars: int | None = 500,
     ensure_coverage: bool = True,
     reorder_for_attention: bool = True,
+    enforce_token_budget: bool = True,
 ) -> RetrievalResult:
     """Full retrieval pipeline — single source of truth.
 
@@ -1371,6 +1474,15 @@ async def retrieve_and_rank(
     for ask-AI answer comprehensiveness; retrieve-only consumers (/search)
     don't need it and on large collection scopes it enumerates every member
     doc per query.
+
+    ``enforce_token_budget=False`` measures the context tokens but does not TRUNCATE
+    to them. Retrieve-only callers (/search) generate no answer, so budgeting their
+    response against this service's own model window - 60%% of it, minus
+    ``reserved_output_tokens`` held back for a reply that is never produced - trims an
+    agent's results to fit a model that is not the one reading them. That endpoint
+    documents ``top_k`` as the caller's token-discipline lever; this flag is what lets
+    the lever actually hold. The tokens are still COUNTED, so ``context_used_tokens``
+    stays true: what is skipped is the enforcement, not the measurement.
 
     ``reorder_for_attention=False`` skips the lost-in-the-middle U-shape
     placement (best first, SECOND-BEST LAST) — that layout optimizes LLM
@@ -1425,6 +1537,7 @@ async def retrieve_and_rank(
             chunks_included=0,
             chunks_available=0,
             context_used_tokens=0,
+            stage_counts=_zero_stage_counts(),
         )
 
     # Load scoring profile (cached), resolve after query analysis
@@ -1641,6 +1754,7 @@ async def retrieve_and_rank(
             sources=[], retrieved=[], query_types=query_types,
             query_label=query_label, web_search_needed=True,
             chat_history=chat_history,
+            stage_counts=_unknown_stage_counts("web_search_path"),
         )
 
     # 8. Visual proximity linking
@@ -1674,6 +1788,9 @@ async def retrieve_and_rank(
     # 12. Sort by composite — deterministic order for the reranker's input cap,
     # and the final order when reranking is disabled.
     retrieved.sort(key=lambda x: x[1], reverse=True)
+    stage_counts = {s: None for s in STAGE_ORDER}
+    stage_counts["basis"] = "measured per stage in retrieve_and_rank"
+    stage_counts["after_composite"] = len(retrieved)
 
     # 12b. Reranking — runs LAST among ranking stages, on composite-sorted
     # candidates (so the rerank_max_candidates cap keeps the best by composite,
@@ -1681,6 +1798,10 @@ async def retrieve_and_rank(
     # With rerank_final_order (default) the cross-encoder's order IS the final
     # order; score values remain composite, so position and score can be
     # locally non-monotonic — two honest, different signals.
+    # Initialised before the branch: when reranking is disabled the call below never
+    # happens, and the stage-count line further down reads this unconditionally.
+    _rerank_ran = False
+    _n_after_rerank = 0
     if settings.rerank_enabled:
         # Pass top_k so rerank doesn't throttle multi-doc queries.
         # For multi-doc scope: ensure at least ~3 chunks per selected doc so the
@@ -1696,9 +1817,15 @@ async def retrieve_and_rank(
             if doc.metadata.get("_mandatory")
         }
 
-        retrieved = await _rerank_results(
+        retrieved, _rerank_ran = await _rerank_results(
             retrieved, question, settings, llm, top_n=effective_top_n,
         )
+        # Captured HERE, before the mandatory-restore loop below mutates `retrieved`.
+        # Recording it afterwards reports the post-restore length and hides the reduction the
+        # reranker actually made - if rerank trims 10 to 4 and three mandatory backfills are
+        # reinserted, the field would say 7 and conceal both numbers. Found by review; it is
+        # this field's own purpose failing on itself for the third time.
+        _n_after_rerank = len(retrieved)
 
         # Re-insert any mandatory chunks the reranker dropped.
         post_keys = {
@@ -1719,6 +1846,22 @@ async def retrieve_and_rank(
             retrieved.sort(key=lambda x: x[1], reverse=True)
         _trace(settings, "rerank_final", retrieved)
 
+    # A stage that did not RUN reports None, never a number. Recording len(retrieved)
+    # here when reranking is disabled would be indistinguishable from a rerank pass that
+    # kept every candidate - the exact 'nothing dropped' vs 'never happened' conflation
+    # this field exists to remove. I originally captured it unconditionally and defended
+    # that as 'it correctly equals after_composite'; equalling the previous stage IS the
+    # ambiguity, and an independent review caught it.
+    # `_rerank_ran` and not merely `rerank_enabled`: the reranker catches its own failures
+    # and returns the input list, so an enabled-but-broken reranker (missing model, provider
+    # error, OOM) would otherwise be reported as "ran and kept every candidate" - the exact
+    # confusion this field exists to remove, in its own failure mode. Found by review.
+    stage_counts["after_rerank"] = _n_after_rerank if _rerank_ran else None
+    if not settings.rerank_enabled:
+        stage_counts["basis"] += "; rerank SKIPPED (rerank_enabled=false)"
+    elif not _rerank_ran:
+        stage_counts["basis"] += "; rerank ATTEMPTED BUT FELL BACK (original order kept)"
+
     retrieved = _normalize_scores(retrieved, profile)
 
     # 13. Prepend label chunks
@@ -1734,17 +1877,50 @@ async def retrieve_and_rank(
         retrieved = label_results + retrieved
 
     chunks_available = len(retrieved)
+    # NB: this is after rerank AND after label prepending (step 13), which can ADD
+    # chunks. It is not 'the count after reranking'.
+    stage_counts["after_labels"] = chunks_available
 
     # 14. Per-doc cap (multi-doc scope only)
     # Count unique docs in retrieved set
     unique_docs = len({doc.metadata.get("doc_id") for doc, _ in retrieved})
     retrieved = _apply_per_doc_cap(retrieved, unique_docs, top_k)
+    stage_counts["after_per_doc_cap"] = len(retrieved)
 
     # 15. Token budget enforcement — greedy fill until budget reached
     chunk_budget, history_budget, total_input_budget = _compute_context_budget(
         question, chat_history, primary_type, settings,
     )
-    retrieved, tokens_used = _apply_token_budget(retrieved, chunk_budget)
+    # 15a. Declining the generation-end budget must not mean declining EVERY bound.
+    # The budget was the last size limiter on this path, and stages above it can exceed
+    # top_k on purpose: the reranker keeps max(top_k, n_docs*3) for multi-doc queries,
+    # and the per-doc cap floors at ONE chunk per document, so any scope holding more
+    # documents than top_k comes out larger than top_k. Measured: 12 documents with
+    # top_k=4 yields 12 chunks. SearchRequest.top_k is documented as the maximum to
+    # return, so the opt-out swaps the model-window limiter for the CALLER's own -- it
+    # does not remove limiting. Found by independent review; I had removed the only
+    # downstream bound while knowing the label stage can ADD chunks, which is a fact I
+    # had written into this file myself.
+    #
+    # Before the budget call, not after, so tokens_used describes the list actually
+    # returned rather than chunks the caller never receives.
+    if not enforce_token_budget:
+        _before_cap = len(retrieved)
+        retrieved = _apply_caller_size_limit(retrieved, top_k)
+        stage_counts["after_top_k_cap"] = len(retrieved)
+    else:
+        # A stage that did not run reports None, never a number equal to its predecessor.
+        stage_counts["after_top_k_cap"] = None
+
+    retrieved, tokens_used = _apply_token_budget(
+        retrieved, chunk_budget, enforce=enforce_token_budget)
+    # Same rule. With enforcement declined this stage removes nothing by construction, so
+    # a number here would tell a caller the chunks fit a budget that was never applied.
+    stage_counts["after_token_budget"] = len(retrieved) if enforce_token_budget else None
+    if not enforce_token_budget:
+        stage_counts["basis"] += (
+            "; token budget NOT ENFORCED (measured only); hard top_k=%d cap applied "
+            "instead (%d -> %d)" % (top_k, _before_cap, len(retrieved)))
 
     # 16. Strategic placement — mitigate "lost in the middle"
     # (Apply only to non-label chunks; labels stay at front for priority)
@@ -1828,6 +2004,7 @@ async def retrieve_and_rank(
         context_mode="chunks",  # phase 3 will add "summary" fallback
         chunks_included=len(retrieved),
         chunks_available=chunks_available,
+        stage_counts=dict(stage_counts, returned=len(sources)),
     )
 
 

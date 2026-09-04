@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class HealthResponse(BaseModel):
@@ -143,6 +143,44 @@ class SearchRequest(BaseModel):
     subtags: list[str] | None = Field(default=None, description="Restrict to docs matching these subtags (AND across values, case-insensitive substring match)")
 
 
+class StageCounts(BaseModel):
+    """How many results each retrieval stage produced.
+
+    Typed rather than a bare ``dict`` because the bare dict validated NOTHING: measured on
+    the previous revision, ``{}``, ``{"after_composite": "twelve"}`` and ``{"nonsense": 1}``
+    were all accepted, and the generated OpenAPI said only ``additionalProperties: true``.
+    That is this field own argument used against itself - it was added so a caller could
+    tell "nothing was dropped" from "nobody counted", and an untyped object hands a
+    schema-driven client (this repo /search serves MCP/agent consumers) no idea that these
+    keys exist or which of them may be null.
+
+    A stage that did not RUN is ``None``. A stage that ran and dropped nothing is a number
+    equal to the previous stage. Those are different facts and the types keep them different.
+
+    ``returned`` is never null: every path that emits this knows how many sources it is
+    handing back, and reporting null for a count the response itself demonstrates would
+    reintroduce the zero-vs-unknown conflation one layer down.
+
+    ``extra="forbid"`` so a misspelled stage name fails at the response boundary instead of
+    silently vanishing into a permissive dict - which is precisely how the previous revision
+    could have shipped a stage that nobody ever noticed was missing.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    after_composite: int | None
+    after_rerank: int | None
+    after_labels: int | None
+    after_per_doc_cap: int | None
+    after_token_budget: int | None
+    # Applied only when the caller declined the token budget: that opt-out removed the
+    # last size limiter, and stages above deliberately exceed top_k (per-doc cap floors
+    # at one chunk per document). None when the token budget ran instead.
+    after_top_k_cap: int | None
+    returned: int
+    basis: str
+
+
 class SearchResponse(BaseModel):
     """Retrieve-only search response — deliberately NO `answer` field.
 
@@ -153,6 +191,16 @@ class SearchResponse(BaseModel):
     confidence_tier: str | None = None
     total_available: int | None = None
     query_types: list[str] | None = None
+    # How many results each pipeline stage produced, plus a `basis` string saying how
+    # the numbers were obtained. REQUIRED, not optional: the whole purpose of the field
+    # is to let a caller distinguish 'nothing was dropped' from 'nobody counted', and a
+    # nullable declaration puts that ambiguity straight back into the generated schema -
+    # a schema-driven client would be told to handle absent/null and would be right to.
+    # Declaring it required also means a future return path that forgets to set it fails
+    # loudly at the response boundary instead of quietly emitting null. Typed (not `dict`)
+    # so the guarantee is actually enforced and appears in the generated schema -- see
+    # StageCounts above for the measurement showing `dict` enforced nothing at all.
+    stage_counts: StageCounts
 
 
 class UserInfo(BaseModel):

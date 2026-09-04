@@ -27,6 +27,10 @@ async def test_rerank_input_capped(monkeypatch):
     settings = Settings()
     settings.rerank_max_candidates = 50
     retrieved = [_pair(i) for i in range(500)]
-    out = await retrieval._rerank_results(retrieved, "q", settings, llm=None, top_n=4368)
+    # _rerank_results returns (results, ran). `ran` distinguishes a real rerank from the
+    # fallback it performs on failure - without it an enabled-but-broken reranker is reported
+    # as having run and kept everything.
+    out, ran = await retrieval._rerank_results(retrieved, "q", settings, llm=None, top_n=4368)
     assert seen["n"] <= 50          # reranker never saw more than the cap
     assert len(out) >= 1
+    assert ran is True, "the fake compressor succeeded, so this was a real rerank"
