@@ -47,52 +47,9 @@ class FAISSStoreManager(VectorStoreManager):
         # times per query (coverage, visual proximity, graph expansion).
         self._doc_id_index: dict[str, list[str]] | None = None
 
-    def _recover_interrupted_publish(self) -> None:
-        """If a publish was interrupted, put a COMPLETE index back at the live path.
-
-        The swap leaves `faiss` absent for the instant between its two renames. A crash there
-        is recoverable precisely because both sides are whole: `.save-*` holds the fully
-        written new index, `.prev-*` holds the previous one. Prefer the new, fall back to the
-        old, and say so loudly - a service that silently starts on an older index is worse
-        than one that says which index it started on.
-
-        Does nothing when the live directory already has an index, which is every normal boot.
-        """
-        live = self._persist_dir / "index.faiss"
-        if live.exists():
-            return
-
-        def _complete(d):
-            return (d / "index.faiss").exists() and (d / "index.pkl").exists()
-
-        parent = self._persist_dir.parent
-        if not parent.is_dir():
-            return
-        for prefix, what in ((".save-", "the new index"), (".prev-", "the previous index")):
-            cands = sorted((d for d in parent.iterdir()
-                            if d.is_dir() and d.name.startswith(prefix) and _complete(d)),
-                           key=lambda d: d.stat().st_mtime, reverse=True)
-            if not cands:
-                continue
-            src = cands[0]
-            logger.warning(
-                "index directory %s is missing - a publish was interrupted. Recovering %s "
-                "from %s", self._persist_dir, what, src)
-            if self._persist_dir.exists():
-                shutil.rmtree(self._persist_dir, ignore_errors=True)
-            os.replace(str(src), str(self._persist_dir))
-            return
-        logger.warning(
-            "index directory %s has no index.faiss and no complete .save-/.prev- directory "
-            "to recover from; starting empty", self._persist_dir)
-
     def initialize(self, embeddings: Embeddings) -> None:
         self._embeddings = embeddings
         self._doc_id_index = None
-        # Recovery BEFORE the sweep, always. The sweep deletes exactly the directories
-        # recovery reads, and running it first is how an interrupted publish turns into
-        # permanent data loss - flagged in review.
-        self._recover_interrupted_publish()
         # A killed save leaves ~2 GB behind; startup is the one moment we know no save of
         # ours is in flight, so it is the safe place to clear them.
         self._sweep_stale_save_dirs()
@@ -234,7 +191,7 @@ class FAISSStoreManager(VectorStoreManager):
             return
         now = time.time()
         for child in parent.iterdir():
-            if not child.is_dir() or not child.name.startswith((".save-", ".prev-")):
+            if not child.is_dir() or not child.name.startswith(".save-"):
                 continue
             if child.resolve() == self._persist_dir.resolve():
                 continue        # belt and braces: never the live directory
@@ -311,26 +268,8 @@ class FAISSStoreManager(VectorStoreManager):
                     os.fsync(fd)
                 finally:
                     os.close(fd)
-            # DIRECTORY SWAP, not two file renames. Publishing the two files
-            # independently meant a crash between them left index.faiss new beside
-            # index.pkl old - permanently. Swapping the directory means neither window
-            # leaves a mismatch: it leaves `faiss` ABSENT, with complete copies on both
-            # sides, which initialize() detects and repairs.
-            prev = self._persist_dir.parent / (
-                ".prev-%d-%s" % (os.getpid(), time.strftime("%Y%m%d%H%M%S")))
-            if self._persist_dir.exists():
-                os.replace(str(self._persist_dir), str(prev))
-            try:
-                os.replace(str(tmp), str(self._persist_dir))
-            except OSError:
-                # Could not publish - put the previous index back rather than leaving the
-                # live path empty. Re-raising after restoring is the honest outcome: the
-                # write failed and the caller must hear so, but not on a broken store.
-                if prev.exists() and not self._persist_dir.exists():
-                    os.replace(str(prev), str(self._persist_dir))
-                raise
-            tmp = None      # consumed by the rename; the finally block must not remove it
-            shutil.rmtree(prev, ignore_errors=True)
+            for name in names:
+                os.replace(str(tmp / name), str(self._persist_dir / name))
             if os.name == "posix":
                 # Flush the directory ENTRIES too, or the renames can be lost to power loss
                 # while the file contents survive. Not possible on Windows, where opening a
@@ -364,10 +303,7 @@ class FAISSStoreManager(VectorStoreManager):
                         "(%s). The new index IS on disk; only its durability across a power "
                         "loss is unguaranteed.", e)
         finally:
-            # `tmp` is None once the swap consumed it - removing it then would delete the
-            # freshly published live directory.
-            if tmp is not None:
-                shutil.rmtree(tmp, ignore_errors=True)
+            shutil.rmtree(tmp, ignore_errors=True)
 
     def persist(self) -> None:
         if self._store is not None:

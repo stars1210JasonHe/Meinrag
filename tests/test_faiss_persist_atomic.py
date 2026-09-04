@@ -20,6 +20,7 @@ that FAILS leaves the previous index intact".
 """
 import os
 import shutil
+import time
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -129,6 +130,86 @@ class TestPersistIsAtomic:
         assert not strays, "left temp directories behind: %r" % [p.name for p in strays]
 
 
+
+
+class TestInterruptedPublishIsRecoverable:
+    """A crash between the swap's two renames must leave a repairable state, not a broken one.
+
+    The old code published index.faiss and index.pkl with independent renames, so dying between
+    them left a PERMANENT mismatch - new .faiss beside old .pkl - which initialize() could not
+    detect because it only checked that index.faiss existed. These tests describe the states the
+    directory swap leaves instead, each of which holds complete data on both sides.
+    """
+
+    def _complete_dir(self, p, payload):
+        p.mkdir(parents=True, exist_ok=True)
+        (p / "index.faiss").write_bytes(payload)
+        (p / "index.pkl").write_bytes(payload + b"-PKL")
+        return p
+
+    def test_crash_after_first_rename_recovers_the_NEW_index(self, tmp_path):
+        """live dir absent, .save-* holds the fully written new index -> promote it."""
+        m = _manager(tmp_path)
+        shutil.rmtree(m._persist_dir)                       # the instant between the renames
+        self._complete_dir(m._persist_dir.parent / ".save-x", b"NEW")
+        self._complete_dir(m._persist_dir.parent / ".prev-x", b"OLD")
+        try:
+            m.initialize(MagicMock())
+        except Exception:
+            pass    # faiss cannot parse the stand-in payload; recovery placement is
+                    # what is under test, and it happens before any load
+        assert (m._persist_dir / "index.faiss").read_bytes() == b"NEW", (
+            "recovery must prefer the completed new index over the previous one")
+
+    def test_falls_back_to_the_PREVIOUS_index_when_the_new_one_is_incomplete(self, tmp_path):
+        m = _manager(tmp_path)
+        shutil.rmtree(m._persist_dir)
+        half = m._persist_dir.parent / ".save-y"
+        half.mkdir()
+        (half / "index.faiss").write_bytes(b"HALF")          # no .pkl -> not complete
+        self._complete_dir(m._persist_dir.parent / ".prev-y", b"OLD")
+        try:
+            m.initialize(MagicMock())
+        except Exception:
+            pass    # faiss cannot parse the stand-in payload; recovery placement is
+                    # what is under test, and it happens before any load
+        assert (m._persist_dir / "index.faiss").read_bytes() == b"OLD", (
+            "an incomplete .save- must not be promoted over a complete .prev-")
+
+    def test_recovery_runs_BEFORE_the_sweep(self, tmp_path):
+        """Ordering, and it is the whole ballgame.
+
+        The sweep deletes exactly the directories recovery reads. Sweeping first turns an
+        interrupted publish into permanent loss - which is what review found in the previous
+        revision. Aged past the gate so the sweep would certainly remove it if it ran first.
+        """
+        m = _manager(tmp_path)
+        shutil.rmtree(m._persist_dir)
+        d = self._complete_dir(m._persist_dir.parent / ".save-z", b"NEW")
+        from app.vectorstore.faiss_store import STALE_SAVE_DIR_SECONDS
+        old_t = time.time() - STALE_SAVE_DIR_SECONDS - 600
+        os.utime(d, (old_t, old_t))
+        try:
+            m.initialize(MagicMock())
+        except Exception:
+            pass    # faiss cannot parse the stand-in payload; recovery placement is
+                    # what is under test, and it happens before any load
+        assert (m._persist_dir / "index.faiss").read_bytes() == b"NEW", (
+            "the sweep ran before recovery and destroyed the only complete copy")
+
+    def test_a_NORMAL_boot_recovers_nothing(self, tmp_path):
+        """Negative half: recovery must be inert when the live index is present, or every
+        restart would start shuffling directories."""
+        m = _manager(tmp_path)
+        (m._persist_dir / "index.faiss").write_bytes(b"LIVE")
+        (m._persist_dir / "index.pkl").write_bytes(b"LIVE-PKL")
+        self._complete_dir(m._persist_dir.parent / ".prev-w", b"OLD")
+        try:
+            m.initialize(MagicMock())
+        except Exception:
+            pass                    # faiss cannot parse b"LIVE"; only the recovery decision matters
+        assert (m._persist_dir / "index.faiss").read_bytes() == b"LIVE", (
+            "recovery overwrote a live index that was present")
 
 
 class TestStaleSaveDirsAreSwept:
