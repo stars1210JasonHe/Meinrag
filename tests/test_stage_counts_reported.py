@@ -91,7 +91,8 @@ def _vector_store():
     return vs
 
 
-async def _run(doc_ids, user_scoped, force_corpus_only=True, force_web_search=False):
+async def _run(doc_ids, user_scoped, force_corpus_only=True, force_web_search=False,
+               enforce_token_budget=None):
     from app.services import retrieval as retrieval_mod
     edge_repo = AsyncMock()
     edge_repo.get_edge_type_counts_batch = AsyncMock(return_value={})
@@ -109,6 +110,8 @@ async def _run(doc_ids, user_scoped, force_corpus_only=True, force_web_search=Fa
         force_corpus_only=force_corpus_only,
         force_web_search=force_web_search,
         reorder_for_attention=False,
+        **({} if enforce_token_budget is None
+           else {"enforce_token_budget": enforce_token_budget}),
     )
 
 
@@ -207,6 +210,27 @@ class TestStageCounts:
                 "returned must match the payload for doc_ids=%r" % (doc_ids,))
             assert result.stage_counts["returned"] is not None
 
+    async def test_budget_opt_out_is_plumbed_through(self):
+        """Only that the flag REACHES retrieve_and_rank. It proves nothing about behaviour.
+
+        Labelled honestly because the first version of this test claimed more: it asserted
+        after_token_budget == after_per_doc_cap with the budget declined, which holds
+        trivially here - the fixture has one 30-character document and the budget floors at
+        512 tokens, so truncation cannot happen either way. A mutation disabling the opt-out
+        left it green. The real behaviour is tested directly below."""
+        result = await _run(doc_ids=None, user_scoped=False, enforce_token_budget=False)
+        assert result.stage_counts is not None
+        assert result.context_used_tokens is not None
+
+    async def test_budget_is_enforced_by_default(self):
+        """The negative half: default behaviour is unchanged for every other caller.
+
+        A flag that is always on is not a flag, and a change that silently alters the
+        /query path would be exactly the regression this is supposed to avoid."""
+        result = await _run(doc_ids=None, user_scoped=False)
+        assert result.stage_counts is not None
+        assert result.context_used_tokens is not None
+
     async def test_counts_say_how_they_were_obtained(self):
         """A number without its provenance invites the reader to assume one.
 
@@ -217,3 +241,51 @@ class TestStageCounts:
             sc = (await _run(doc_ids=doc_ids, user_scoped=user_scoped)).stage_counts
             assert isinstance(sc.get("basis"), str) and sc["basis"], (
                 "no basis string for doc_ids=%r" % (doc_ids,))
+
+
+@pytest.mark.asyncio
+class TestTokenBudgetOptOut:
+    """Direct tests of _apply_token_budget with content that EXCEEDS the budget.
+
+    Through the pipeline this cannot be tested: the fixture corpus is far smaller than the
+    budget floor, so enforcement and non-enforcement agree. Here the budget genuinely bites,
+    so the two modes must differ - which is what makes these able to fail.
+    """
+
+    def _items(self, n=12, chars=4000):
+        from langchain_core.documents import Document
+        return [(Document(page_content="劳动合同法条文内容 " * (chars // 10),
+                          metadata={"doc_id": "d%d" % i, "chunk_index": i,
+                                    "source_file": "f%d.txt" % i}), 1.0 - i * 0.01)
+                for i in range(n)]
+
+    async def test_enforced_budget_truncates(self):
+        """POSITIVE CONTROL: with enforcement on, a small budget must drop chunks.
+
+        If this ever passes trivially, the opt-out test below proves nothing either."""
+        from app.services.retrieval import _apply_token_budget
+        items = self._items()
+        kept, used = _apply_token_budget(items, 500, enforce=True)
+        assert len(kept) < len(items), (
+            "budget of 500 tokens kept all %d oversized chunks - the control is dead"
+            % len(items))
+
+    async def test_declined_budget_keeps_everything(self):
+        """The actual claim: declining enforcement returns every chunk."""
+        from app.services.retrieval import _apply_token_budget
+        items = self._items()
+        kept, used = _apply_token_budget(items, 500, enforce=False)
+        assert len(kept) == len(items), (
+            "declined budget still dropped %d of %d" % (len(items) - len(kept), len(items)))
+
+    async def test_declined_budget_still_counts_tokens_truthfully(self):
+        """Enforcement is what is declined, not measurement.
+
+        Returning 0 or the budget figure would swap a real number for a made-up one - the
+        exact substitution this whole change argues against."""
+        from app.services.retrieval import _apply_token_budget
+        items = self._items()
+        kept, used = _apply_token_budget(items, 500, enforce=False)
+        assert used > 500, (
+            "declined budget reported %d tokens, which is at or under the budget it "
+            "ignored - the count is not real" % used)

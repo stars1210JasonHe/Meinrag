@@ -1213,7 +1213,7 @@ def _apply_per_doc_cap(
 
 
 def _apply_token_budget(
-    retrieved: list[tuple], chunk_budget: int,
+    retrieved: list[tuple], chunk_budget: int, enforce: bool = True,
 ) -> tuple[list[tuple], int]:
     """Three-pass greedy fill — mandatory-aware, doc-diversity aware.
 
@@ -1227,6 +1227,11 @@ def _apply_token_budget(
     individually exceed 25% of budget (outliers) — but mandatory chunks are
     kept regardless of size.
     """
+    if not enforce:
+        # Measure without truncating. Returning a wrong token count here would swap a
+        # real number for a made-up one, which is precisely what the caller opted out
+        # of enforcement to avoid - the enforcement is what is declined, not the count.
+        return retrieved, sum(_count_tokens(d.page_content or "") for d, _ in retrieved)
     if chunk_budget <= 0:
         return [], 0
     max_single_chunk = chunk_budget // 4
@@ -1393,6 +1398,7 @@ async def retrieve_and_rank(
     source_truncate_chars: int | None = 500,
     ensure_coverage: bool = True,
     reorder_for_attention: bool = True,
+    enforce_token_budget: bool = True,
 ) -> RetrievalResult:
     """Full retrieval pipeline — single source of truth.
 
@@ -1404,6 +1410,15 @@ async def retrieve_and_rank(
     for ask-AI answer comprehensiveness; retrieve-only consumers (/search)
     don't need it and on large collection scopes it enumerates every member
     doc per query.
+
+    ``enforce_token_budget=False`` measures the context tokens but does not TRUNCATE
+    to them. Retrieve-only callers (/search) generate no answer, so budgeting their
+    response against this service's own model window - 60%% of it, minus
+    ``reserved_output_tokens`` held back for a reply that is never produced - trims an
+    agent's results to fit a model that is not the one reading them. That endpoint
+    documents ``top_k`` as the caller's token-discipline lever; this flag is what lets
+    the lever actually hold. The tokens are still COUNTED, so ``context_used_tokens``
+    stays true: what is skipped is the enforcement, not the measurement.
 
     ``reorder_for_attention=False`` skips the lost-in-the-middle U-shape
     placement (best first, SECOND-BEST LAST) — that layout optimizes LLM
@@ -1788,7 +1803,8 @@ async def retrieve_and_rank(
     chunk_budget, history_budget, total_input_budget = _compute_context_budget(
         question, chat_history, primary_type, settings,
     )
-    retrieved, tokens_used = _apply_token_budget(retrieved, chunk_budget)
+    retrieved, tokens_used = _apply_token_budget(
+        retrieved, chunk_budget, enforce=enforce_token_budget)
     stage_counts["after_token_budget"] = len(retrieved)
 
     # 16. Strategic placement — mitigate "lost in the middle"

@@ -552,6 +552,9 @@ async def search_documents(
             # retrieve-only: response order must be ranking order, not the
             # LLM-context U-shape placement (which buries #2 at the end)
             reorder_for_attention=False,
+            # This endpoint produces no answer, so it must not be trimmed to fit this
+            # service's model window. Same reasoning as the two opt-outs above.
+            enforce_token_budget=False,
         )
         return SearchResponse(
             results=result.sources,
