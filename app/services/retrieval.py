@@ -1772,7 +1772,15 @@ async def retrieve_and_rank(
             retrieved.sort(key=lambda x: x[1], reverse=True)
         _trace(settings, "rerank_final", retrieved)
 
-    stage_counts["after_rerank"] = len(retrieved)
+    # A stage that did not RUN reports None, never a number. Recording len(retrieved)
+    # here when reranking is disabled would be indistinguishable from a rerank pass that
+    # kept every candidate - the exact 'nothing dropped' vs 'never happened' conflation
+    # this field exists to remove. I originally captured it unconditionally and defended
+    # that as 'it correctly equals after_composite'; equalling the previous stage IS the
+    # ambiguity, and an independent review caught it.
+    stage_counts["after_rerank"] = len(retrieved) if settings.rerank_enabled else None
+    if not settings.rerank_enabled:
+        stage_counts["basis"] += "; rerank SKIPPED (rerank_enabled=false)"
 
     retrieved = _normalize_scores(retrieved, profile)
 
@@ -1805,7 +1813,11 @@ async def retrieve_and_rank(
     )
     retrieved, tokens_used = _apply_token_budget(
         retrieved, chunk_budget, enforce=enforce_token_budget)
-    stage_counts["after_token_budget"] = len(retrieved)
+    # Same rule. With enforcement declined this stage removes nothing by construction, so
+    # a number here would tell a caller the chunks fit a budget that was never applied.
+    stage_counts["after_token_budget"] = len(retrieved) if enforce_token_budget else None
+    if not enforce_token_budget:
+        stage_counts["basis"] += "; token budget NOT ENFORCED (measured only)"
 
     # 16. Strategic placement — mitigate "lost in the middle"
     # (Apply only to non-label chunks; labels stay at front for priority)

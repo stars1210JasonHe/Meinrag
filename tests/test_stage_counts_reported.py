@@ -139,6 +139,8 @@ class TestStageCounts:
         prev_name, prev = None, None
         for stage in STAGE_ORDER:
             val = sc[stage]
+            if val is None:      # stage did not run; it reports None, not a number
+                continue
             if prev is not None and stage not in may_grow:
                 assert val <= prev, (
                     "%s (%s) exceeds %s (%s) and is not allowed to grow"
@@ -230,6 +232,34 @@ class TestStageCounts:
         result = await _run(doc_ids=None, user_scoped=False)
         assert result.stage_counts is not None
         assert result.context_used_tokens is not None
+
+    async def test_skipped_stages_report_none_not_a_number(self):
+        """A stage that did not run must not look like one that ran and kept everything.
+
+        The fixture disables reranking (rerank_enabled=False), so after_rerank must be
+        None. With the budget also declined, after_token_budget must be None too, and the
+        basis string must say both. Found by independent review: reporting len(retrieved)
+        for a skipped stage reproduces, inside this field, the conflation the field was
+        added to remove."""
+        result = await _run(doc_ids=None, user_scoped=False, enforce_token_budget=False)
+        sc = result.stage_counts
+        assert sc["after_rerank"] is None, (
+            "reranking is off in this fixture; after_rerank must be None, got %r"
+            % (sc["after_rerank"],))
+        assert sc["after_token_budget"] is None, (
+            "budget enforcement was declined; after_token_budget must be None, got %r"
+            % (sc["after_token_budget"],))
+        assert "rerank SKIPPED" in sc["basis"] and "NOT ENFORCED" in sc["basis"], (
+            "basis must name what was skipped: %r" % sc["basis"])
+
+    async def test_stages_that_DID_run_still_report_numbers(self):
+        """The negative half. If every stage reported None this would be useless."""
+        result = await _run(doc_ids=None, user_scoped=False)
+        sc = result.stage_counts
+        assert isinstance(sc["after_composite"], int)
+        assert isinstance(sc["after_labels"], int)
+        assert isinstance(sc["after_per_doc_cap"], int)
+        assert isinstance(sc["returned"], int)
 
     async def test_counts_say_how_they_were_obtained(self):
         """A number without its provenance invites the reader to assume one.
