@@ -218,11 +218,34 @@ class FAISSStoreManager(VectorStoreManager):
                 # Flush the directory ENTRIES too, or the renames can be lost to power loss
                 # while the file contents survive. Not possible on Windows, where opening a
                 # directory is not permitted; production is a Linux container.
-                dfd = os.open(str(self._persist_dir), os.O_RDONLY)
+                #
+                # This runs AFTER both renames, so the new index is already published and the
+                # write has SUCCEEDED by the time we get here. Letting an fsync error escape
+                # would therefore report a failed write that actually landed, and callers act
+                # on that: add_documents() and update_document_metadata() would surface a 500
+                # and the upload flow would skip adding the registry row, leaving chunks in
+                # the index with no row pointing at them. A false failure here is worse than
+                # the durability gap it would be reporting.
+                #
+                # Some POSIX filesystems reject directory fsync outright (NFS/CIFS mounts and
+                # several non-Linux POSIX systems). Measured on the actual deploy volume
+                # 2026-09-04: Synology btrfs SUPPORTS it, so this path is a portability guard
+                # rather than a live bug here - but the ordering was wrong either way.
+                #
+                # Downgraded to a warning, NOT swallowed: what is lost is only the guarantee
+                # that the rename survives a power cut, and the log says so. The data itself
+                # is already in place.
                 try:
-                    os.fsync(dfd)
-                finally:
-                    os.close(dfd)
+                    dfd = os.open(str(self._persist_dir), os.O_RDONLY)
+                    try:
+                        os.fsync(dfd)
+                    finally:
+                        os.close(dfd)
+                except OSError as e:
+                    logger.warning(
+                        "index published, but the directory entry could not be flushed "
+                        "(%s). The new index IS on disk; only its durability across a power "
+                        "loss is unguaranteed.", e)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

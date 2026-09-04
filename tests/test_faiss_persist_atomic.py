@@ -20,6 +20,7 @@ that FAILS leaves the previous index intact".
 """
 import os
 import shutil
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -127,7 +128,67 @@ class TestPersistIsAtomic:
                   if p.is_dir() and p.name.startswith(".")]
         assert not strays, "left temp directories behind: %r" % [p.name for p in strays]
 
-    @pytest.mark.skipif(os.name != "posix", reason="directory fsync is POSIX-only")
+
+
+@pytest.mark.skipif(os.name != "posix",
+                    reason="the directory-flush block is POSIX-only; on Windows it does not "
+                           "execute at all, so these tests would pass without running the "
+                           "code under test -- verified: mutating the guard left them green")
+class TestDirectoryFsyncFailureDoesNotFailTheWrite:
+    """A filesystem that rejects directory fsync must not turn a successful publish into an
+    error. The fsync happens AFTER both renames, so by then the write has landed; raising
+    would make add_documents() and the upload flow treat a completed write as failed and skip
+    the registry row, leaving chunks nothing points at.
+
+    Found by independent review before deploy. Measured on the real target the same day:
+    Synology btrfs DOES support directory fsync, so this was a portability guard rather than
+    a live bug there - but the ordering was wrong regardless of filesystem.
+    """
+
+    def test_persist_survives_a_rejected_directory_fsync(self, tmp_path, monkeypatch):
+        m = _manager(tmp_path)
+        m._store = _FakeStore(b"PAYLOAD-V1")
+        real = os.fsync
+
+        def picky(fd):
+            # reject only DIRECTORY fsync, exactly as an unsupporting filesystem would
+            try:
+                if os.fstat(fd).st_mode & 0o040000:
+                    raise OSError(22, "Invalid argument")
+            except OSError as e:
+                if e.errno == 22:
+                    raise
+            return real(fd)
+
+        monkeypatch.setattr(os, "fsync", picky)
+        m.persist()          # must NOT raise
+        assert (m._persist_dir / "index.faiss").read_bytes() == b"PAYLOAD-V1", (
+            "the index must still be published even when the directory flush is refused")
+
+    def test_a_DATA_fsync_failure_still_fails_loudly(self, tmp_path, monkeypatch):
+        """Negative half. Only the post-publish directory flush is forgiven. A failure while
+        flushing the FILE happens BEFORE anything is published, so it must still raise -
+        otherwise this fix would have swallowed real write errors."""
+        m = _manager(tmp_path)
+        m._store = _FakeStore(b"PAYLOAD-V1")
+        real = os.fsync
+
+        def fail_files(fd):
+            if not (os.fstat(fd).st_mode & 0o040000):
+                raise OSError(5, "Input/output error")
+            return real(fd)
+
+        monkeypatch.setattr(os, "fsync", fail_files)
+        with pytest.raises(OSError):
+            m.persist()
+
+
+class TestDirectoryEntryIsFlushed:
+    """Kept separate from TestPersistIsAtomic so the Linux-only skip does not read as
+    if the atomicity tests themselves were platform-conditional. They are not."""
+
+    @pytest.mark.skipif(not sys.platform.startswith("linux"),
+                        reason="this test reads /proc/self/fd, which is Linux-only")
     def test_directory_entry_is_flushed_on_posix(self, tmp_path):
         """The rename must survive power loss, which needs the DIRECTORY fsynced too.
 
