@@ -165,6 +165,21 @@ class TestStageCounts:
             assert result.stage_counts is not None, (
                 "stage_counts absent for doc_ids=%r user_scoped=%r" % (doc_ids, user_scoped))
 
+    async def test_returned_is_never_null_when_the_payload_is_countable(self):
+        """The returned count describes the response body, so it is knowable on EVERY path.
+
+        Found by re-reading my own diff: the web-search early return handed back
+        sources=[] while reporting returned=None. A caller would see zero results beside
+        a null count -- the same conflation of "zero" and "unknown" this whole field
+        exists to prevent, reproduced inside it. Stages that genuinely did not run stay
+        None; the returned count does not, because the response itself demonstrates it.
+        """
+        for doc_ids, user_scoped in ((None, False), ([], True)):
+            result = await _run(doc_ids=doc_ids, user_scoped=user_scoped)
+            assert result.stage_counts["returned"] == len(result.sources), (
+                "returned must match the payload for doc_ids=%r" % (doc_ids,))
+            assert result.stage_counts["returned"] is not None
+
     async def test_counts_say_how_they_were_obtained(self):
         """A number without its provenance invites the reader to assume one.
 

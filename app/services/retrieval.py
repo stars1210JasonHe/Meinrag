@@ -258,15 +258,21 @@ def _zero_stage_counts() -> dict:
     return d
 
 
-def _unknown_stage_counts(reason: str) -> dict:
-    """This path returned before the ranking stages ran, so nothing was counted.
+def _unknown_stage_counts(reason: str, returned: int = 0) -> dict:
+    """This path returned before the ranking stages ran, so they were never counted.
 
-    Reporting 0 would be false and omitting the field would be worse: an absent
-    marker gets read as 'nothing was dropped'. The user's constraint is that the
-    field only ever makes POSITIVE assertions and that silence is never mistaken
-    for a clean result, so this says explicitly that it did not measure."""
+    Reporting 0 for a stage that did not run would be false, and omitting the field
+    would be worse: an absent marker gets read as 'nothing was dropped'. So the
+    pipeline stages say None and `basis` says explicitly that they were not measured.
+
+    `returned` is the exception and is NOT None: this path hands back a known number
+    of sources (zero), and reporting null for a count the response itself demonstrates
+    would be the same conflation of 'zero' and 'unknown' that this field exists to
+    prevent -- the mistake that had to be fixed once already, one layer up."""
     d = {s: None for s in STAGE_ORDER}
-    d["basis"] = "not measured: returned before the ranking stages ran (%s)" % reason
+    d["returned"] = returned
+    d["basis"] = ("not measured: returned before the ranking stages ran (%s); "
+                  "'returned' is known and is not null" % reason)
     return d
 
 
