@@ -373,6 +373,24 @@ class TestCallerSizeLimit:
             "mandatory coverage chunks were dropped by the cap: %r" % sorted(kept_ids))
         assert len(kept) <= 4, "cap still bounds the total: %d" % len(kept)
 
+    def test_top_k_is_a_HARD_bound_even_when_mandatory_exceeds_it(self):
+        """Review round 10, P1: my first version let the mandatory set lift the cap.
+
+        A scope holding more documents than top_k cannot give every document a voice under any
+        arrangement, so the caller's explicit number wins over the coverage heuristic. Twelve
+        results for top_k=4 makes the documented maximum unusable for an agent sizing its own
+        context. Coverage still decides WHICH chunks fill the slots - it no longer decides how
+        many."""
+        from app.services.retrieval import _apply_caller_size_limit
+        items = self._items(12)
+        for d, _ in items[:8]:              # more mandatory chunks than top_k
+            d.metadata["_mandatory"] = True
+        kept = _apply_caller_size_limit(items, 4)
+        assert len(kept) == 4, (
+            "top_k=4 returned %d - the mandatory set lifted the bound" % len(kept))
+        assert all((d.metadata or {}).get("_mandatory") for d, _ in kept), (
+            "the slots should have gone to mandatory chunks first")
+
     def test_mandatory_chunks_do_not_disable_the_cap(self):
         """Negative half: keeping mandatory chunks must not turn the cap into a no-op for
         everything else."""

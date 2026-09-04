@@ -1239,8 +1239,15 @@ def _apply_caller_size_limit(retrieved: list[tuple], top_k: int) -> list[tuple]:
     if not mandatory:
         return retrieved[:top_k]
     rest = [t for t in retrieved if not (t[0].metadata or {}).get("_mandatory")]
-    room = max(0, top_k - len(mandatory))
-    kept = mandatory + rest[:room]
+    # top_k is a HARD bound, and mandatory chunks get priority INSIDE it - they do not lift it.
+    # My first version let the mandatory set exceed top_k, mirroring _apply_token_budget's
+    # "selected docs must have a voice". Review pushed back and is right: when a scope holds
+    # more documents than top_k, no arrangement gives all of them a voice, and the caller's
+    # explicit number should win over a heuristic. Twelve results for top_k=4 makes the
+    # documented maximum unusable, and an agent sizing its own context cannot absorb that.
+    # Coverage still wins the CHOICE of which chunks fill the slots; it no longer wins the
+    # count. The reduction is visible in after_top_k_cap either way.
+    kept = (mandatory + rest)[:top_k] if len(mandatory) >= top_k else            mandatory + rest[:max(0, top_k - len(mandatory))]
     # Restore the caller-visible ordering rather than emitting mandatory-first.
     order = {id(t[0]): i for i, t in enumerate(retrieved)}
     return sorted(kept, key=lambda t: order[id(t[0])])
@@ -1794,6 +1801,7 @@ async def retrieve_and_rank(
     # Initialised before the branch: when reranking is disabled the call below never
     # happens, and the stage-count line further down reads this unconditionally.
     _rerank_ran = False
+    _n_after_rerank = 0
     if settings.rerank_enabled:
         # Pass top_k so rerank doesn't throttle multi-doc queries.
         # For multi-doc scope: ensure at least ~3 chunks per selected doc so the
@@ -1812,6 +1820,12 @@ async def retrieve_and_rank(
         retrieved, _rerank_ran = await _rerank_results(
             retrieved, question, settings, llm, top_n=effective_top_n,
         )
+        # Captured HERE, before the mandatory-restore loop below mutates `retrieved`.
+        # Recording it afterwards reports the post-restore length and hides the reduction the
+        # reranker actually made - if rerank trims 10 to 4 and three mandatory backfills are
+        # reinserted, the field would say 7 and conceal both numbers. Found by review; it is
+        # this field's own purpose failing on itself for the third time.
+        _n_after_rerank = len(retrieved)
 
         # Re-insert any mandatory chunks the reranker dropped.
         post_keys = {
@@ -1842,7 +1856,7 @@ async def retrieve_and_rank(
     # and returns the input list, so an enabled-but-broken reranker (missing model, provider
     # error, OOM) would otherwise be reported as "ran and kept every candidate" - the exact
     # confusion this field exists to remove, in its own failure mode. Found by review.
-    stage_counts["after_rerank"] = len(retrieved) if _rerank_ran else None
+    stage_counts["after_rerank"] = _n_after_rerank if _rerank_ran else None
     if not settings.rerank_enabled:
         stage_counts["basis"] += "; rerank SKIPPED (rerank_enabled=false)"
     elif not _rerank_ran:
