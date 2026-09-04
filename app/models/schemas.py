@@ -173,6 +173,10 @@ class StageCounts(BaseModel):
     after_labels: int | None
     after_per_doc_cap: int | None
     after_token_budget: int | None
+    # Applied only when the caller declined the token budget: that opt-out removed the
+    # last size limiter, and stages above deliberately exceed top_k (per-doc cap floors
+    # at one chunk per document). None when the token budget ran instead.
+    after_top_k_cap: int | None
     returned: int
     basis: str
 

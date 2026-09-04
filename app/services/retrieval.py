@@ -248,7 +248,8 @@ def _scale_query_sim(doc, factor: float) -> None:
 
 
 STAGE_ORDER = ("after_composite", "after_rerank", "after_labels",
-               "after_per_doc_cap", "after_token_budget", "returned")
+               "after_per_doc_cap", "after_token_budget", "after_top_k_cap",
+               "returned")
 
 
 def _zero_stage_counts() -> dict:
@@ -1189,6 +1190,18 @@ def _ensure_per_doc_coverage(
     return result
 
 
+def _apply_caller_size_limit(retrieved: list[tuple], top_k: int) -> list[tuple]:
+    """The CALLER's size bound, used when the model-window token budget was declined.
+
+    A named function rather than an inline slice for one reason: an inline slice could not
+    be tested. The integration fixture in tests/test_stage_counts_reported.py holds too few
+    documents for any stage to exceed top_k, so a mutation DELETING the cap left the entire
+    suite green - the test asserted "at most top_k" on a path that could never produce more.
+    Extracted so the guarantee has somewhere to be tested that can actually fail.
+    """
+    return retrieved[:top_k]
+
+
 def _apply_per_doc_cap(
     retrieved: list[tuple], n_docs_in_scope: int, top_k: int,
 ) -> list[tuple]:
@@ -1811,13 +1824,36 @@ async def retrieve_and_rank(
     chunk_budget, history_budget, total_input_budget = _compute_context_budget(
         question, chat_history, primary_type, settings,
     )
+    # 15a. Declining the generation-end budget must not mean declining EVERY bound.
+    # The budget was the last size limiter on this path, and stages above it can exceed
+    # top_k on purpose: the reranker keeps max(top_k, n_docs*3) for multi-doc queries,
+    # and the per-doc cap floors at ONE chunk per document, so any scope holding more
+    # documents than top_k comes out larger than top_k. Measured: 12 documents with
+    # top_k=4 yields 12 chunks. SearchRequest.top_k is documented as the maximum to
+    # return, so the opt-out swaps the model-window limiter for the CALLER's own -- it
+    # does not remove limiting. Found by independent review; I had removed the only
+    # downstream bound while knowing the label stage can ADD chunks, which is a fact I
+    # had written into this file myself.
+    #
+    # Before the budget call, not after, so tokens_used describes the list actually
+    # returned rather than chunks the caller never receives.
+    if not enforce_token_budget:
+        _before_cap = len(retrieved)
+        retrieved = _apply_caller_size_limit(retrieved, top_k)
+        stage_counts["after_top_k_cap"] = len(retrieved)
+    else:
+        # A stage that did not run reports None, never a number equal to its predecessor.
+        stage_counts["after_top_k_cap"] = None
+
     retrieved, tokens_used = _apply_token_budget(
         retrieved, chunk_budget, enforce=enforce_token_budget)
     # Same rule. With enforcement declined this stage removes nothing by construction, so
     # a number here would tell a caller the chunks fit a budget that was never applied.
     stage_counts["after_token_budget"] = len(retrieved) if enforce_token_budget else None
     if not enforce_token_budget:
-        stage_counts["basis"] += "; token budget NOT ENFORCED (measured only)"
+        stage_counts["basis"] += (
+            "; token budget NOT ENFORCED (measured only); hard top_k=%d cap applied "
+            "instead (%d -> %d)" % (top_k, _before_cap, len(retrieved)))
 
     # 16. Strategic placement — mitigate "lost in the middle"
     # (Apply only to non-label chunks; labels stay at front for priority)

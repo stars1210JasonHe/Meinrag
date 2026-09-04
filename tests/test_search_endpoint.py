@@ -47,6 +47,7 @@ class TestSearchModels:
             # testing what it tests - the assertions below are unchanged.
             stage_counts={"after_composite": 1, "after_rerank": 1, "after_labels": 1,
                           "after_per_doc_cap": 1, "after_token_budget": 1,
+                          "after_top_k_cap": None,
                           "returned": 1, "basis": "test fixture"},
         )
         assert not hasattr(resp, "answer")

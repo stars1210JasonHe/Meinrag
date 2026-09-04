@@ -80,19 +80,27 @@ def _settings():
     return s
 
 
-def _vector_store():
+def _vector_store(n_docs=1):
+    """n_docs > 1 exists because a one-document fixture cannot exercise a size cap.
+
+    With a single document every "did we return at most top_k" assertion holds no matter
+    what the code does, which is how a mutation that DELETED the top_k cap left the whole
+    suite green. The per-doc cap floors at max(1, top_k // n_docs) chunks per document, so
+    a scope with more documents than top_k is the only shape where the cap can be seen.
+    """
     vs = MagicMock()
-    doc = Document(page_content="a corpus chunk about liability",
-                   metadata={"doc_id": "doc-1", "chunk_index": 0,
-                             "source_file": "a.txt"})
-    vs.similarity_search_with_scores = MagicMock(return_value=[(doc, 0.9)])
+    docs = [(Document(page_content="a corpus chunk about liability %d" % i,
+                      metadata={"doc_id": "doc-%d" % i, "chunk_index": 0,
+                                "source_file": "a%d.txt" % i}), 0.9 - i * 0.01)
+            for i in range(n_docs)]
+    vs.similarity_search_with_scores = MagicMock(return_value=docs)
     vs.get_all_documents = MagicMock(return_value=[])
     vs.get_chunks_by_doc = MagicMock(return_value=[])
     return vs
 
 
 async def _run(doc_ids, user_scoped, force_corpus_only=True, force_web_search=False,
-               enforce_token_budget=None):
+               enforce_token_budget=None, n_docs=1):
     from app.services import retrieval as retrieval_mod
     edge_repo = AsyncMock()
     edge_repo.get_edge_type_counts_batch = AsyncMock(return_value={})
@@ -103,7 +111,7 @@ async def _run(doc_ids, user_scoped, force_corpus_only=True, force_web_search=Fa
         doc_ids=doc_ids,
         user_scoped=user_scoped,
         llm=_StubLLM(),
-        vector_store=_vector_store(),
+        vector_store=_vector_store(n_docs),
         embeddings=MagicMock(),
         edge_repo=edge_repo,
         settings=_settings(),
@@ -261,6 +269,35 @@ class TestStageCounts:
         assert isinstance(sc["after_per_doc_cap"], int)
         assert isinstance(sc["returned"], int)
 
+
+    async def test_declining_the_budget_does_not_remove_the_top_k_bound(self):
+        """P1 from independent review: the opt-out removed the last size limiter.
+
+        Measured on the previous revision: 12 documents in scope with top_k=4 returned 12
+        chunks, because the per-doc cap floors at one chunk per document and nothing after
+        it bounded the list once the budget was declined. SearchRequest.top_k is documented
+        as the maximum to return."""
+        result = await _run(doc_ids=None, user_scoped=False, enforce_token_budget=False,
+                            n_docs=12)          # 12 docs, top_k=4 -> per-doc cap gives 1 each
+        sc = result.stage_counts
+        assert sc["after_top_k_cap"] is not None, (
+            "the cap stage must REPORT itself when it runs, not trim silently: %r" % sc)
+        # NOTE, so nobody reads more into this test than it proves: with this fixture the
+        # per-doc cap already returns exactly top_k (an earlier [:top_k] in the scoring path
+        # bounds it), so the invariant below would hold even with the cap DELETED. Verified:
+        # that mutation leaves this file green. The overrun needs the label/backfill stages,
+        # which this fixture disables. The cap itself is proved in TestCallerSizeLimit below,
+        # which CAN fail. This test covers only that the stage reports itself.
+        assert len(result.sources) <= 4, (          # _run passes top_k=4, line 102
+            "returned %d sources for top_k=4" % len(result.sources))
+
+    async def test_the_cap_stage_is_None_when_the_budget_DID_run(self):
+        """Negative half. The cap is the budget's substitute, not an extra always-on trim -
+        reporting a number here on the /query path would say a stage ran that did not."""
+        result = await _run(doc_ids=None, user_scoped=False)
+        assert result.stage_counts["after_top_k_cap"] is None, (
+            "budget enforced, so the top_k cap did not run and must report None")
+
     async def test_counts_say_how_they_were_obtained(self):
         """A number without its provenance invites the reader to assume one.
 
@@ -271,6 +308,41 @@ class TestStageCounts:
             sc = (await _run(doc_ids=doc_ids, user_scoped=user_scoped)).stage_counts
             assert isinstance(sc.get("basis"), str) and sc["basis"], (
                 "no basis string for doc_ids=%r" % (doc_ids,))
+
+
+class TestCallerSizeLimit:
+    """The cap, tested where it CAN fail.
+
+    Measured on the revision before the fix: 12 documents in scope with top_k=4 came out of
+    _apply_per_doc_cap as 12 chunks, because that cap floors at max(1, top_k // n_docs) = 1
+    chunk per document. With the token budget declined nothing bounded that list, so /search
+    returned 12 results for a request that asked for 4.
+    """
+
+    def _items(self, n):
+        from langchain_core.documents import Document
+        return [(Document(page_content="c%d" % i,
+                          metadata={"doc_id": "d%d" % i, "chunk_index": 0}), 1.0 - i * 0.01)
+                for i in range(n)]
+
+    def test_the_overrun_this_guards_against_is_REAL(self):
+        """POSITIVE CONTROL. If the per-doc cap ever stops exceeding top_k on its own, the
+        test below is guarding nothing and should be deleted rather than left passing."""
+        from app.services.retrieval import _apply_per_doc_cap
+        out = _apply_per_doc_cap(self._items(12), n_docs_in_scope=12, top_k=4)
+        assert len(out) > 4, (
+            "per-doc cap returned %d for top_k=4; the overrun this cap exists to bound no "
+            "longer happens, so the guard is now untested by construction" % len(out))
+
+    def test_the_cap_bounds_it(self):
+        from app.services.retrieval import _apply_caller_size_limit, _apply_per_doc_cap
+        over = _apply_per_doc_cap(self._items(12), n_docs_in_scope=12, top_k=4)
+        assert len(_apply_caller_size_limit(over, 4)) == 4
+
+    def test_the_cap_does_not_pad(self):
+        """Negative half: a limiter that also GREW a short list would pass the test above."""
+        from app.services.retrieval import _apply_caller_size_limit
+        assert len(_apply_caller_size_limit(self._items(2), 4)) == 2
 
 
 @pytest.mark.asyncio
@@ -347,6 +419,7 @@ class TestSearchResponseContract:
         from app.models.schemas import SearchResponse
         r = SearchResponse(results=[], stage_counts={"after_composite": 0, "after_rerank": 0, "after_labels": 0,
                           "after_per_doc_cap": 0, "after_token_budget": 0,
+                          "after_top_k_cap": 0,
                           "returned": 0, "basis": "test"})
         assert r.stage_counts.returned == 0
 
@@ -399,6 +472,7 @@ class TestSearchResponseContract:
         r = SearchResponse(results=[], stage_counts={
             "after_composite": 12, "after_rerank": None, "after_labels": 12,
             "after_per_doc_cap": 8, "after_token_budget": None,
+            "after_top_k_cap": 8,
             "returned": 8, "basis": "measured"})
         assert r.stage_counts.returned == 8
         assert r.stage_counts.after_rerank is None, "None must survive as None, not become 0"
