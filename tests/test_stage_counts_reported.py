@@ -345,5 +345,60 @@ class TestSearchResponseContract:
     def test_search_response_still_builds_when_given_one(self):
         """Negative half: required must not mean unconstructable."""
         from app.models.schemas import SearchResponse
-        r = SearchResponse(results=[], stage_counts={"returned": 0, "basis": "test"})
-        assert r.stage_counts["returned"] == 0
+        r = SearchResponse(results=[], stage_counts={"after_composite": 0, "after_rerank": 0, "after_labels": 0,
+                          "after_per_doc_cap": 0, "after_token_budget": 0,
+                          "returned": 0, "basis": "test"})
+        assert r.stage_counts.returned == 0
+
+    def test_a_partial_or_junk_stage_counts_is_REJECTED(self):
+        """The point of typing it. Each of these was ACCEPTED before this change.
+
+        Measured on the previous revision, not assumed: {} , a string where a count belongs,
+        and a dict of unrelated keys all passed validation on a field documented as a
+        required guarantee. If this test ever goes green with the model loosened back to
+        `dict`, the guarantee is gone again and nothing else in the suite would say so."""
+        import pytest as _pytest
+        from pydantic import ValidationError
+        from app.models.schemas import SearchResponse
+        for bad in ({},
+                    {"after_composite": "twelve"},
+                    {"nonsense": 1},
+                    {"returned": 0, "basis": "missing every stage"}):
+            with _pytest.raises(ValidationError):
+                SearchResponse(results=[], stage_counts=bad)
+
+    def test_a_misspelled_stage_name_is_REJECTED_not_swallowed(self):
+        """extra=forbid. A permissive dict accepts this and loses the real key silently."""
+        import pytest as _pytest
+        from pydantic import ValidationError
+        from app.models.schemas import SearchResponse
+        with _pytest.raises(ValidationError):
+            SearchResponse(results=[], stage_counts={
+                "after_composite": 1, "after_rerank": 1, "after_labels": 1,
+                "after_per_doc_cap": 1, "after_tokn_budget": 1,      # misspelled
+                "returned": 1, "basis": "t"})
+
+    def test_the_schema_now_TELLS_a_client_the_keys(self):
+        """The actual complaint from review: an MCP client generating from OpenAPI saw
+        `additionalProperties: true` and could not know these keys existed."""
+        from app.models.schemas import SearchResponse
+        sch = SearchResponse.model_json_schema()
+        ref = sch["properties"]["stage_counts"]
+        assert ref.get("additionalProperties") is not True, (
+            "stage_counts is still an untyped object in the generated schema: %r" % ref)
+        defs = sch.get("$defs", {})
+        assert "StageCounts" in defs, "must resolve to a named schema, got %r" % ref
+        props = defs["StageCounts"]["properties"]
+        for k in ("after_composite", "after_rerank", "after_labels",
+                  "after_per_doc_cap", "after_token_budget", "returned", "basis"):
+            assert k in props, "generated schema does not mention %s" % k
+
+    def test_a_VALID_full_stage_counts_still_builds(self):
+        """Negative half. A model that rejected everything would pass all three above."""
+        from app.models.schemas import SearchResponse
+        r = SearchResponse(results=[], stage_counts={
+            "after_composite": 12, "after_rerank": None, "after_labels": 12,
+            "after_per_doc_cap": 8, "after_token_budget": None,
+            "returned": 8, "basis": "measured"})
+        assert r.stage_counts.returned == 8
+        assert r.stage_counts.after_rerank is None, "None must survive as None, not become 0"
