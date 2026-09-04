@@ -17,6 +17,11 @@ logger = logging.getLogger(__name__)
 # remove it. Must exceed the longest plausible save: the production index is ~2 GB
 # and writes in well under a minute. Generous on purpose - see _sweep_stale_save_dirs.
 STALE_SAVE_DIR_SECONDS = 3600
+# How quiet a .save-/.prev- directory must be before startup RECOVERY will adopt it. Short,
+# because recovery only runs when the live index is already missing and waiting means staying
+# down; long enough that a writer mid-swap is not mistaken for an abandoned one - the two
+# renames it must not interrupt are microseconds apart, so seconds is ample.
+RECOVERY_QUIET_SECONDS = 30
 
 
 def _try_gpu_index(store: FAISS) -> bool:
@@ -68,9 +73,17 @@ class FAISSStoreManager(VectorStoreManager):
         parent = self._persist_dir.parent
         if not parent.is_dir():
             return
+        now = time.time()
         for prefix, what in ((".save-", "the new index"), (".prev-", "the previous index")):
+            # AGE GATE ON RECOVERY, not only on the sweep. Under TASK_BACKEND=arq a worker can
+            # call initialize() while ANOTHER process sits between the two renames of
+            # _atomic_save - a window where `faiss` is absent BY DESIGN. Without this the
+            # worker reads that as an interrupted publish and moves the writer's still-live
+            # .save- into place; the writer's own rename then fails on an index that WAS
+            # published, surfacing as a spurious 500. Found by review.
             cands = sorted((d for d in parent.iterdir()
-                            if d.is_dir() and d.name.startswith(prefix) and _complete(d)),
+                            if d.is_dir() and d.name.startswith(prefix) and _complete(d)
+                            and now - d.stat().st_mtime >= RECOVERY_QUIET_SECONDS),
                            key=lambda d: d.stat().st_mtime, reverse=True)
             if not cands:
                 continue
@@ -352,8 +365,13 @@ class FAISSStoreManager(VectorStoreManager):
                 # Downgraded to a warning, NOT swallowed: what is lost is only the guarantee
                 # that the rename survives a power cut, and the log says so. The data itself
                 # is already in place.
+                # The PARENT, not the published directory. The renames changed entries IN
+                # the parent (`faiss` and `.prev-*` are names in it), so fsyncing the
+                # published directory flushes the wrong inode and the rename can still be
+                # lost to power loss - defeating the exact hardening this block exists for.
+                # Found by review.
                 try:
-                    dfd = os.open(str(self._persist_dir), os.O_RDONLY)
+                    dfd = os.open(str(self._persist_dir.parent), os.O_RDONLY)
                     try:
                         os.fsync(dfd)
                     finally:

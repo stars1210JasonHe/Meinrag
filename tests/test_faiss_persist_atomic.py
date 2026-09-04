@@ -141,6 +141,18 @@ class TestInterruptedPublishIsRecoverable:
     directory swap leaves instead, each of which holds complete data on both sides.
     """
 
+    def _age(self, p):
+        """Push a directory past RECOVERY_QUIET_SECONDS so recovery will consider it.
+
+        Without this a test creates a directory and immediately expects it adopted, which is
+        exactly the live-writer case recovery must REFUSE. Ageing it is what separates
+        "abandoned" from "someone is writing this right now".
+        """
+        from app.vectorstore.faiss_store import RECOVERY_QUIET_SECONDS
+        t = time.time() - RECOVERY_QUIET_SECONDS - 60
+        os.utime(p, (t, t))
+        return p
+
     def _complete_dir(self, p, payload):
         p.mkdir(parents=True, exist_ok=True)
         (p / "index.faiss").write_bytes(payload)
@@ -151,8 +163,11 @@ class TestInterruptedPublishIsRecoverable:
         """live dir absent, .save-* holds the fully written new index -> promote it."""
         m = _manager(tmp_path)
         shutil.rmtree(m._persist_dir)                       # the instant between the renames
-        self._complete_dir(m._persist_dir.parent / ".save-x", b"NEW")
-        self._complete_dir(m._persist_dir.parent / ".prev-x", b"OLD")
+        # Aged past RECOVERY_QUIET_SECONDS. Recovery deliberately ignores directories touched
+        # in the last few seconds: under arq another process may be mid-swap, and `faiss` is
+        # absent BY DESIGN during that window, so adopting its live .save- would steal it.
+        self._age(self._complete_dir(m._persist_dir.parent / ".save-x", b"NEW"))
+        self._age(self._complete_dir(m._persist_dir.parent / ".prev-x", b"OLD"))
         try:
             m.initialize(MagicMock())
         except Exception:
@@ -167,7 +182,8 @@ class TestInterruptedPublishIsRecoverable:
         half = m._persist_dir.parent / ".save-y"
         half.mkdir()
         (half / "index.faiss").write_bytes(b"HALF")          # no .pkl -> not complete
-        self._complete_dir(m._persist_dir.parent / ".prev-y", b"OLD")
+        self._age(half)
+        self._age(self._complete_dir(m._persist_dir.parent / ".prev-y", b"OLD"))
         try:
             m.initialize(MagicMock())
         except Exception:
@@ -196,6 +212,25 @@ class TestInterruptedPublishIsRecoverable:
                     # what is under test, and it happens before any load
         assert (m._persist_dir / "index.faiss").read_bytes() == b"NEW", (
             "the sweep ran before recovery and destroyed the only complete copy")
+
+    def test_a_FRESH_save_dir_is_NOT_adopted_by_recovery(self, tmp_path):
+        """The arq race, from the recovery side rather than the sweep side.
+
+        A worker calling initialize() while another process sits between the two renames sees
+        `faiss` absent - which is correct and momentary - and must NOT adopt the writer's live
+        .save-. Doing so makes the writer's own rename fail on an index that was in fact
+        published, surfacing as a spurious 500. Found by review; the sweep had an age gate and
+        recovery did not, and recovery runs first."""
+        m = _manager(tmp_path)
+        shutil.rmtree(m._persist_dir)
+        live = self._complete_dir(m._persist_dir.parent / ".save-live", b"ANOTHER-WRITERS")
+        # deliberately NOT aged - this is a directory someone may be writing right now
+        try:
+            m.initialize(MagicMock())
+        except Exception:
+            pass
+        assert live.exists(), "recovery stole a .save- dir that a live writer may still own"
+        assert (live / "index.faiss").read_bytes() == b"ANOTHER-WRITERS"
 
     def test_a_NORMAL_boot_recovers_nothing(self, tmp_path):
         """Negative half: recovery must be inert when the live index is present, or every
