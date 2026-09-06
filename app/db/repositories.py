@@ -566,15 +566,6 @@ class ChatSessionRepository:
                 )
                 await self._session.flush()
 
-    async def _cleanup_expired(self) -> None:
-        cutoff = datetime.now(timezone.utc).timestamp() - self._session_ttl
-        cutoff_dt = datetime.fromtimestamp(cutoff, tz=timezone.utc)
-        await self._session.execute(
-            delete(ChatSessionModel).where(
-                ChatSessionModel.last_access < cutoff_dt
-            )
-        )
-
 
 class EdgeRepository:
     """Async PostgreSQL-backed chunk edge (relationship) store."""

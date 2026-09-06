@@ -1053,6 +1053,32 @@ def _resolve_model_name(settings: Settings) -> str:
     return settings.openai_model
 
 
+def _trim_history_to_budget(chat_history, budget_tokens: int):
+    """Drop the OLDEST messages until the history fits ``budget_tokens``.
+
+    The budget was always computed and subtracted from the chunk budget, but nothing
+    ever applied it to the history itself, so a long session would have paid twice:
+    fewer chunks AND the whole history in the prompt. The newest message is always kept,
+    even when it alone exceeds the budget -- returning an empty history for a non-empty
+    session would silently turn a follow-up question into a cold one.
+    """
+    if not chat_history:
+        return chat_history
+    kept: list = []
+    used = 0
+    for msg in reversed(chat_history):
+        tokens = _count_tokens(getattr(msg, "content", None) or str(msg))
+        if kept and used + tokens > budget_tokens:
+            break
+        kept.append(msg)
+        used += tokens
+    kept.reverse()
+    if len(kept) < len(chat_history):
+        logger.info("History trimmed to budget: kept %d of %d messages (%d tokens <= %d)",
+                    len(kept), len(chat_history), used, budget_tokens)
+    return kept
+
+
 def _compute_context_budget(
     question: str,
     chat_history,
@@ -1534,6 +1560,7 @@ async def retrieve_and_rank(
         return RetrievalResult(
             sources=[],
             retrieved=[],
+            chat_history=chat_history,  # the routes read history from the result
             chunks_included=0,
             chunks_available=0,
             context_used_tokens=0,
@@ -1891,6 +1918,7 @@ async def retrieve_and_rank(
     chunk_budget, history_budget, total_input_budget = _compute_context_budget(
         question, chat_history, primary_type, settings,
     )
+    chat_history = _trim_history_to_budget(chat_history, history_budget)
     # 15a. Declining the generation-end budget must not mean declining EVERY bound.
     # The budget was the last size limiter on this path, and stages above it can exceed
     # top_k on purpose: the reranker keeps max(top_k, n_docs*3) for multi-doc queries,
