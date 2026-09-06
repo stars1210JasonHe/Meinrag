@@ -364,6 +364,13 @@ async def _doc_summary_fastpath(
     )
 
 
+def _effective_top_k(requested: int | None, settings: Settings) -> int:
+    """One resolution rule for every route. RETRIEVAL_TOP_K used to reach only /search
+    while the chat routes took the schema default (4) and the frontend sent 8 -- three
+    values that never met, so changing the setting changed nothing a user could see."""
+    return requested if requested is not None else settings.retrieval_top_k
+
+
 @router.post("/query", response_model=QueryResponse)
 async def query_documents(
     request: QueryRequest,
@@ -408,7 +415,7 @@ async def query_documents(
         # Single retrieval — one source of truth for both LLM context and frontend sources
         result = await retrieve_and_rank(
             question=request.question,
-            top_k=request.top_k,
+            top_k=_effective_top_k(request.top_k, settings),
             doc_ids=doc_ids,
             user_scoped=user_scoped,
             llm=llm,
@@ -443,6 +450,8 @@ async def query_documents(
             [doc for doc, _ in result.retrieved],
             doc_summaries=doc_summaries or None,
         )
+        # The history the budget was computed against is the history the model gets.
+        chat_history = result.chat_history
 
         # Build simple chain (no retriever — just prompt + LLM)
         if chat_history:
@@ -526,7 +535,7 @@ async def search_documents(
     retrieve_and_rank, so results are deanonymized.
     """
     doc_ids, user_scoped = await _resolve_doc_ids(request, settings, registry, current_user)
-    effective_top_k = request.top_k if request.top_k is not None else settings.retrieval_top_k
+    effective_top_k = _effective_top_k(request.top_k, settings)
 
     try:
         result = await retrieve_and_rank(
@@ -754,7 +763,7 @@ async def query_documents_stream(
     else:
         result = await retrieve_and_rank(
             question=request.question,
-            top_k=request.top_k,
+            top_k=_effective_top_k(request.top_k, settings),
             doc_ids=doc_ids,
             user_scoped=user_scoped,
             llm=llm,
@@ -854,6 +863,7 @@ async def query_documents_stream(
                 })
 
                 sources_data = [s.model_dump() for s in result.sources]
+                chat_history = result.chat_history  # trimmed to the history budget
 
                 if chat_history:
                     rag_chain = RAG_CHAT_PROMPT | llm | StrOutputParser()

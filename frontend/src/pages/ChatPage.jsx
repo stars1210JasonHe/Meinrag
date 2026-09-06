@@ -424,7 +424,7 @@ export default function ChatPage() {
         method: 'POST',
         headers: { 'X-User-Id': USER_ID, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          question, top_k: 8,
+          question,
           session_id: newSessionId,
           ...(scopeDocIds ? { doc_ids: scopeDocIds }
                 : scopeDocId ? { doc_ids: [scopeDocId] }
@@ -595,7 +595,7 @@ export default function ChatPage() {
       const body = source === 'ai'
         ? { question, session_id: sessionId }
         : {
-            question, top_k: 8,
+            question,
             session_id: sessionId,
             force_web_search: true,
           }

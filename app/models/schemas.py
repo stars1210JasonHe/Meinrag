@@ -83,7 +83,10 @@ class BackfillMetadataResponse(BaseModel):
 
 class QueryRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=2000)
-    top_k: int = Field(default=4, ge=1, le=20)
+    top_k: int | None = Field(
+        default=None, ge=1, le=20,
+        description="Chunks to retrieve; None -> settings.retrieval_top_k, the same fallback /search uses",
+    )
     doc_ids: list[str] | None = Field(default=None, description="Filter by document IDs")
     collection: str | None = Field(default=None, description="Filter by collection name")
     subtags: list[str] | None = Field(default=None, description="Filter by subtags (AND across values, case-insensitive substring match)")

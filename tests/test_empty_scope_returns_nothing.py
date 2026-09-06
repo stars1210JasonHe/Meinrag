@@ -92,7 +92,7 @@ def _vector_store():
     return vs
 
 
-async def _run(doc_ids, user_scoped, vs, llm):
+async def _run(doc_ids, user_scoped, vs, llm, chat_history=None):
     from app.services import retrieval as retrieval_mod
     edge_repo = AsyncMock()
     edge_repo.get_edge_type_counts_batch = AsyncMock(return_value={})
@@ -109,6 +109,7 @@ async def _run(doc_ids, user_scoped, vs, llm):
         settings=_settings(),
         force_corpus_only=True,
         reorder_for_attention=False,
+        chat_history=chat_history,
     )
 
 
@@ -147,6 +148,15 @@ class TestEmptyScope:
         result = await _run(doc_ids=[], user_scoped=True, vs=vs, llm=llm)
         assert result.context_budget_tokens is None
         assert result.context_mode is None
+
+    async def test_empty_scope_keeps_the_conversation_history(self):
+        """The chat routes take the history from the result (it is trimmed to the budget
+        on the normal path). An empty scope skips the budget, so it must hand the history
+        back untouched -- dropping it would turn a follow-up into a cold question."""
+        vs, llm = _vector_store(), _CountingLLM()
+        history = [AIMessage(content="earlier answer")]
+        result = await _run(doc_ids=[], user_scoped=True, vs=vs, llm=llm, chat_history=history)
+        assert result.chat_history == history
 
     async def test_empty_scope_never_searches_the_corpus(self):
         """Returning nothing is not enough — it must not have LOOKED either.

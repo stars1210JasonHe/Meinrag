@@ -324,8 +324,14 @@ def get_settings() -> Settings:
 
 # ---------------------------------------------------------------------------
 # Per-model context window lookup. Normalized (lowercased, provider-stripped).
-# Fallback = 8192 for unknown models (conservative).
+# Unknown model -> DEFAULT_MODEL_WINDOW, and it is LOGGED: the old silent 8,192
+# fallback shrank the fact-type chunk budget to one or two chunks the moment a model
+# name outside this table was configured, with no error anywhere (measured 2026-09-02).
 # ---------------------------------------------------------------------------
+import logging as _logging
+
+_log = _logging.getLogger(__name__)
+
 MODEL_WINDOWS: dict[str, int] = {
     # OpenAI
     "gpt-4o": 128_000,
@@ -349,7 +355,15 @@ MODEL_WINDOWS: dict[str, int] = {
     "claude-3-5-haiku": 200_000,
     "claude-haiku-4-5": 200_000,
     "claude-sonnet-4-5": 200_000,
-    "claude-opus-4-7": 200_000,
+    # 1M-context generation (Anthropic models reference): Opus 4.6+, Sonnet 4.6+, Sonnet 5.
+    "claude-sonnet-4-6": 1_000_000,
+    "claude-sonnet-5": 1_000_000,
+    "claude-opus-4-6": 1_000_000,
+    "claude-opus-4-7": 1_000_000,
+    "claude-opus-4-8": 1_000_000,
+    "claude-opus-5": 1_000_000,
+    "claude-fable-5": 1_000_000,
+    "claude-fable-5-1": 1_000_000,
     # Google
     "gemini-1.5-flash": 1_000_000,
     "gemini-1.5-pro": 2_000_000,
@@ -360,7 +374,10 @@ MODEL_WINDOWS: dict[str, int] = {
     "llama-3.3-70b": 128_000,
 }
 
-DEFAULT_MODEL_WINDOW = 8_192
+# 128k, not 8k: every mainstream model since 2024 has at least this. A too-small guess fails
+# SILENTLY (tiny context, no error); a too-large guess fails LOUDLY (the provider rejects the
+# request), and loud is the failure mode we want for a misconfigured model name.
+DEFAULT_MODEL_WINDOW = 128_000
 
 
 def lookup_model_window(model_name: str) -> int:
@@ -368,6 +385,7 @@ def lookup_model_window(model_name: str) -> int:
     ('openai/gpt-4o-mini' → 'gpt-4o-mini'), case, and partial matches.
     """
     if not model_name:
+        _log.warning("No LLM model name configured; assuming a %d-token window", DEFAULT_MODEL_WINDOW)
         return DEFAULT_MODEL_WINDOW
     norm = model_name.lower().strip()
     # Strip provider prefix
@@ -380,6 +398,11 @@ def lookup_model_window(model_name: str) -> int:
     for known, window in MODEL_WINDOWS.items():
         if norm.startswith(known) or known.startswith(norm):
             return window
+    _log.warning(
+        "Model %r is not in MODEL_WINDOWS; assuming a %d-token window. Add it to the table "
+        "in app/config.py so the context budget matches the real window.",
+        model_name, DEFAULT_MODEL_WINDOW,
+    )
     return DEFAULT_MODEL_WINDOW
 
 
@@ -391,7 +414,9 @@ QUERY_BUDGET_RATIOS: dict[str, float] = {
     "overview": 0.60,
     "reference": 0.40,
     "exploratory": 1.00,
-    "synthesis": 0.80,  # deliberately < 1.0; test showed top_k=10 regresses synthesis
+    # No "synthesis" entry: the classifier only emits the types listed in
+    # data/query_types.json, and "synthesis" is not one of them, so a ratio for it was
+    # dead configuration (tests/test_context_silent_failures.py keeps the two in step).
 }
 
 DEFAULT_QUERY_BUDGET_RATIO = 0.60
