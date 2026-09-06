@@ -25,7 +25,7 @@ class TestQueryRequest:
         """A2.1: Valid request with required fields only."""
         req = QueryRequest(question="What is RAG?")
         assert req.question == "What is RAG?"
-        assert req.top_k == 4  # default
+        assert req.top_k is None  # None -> settings.retrieval_top_k, resolved in the route (same as /search)
         assert req.doc_ids is None
         assert req.collection is None
         assert req.session_id is None
