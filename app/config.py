@@ -166,6 +166,12 @@ class Settings(BaseSettings):
     summary_provider: str = "openai"  # "openai" or "openrouter"
     summary_model: str = "gpt-4o-mini"
     summary_min_chars: int = 200
+    # Contextual chunk summaries: each chunk is summarised WITH the document's opening in
+    # front of it, so the summary names the document and the article/section the chunk
+    # belongs to. A bare one-line summary of a statute clause cannot say which statute it
+    # is, and that is exactly what a short query fails to retrieve (measured 2026-09-06).
+    summary_contextual: bool = True
+    summary_context_head_chars: int = 1200  # how much of the document opening to show
     summary_max_chunks_for_overview: int = 30  # stride-sampled across doc for doc-level overview
     scoring_profile: str = "general"
     scoring_recency_decay: float = 0.001  # unused until recency signal is wired into _composite_score
