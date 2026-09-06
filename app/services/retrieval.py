@@ -733,7 +733,8 @@ async def _rerank_results(
             original_score = score_map.get(key, 0.0)
             reranked.append((cdoc, original_score))
 
-        logger.info("Reranked %d → %d results (cross-encoder order; input score values preserved)", len(retrieved), len(reranked))
+        logger.info("Reranked %d → %d results (%s order; input score values preserved)",
+                    len(retrieved), len(reranked), settings.rerank_provider)
         # An empty compressor result is a fallback too, not a rerank that kept nothing.
         return (reranked, True) if reranked else (retrieved, False)
     except Exception as e:
