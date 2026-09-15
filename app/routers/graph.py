@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.config import Settings
 from app.dependencies import (
     get_settings, get_vector_store, get_current_user, get_llm,
-    get_registry, get_edge_repository,
+    get_registry, get_edge_repository, resolve_doc_scope, resolve_multi_doc_scope,
 )
 from app.db.repositories import DocumentRepository, EdgeRepository
 from app.models.schemas import GraphResponse, GraphNode, GraphEdge, MultiMindmapResponse
@@ -84,10 +84,16 @@ async def get_chunk_graph(
     ),
     vector_store: VectorStoreManager = Depends(get_vector_store),
     edge_repo: EdgeRepository = Depends(get_edge_repository),
+    settings: Settings = Depends(get_settings),
+    registry: DocumentRepository = Depends(get_registry),
     current_user: str = Depends(get_current_user),
 ):
-    """Get chunk-level graph for a document: all chunks as nodes, filtered edges."""
-    chunks = vector_store.get_chunks_by_doc(doc_id)
+    """Get chunk-level graph for a document: all chunks as nodes, filtered edges.
+
+    Scoped to the caller, mirroring the pattern in `get_mindmap_multi`.
+    """
+    _doc, allowed = await resolve_doc_scope(doc_id, registry, settings, current_user)
+    chunks = vector_store.get_chunks_by_doc(doc_id, allowed_doc_ids=allowed)
     if not chunks:
         return GraphResponse(nodes=[], edges=[])
 
@@ -175,8 +181,9 @@ async def get_chunk_graph_multi(
     # Build nodes — chunks from each authorised doc. Each node carries its
     # doc_id so the client can colour and filter without a separate lookup.
     nodes: list[GraphNode] = []
+    allowed_set = set(allowed_doc_ids)
     for doc_id in allowed_doc_ids:
-        chunks = vector_store.get_chunks_by_doc(doc_id)
+        chunks = vector_store.get_chunks_by_doc(doc_id, allowed_doc_ids=allowed_set)
         for chunk in chunks:
             m = chunk.metadata or {}
             nodes.append(GraphNode(
@@ -276,9 +283,20 @@ async def get_neighbors(
     hops: int = Query(default=1, ge=1, le=3),
     vector_store: VectorStoreManager = Depends(get_vector_store),
     edge_repo: EdgeRepository = Depends(get_edge_repository),
+    settings: Settings = Depends(get_settings),
+    registry: DocumentRepository = Depends(get_registry),
+    current_user: str = Depends(get_current_user),
 ):
-    """Get neighborhood subgraph for a specific chunk."""
-    all_chunks = vector_store.get_chunks_by_doc(doc_id)
+    """Get neighborhood subgraph for a specific chunk.
+
+    Scoped twice, because the traversal leaves the document it starts in: the
+    entry doc must belong to the caller (404/403), and the edges it follows can
+    land in other documents, which are resolved against the caller separately
+    below. Owning the starting point says nothing about what it points at.
+    """
+    _doc, entry_allowed = await resolve_doc_scope(
+        doc_id, registry, settings, current_user)
+    all_chunks = vector_store.get_chunks_by_doc(doc_id, allowed_doc_ids=entry_allowed)
     chunk_map = {c.metadata.get("chunk_index"): c for c in all_chunks}
 
     # BFS to collect neighbors
@@ -321,9 +339,20 @@ async def get_neighbors(
                     next_frontier.append(source_key)
         frontier = next_frontier
 
+    # The traversal has left the entry document by now, so resolve the whole
+    # set it reached against the caller in one roundtrip. Nodes outside it are
+    # dropped, matching how `get_mindmap_multi` treats docs the caller does not
+    # own. Resolved once here rather than per node: the loop below runs per
+    # visited chunk, and a per-node lookup would be both slower and easier to
+    # forget on a later edit.
+    reachable_allowed = await resolve_multi_doc_scope(
+        {d for d, _ in visited}, registry, settings, current_user)
+
     # Build nodes from visited set
     nodes = []
     for did, cidx in visited:
+        if reachable_allowed is not None and did not in reachable_allowed:
+            continue
         if did == doc_id and cidx in chunk_map:
             c = chunk_map[cidx]
             m = c.metadata
@@ -339,7 +368,7 @@ async def get_neighbors(
             ))
         else:
             # Cross-doc node — try to load
-            cross_chunks = vector_store.get_chunks_by_doc(did)
+            cross_chunks = vector_store.get_chunks_by_doc(did, allowed_doc_ids=reachable_allowed)
             for c in cross_chunks:
                 if c.metadata.get("chunk_index") == cidx:
                     m = c.metadata

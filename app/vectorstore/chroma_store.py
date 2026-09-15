@@ -55,7 +55,15 @@ class ChromaStoreManager(VectorStoreManager):
         results = self._store.similarity_search_with_score(query, k=k, filter=where)
         return [(doc, l2sq_to_score(dist)) for doc, dist in results]
 
-    def get_chunks_by_doc(self, doc_id: str, chunk_indices: list[int] | None = None) -> list[Document]:
+    def get_chunks_by_doc(
+        self,
+        doc_id: str,
+        chunk_indices: list[int] | None = None,
+        *,
+        allowed_doc_ids: set[str] | None,
+    ) -> list[Document]:
+        if self._scope_denies(doc_id, allowed_doc_ids):
+            return []
         results = self._store.get(
             where={"doc_id": doc_id},
             include=["documents", "metadatas"],

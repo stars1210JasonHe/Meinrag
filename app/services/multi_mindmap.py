@@ -269,7 +269,7 @@ async def build_multi_mindmap(
     doc_chunks: dict[str, list[Document]] = {}
     valid_indices_by_doc: dict[str, set[int]] = {}
     for doc_id in sorted_ids:
-        chunks = vector_store.get_chunks_by_doc(doc_id) or []
+        chunks = vector_store.get_chunks_by_doc(doc_id, allowed_doc_ids=None) or []
         doc_chunks[doc_id] = chunks
         valid_indices_by_doc[doc_id] = {
             (c.metadata or {}).get("chunk_index")

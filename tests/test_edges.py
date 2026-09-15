@@ -227,7 +227,7 @@ class TestGraphExpansion:
                 return []
 
         class MockStore:
-            def get_chunks_by_doc(self, doc_id):
+            def get_chunks_by_doc(self, doc_id, **_):
                 return [text_chunk, image_chunk]
 
         retrieved = [(text_chunk, 0.7)]
@@ -258,7 +258,7 @@ class TestGraphExpansion:
                 return []
 
         class MockStore:
-            def get_chunks_by_doc(self, doc_id):
+            def get_chunks_by_doc(self, doc_id, **_):
                 return [chunk]
 
         retrieved = [(chunk, 0.7)]
@@ -274,7 +274,7 @@ class TestGraphExpansion:
                 return []
 
         class MockStore:
-            def get_chunks_by_doc(self, doc_id):
+            def get_chunks_by_doc(self, doc_id, **_):
                 return []
 
         result = await _expand_via_edges([], MockEdgeRepo(), MockStore(), _general_scoring())
@@ -301,7 +301,7 @@ class TestGraphExpansion:
                 return []
 
         class MockStore:
-            def get_chunks_by_doc(self, doc_id):
+            def get_chunks_by_doc(self, doc_id, **_):
                 return [text_chunk] + targets
 
         retrieved = [(text_chunk, 0.7)]

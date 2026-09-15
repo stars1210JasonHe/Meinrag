@@ -118,10 +118,11 @@ class TestGraphNodes:
         assert resp.status_code == 422  # missing required param
 
     def test_nonexistent_doc(self, client):
+        # Unknown doc now answers 404 rather than an empty 200, matching the
+        # shape /documents/{doc_id}/mindmap has always had. The endpoint no
+        # longer reports on documents it has not resolved.
         resp = client.get("/graph/nodes?doc_id=nonexistent", headers={"X-User-Id": "testuser"})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["nodes"] == []
+        assert resp.status_code == 404
 
 
 class TestGraphNeighbors:

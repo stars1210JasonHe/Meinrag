@@ -135,7 +135,7 @@ async def build_doc_graph(
         vector_store: VectorStoreManager with get_chunks_by_doc()
         edge_repo: EdgeRepository with get_edges_in_doc()
     """
-    chunks = vector_store.get_chunks_by_doc(doc_id)
+    chunks = vector_store.get_chunks_by_doc(doc_id, allowed_doc_ids=None)
     edge_rows = await edge_repo.get_edges_in_doc(doc_id)
 
     nodes = [_chunk_to_node(c) for c in chunks]
@@ -303,7 +303,7 @@ async def build_mindmap_tree(
             tree=cached,
         )
 
-    chunks = vector_store.get_chunks_by_doc(doc_id)
+    chunks = vector_store.get_chunks_by_doc(doc_id, allowed_doc_ids=None)
     if not chunks:
         return MindmapTreeResponse(
             doc_id=doc_id,

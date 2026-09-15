@@ -44,7 +44,7 @@ class _FakeVectorStoreWithBrokenFilter:
     def __init__(self, chunks_by_doc: dict[str, list[Document]]):
         self._chunks = chunks_by_doc
 
-    def get_chunks_by_doc(self, doc_id: str, chunk_indices=None) -> list[Document]:
+    def get_chunks_by_doc(self, doc_id: str, chunk_indices=None, **_) -> list[Document]:
         chunks = self._chunks.get(doc_id, [])
         if chunk_indices is not None:
             chunks = [c for c in chunks if c.metadata.get("chunk_index") in chunk_indices]

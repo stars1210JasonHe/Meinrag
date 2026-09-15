@@ -15,6 +15,7 @@ from app.config import Settings
 from app.classification import PRIMARY_CATEGORIES, TAXONOMY
 from app.dependencies import (
     get_settings, get_vector_store, get_registry, get_llm, get_embeddings, get_current_user, get_db,
+    resolve_doc_scope,
     get_summary_store, get_edge_repository,
     get_anonymization_mapping_repo, get_anonymization_audit_repo,
     get_anonymization_engine,
@@ -868,10 +869,16 @@ async def get_document_chunks(
     doc_id: str,
     page: int | None = None,
     vector_store: VectorStoreManager = Depends(get_vector_store),
+    settings: Settings = Depends(get_settings),
+    registry: DocumentRepository = Depends(get_registry),
     current_user: str = Depends(get_current_user),
 ):
-    """Get chunks for a document, optionally filtered by page."""
-    chunks = vector_store.get_chunks_by_doc(doc_id)
+    """Get chunks for a document, optionally filtered by page.
+
+    Scoped to the caller: unknown doc -> 404, someone else's -> 403.
+    """
+    _doc, allowed = await resolve_doc_scope(doc_id, registry, settings, current_user)
+    chunks = vector_store.get_chunks_by_doc(doc_id, allowed_doc_ids=allowed)
 
     result = []
     for chunk in chunks:

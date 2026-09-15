@@ -274,7 +274,7 @@ class TestEndpoint:
     def test_happy_path_with_mock_llm(self, client, mock_llm, mock_vector_store):
         chunks_a = [_chunk("docA", i, f"summary A {i}") for i in range(3)]
         chunks_b = [_chunk("docB", i, f"summary B {i}") for i in range(2)]
-        mock_vector_store.get_chunks_by_doc.side_effect = lambda did: (
+        mock_vector_store.get_chunks_by_doc.side_effect = lambda did, **_: (
             chunks_a if did == "docA" else chunks_b if did == "docB" else []
         )
         mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=json.dumps({

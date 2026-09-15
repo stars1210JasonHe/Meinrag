@@ -146,7 +146,7 @@ class TestEmptyBatchStoreGuards:
         assert store.get_all_documents() == []
         # and the store still works normally afterwards
         store.add_documents(_docs("real", 2), doc_id="real")
-        assert len(store.get_chunks_by_doc("real")) == 2
+        assert len(store.get_chunks_by_doc("real", allowed_doc_ids=None)) == 2
 
     def test_faiss_single_chunk_doc_is_fine(self, tmp_path):
         """The other half of the production suspicion — single-chunk docs
@@ -154,7 +154,7 @@ class TestEmptyBatchStoreGuards:
         store = FAISSStoreManager(persist_directory=tmp_path)
         store.initialize(_HashEmbeddings())
         store.add_documents(_docs("solo", 1), doc_id="solo")
-        assert len(store.get_chunks_by_doc("solo")) == 1
+        assert len(store.get_chunks_by_doc("solo", allowed_doc_ids=None)) == 1
 
     def test_chroma_empty_add_is_noop(self):
         from app.vectorstore.chroma_store import ChromaStoreManager

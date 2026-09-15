@@ -11,7 +11,7 @@ def _doc(did, idx=0):
 
 
 class _FakeStore:
-    def get_chunks_by_doc(self, did):
+    def get_chunks_by_doc(self, did, **_):
         return [_doc(did)]
 
 

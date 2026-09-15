@@ -652,7 +652,7 @@ async def _expand_via_edges(
                 continue
             seen_keys.add(target_key)
 
-            target_chunks = vector_store.get_chunks_by_doc(edge["target_doc_id"])
+            target_chunks = vector_store.get_chunks_by_doc(edge["target_doc_id"], allowed_doc_ids=None)
             for tc in target_chunks:
                 if tc.metadata.get("chunk_index") == edge["target_chunk_index"]:
                     edge_sim = edge.get("score") or 1.0
@@ -780,7 +780,7 @@ def _link_nearby_visuals(
     # Find visual chunks on those pages
     extra_docs = []
     for did, pages in doc_pages.items():
-        chunks = vector_store.get_chunks_by_doc(did)
+        chunks = vector_store.get_chunks_by_doc(did, allowed_doc_ids=None)
         for chunk in chunks:
             meta = chunk.metadata
             ct = meta.get("chunk_type")
@@ -922,7 +922,7 @@ def _lookup_by_label(
     label_lower = label.lower()
     matches = []
     for did in doc_ids:
-        chunks = vector_store.get_chunks_by_doc(did)
+        chunks = vector_store.get_chunks_by_doc(did, allowed_doc_ids=None)
         for chunk in chunks:
             chunk_label = chunk.metadata.get("label", "")
             if chunk_label and chunk_label.lower() == label_lower:
@@ -946,7 +946,7 @@ def _lookup_by_label(
         return []
 
     for did in doc_ids:
-        chunks = vector_store.get_chunks_by_doc(did)
+        chunks = vector_store.get_chunks_by_doc(did, allowed_doc_ids=None)
         typed = sorted(
             [c for c in chunks if c.metadata.get("chunk_type") == chunk_type],
             key=lambda c: c.metadata.get("chunk_index", 0),
@@ -1213,7 +1213,7 @@ def _ensure_per_doc_coverage(
             if appended_from_pool + appended_from_search >= max_backfill:
                 break
             try:
-                chunks = vector_store.get_chunks_by_doc(did)
+                chunks = vector_store.get_chunks_by_doc(did, allowed_doc_ids=None)
                 if chunks:
                     representative = chunks[0]
                     representative.metadata["_mandatory"] = True
