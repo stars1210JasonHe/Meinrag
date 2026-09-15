@@ -1282,9 +1282,21 @@ def _apply_caller_size_limit(retrieved: list[tuple], top_k: int) -> list[tuple]:
 
 def _apply_per_doc_cap(
     retrieved: list[tuple], n_docs_in_scope: int, top_k: int,
+    *, enabled: bool = True,
 ) -> list[tuple]:
     """When scope is multiple docs, cap chunks per doc to prevent one doc from
-    dominating. Preserves rank order within each doc."""
+    dominating. Preserves rank order within each doc.
+
+    `enabled` is keyword-only and defaults to True so every existing caller and
+    test keeps today's behaviour untouched. It is wired to
+    `settings.per_doc_cap_enabled` at the call site (settings is not in scope
+    here). Turning it off is a MEASUREMENT: it removes the diversity guarantee
+    this function exists to provide, so the off state is for comparing recall
+    against result concentration — not a fix for "top_k asked for 50 and the
+    response carried 24", which is this cap working as designed.
+    """
+    if not enabled:
+        return retrieved
     if n_docs_in_scope <= 1:
         return retrieved
     cap = max(1, top_k // n_docs_in_scope)
@@ -1912,7 +1924,10 @@ async def retrieve_and_rank(
     # 14. Per-doc cap (multi-doc scope only)
     # Count unique docs in retrieved set
     unique_docs = len({doc.metadata.get("doc_id") for doc, _ in retrieved})
-    retrieved = _apply_per_doc_cap(retrieved, unique_docs, top_k)
+    retrieved = _apply_per_doc_cap(
+        retrieved, unique_docs, top_k,
+        enabled=getattr(settings, "per_doc_cap_enabled", True),
+    )
     stage_counts["after_per_doc_cap"] = len(retrieved)
 
     # 15. Token budget enforcement — greedy fill until budget reached

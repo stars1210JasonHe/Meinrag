@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import logging
 
@@ -127,6 +128,35 @@ async def _resolve_doc_ids(
         subtag_ids = subtag_ids or set()
         doc_ids = list(subtag_ids) if doc_ids is None else [d for d in doc_ids if d in subtag_ids]
         user_scoped = True
+
+    # Scope probe. Emitted UNCONDITIONALLY, from the single exit of the single
+    # place that resolves scope — the three call sites must not restate it, or
+    # the three copies drift while each still looks correct on its own.
+    #
+    # `none` / `0` / `N` are three DISTINGUISHABLE literals on purpose. Written
+    # as `if doc_ids:` this probe would be dead on arrival: the absence of a log
+    # line is simultaneously compatible with "not deployed", "no traffic" and
+    # "no scope passed" — which are exactly the three states it exists to tell
+    # apart.
+    #
+    # `actor` is a truncated hash because the denominator that matters is PEOPLE,
+    # not calls: a week of calls may come from a handful of users, and a tidy
+    # confidence interval over the call count would otherwise be used to answer
+    # a question whose real n is the user count. It only has to DISTINGUISH
+    # users, never to restore one, so 8 hex chars of a session-salted digest is
+    # the whole requirement — the raw user id is never written to the log.
+    _scope = "none" if doc_ids is None else str(len(doc_ids))
+    logger.info(
+        "Scope probe: scope=%s user_scoped=%s collection=%s subtags=%s actor=%s",
+        _scope,
+        user_scoped,
+        bool(getattr(request, "collection", None)),
+        len(getattr(request, "subtags", None) or []),
+        hashlib.sha256(
+            ("%s|%s" % (current_user,
+                        getattr(request, "session_id", None) or "-")).encode()
+        ).hexdigest()[:8],
+    )
 
     return doc_ids, user_scoped
 
