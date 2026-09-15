@@ -15,7 +15,7 @@ from app.config import Settings
 from app.classification import PRIMARY_CATEGORIES, TAXONOMY
 from app.dependencies import (
     get_settings, get_vector_store, get_registry, get_llm, get_embeddings, get_current_user, get_db,
-    resolve_doc_scope,
+    resolve_doc_scope, get_scope_collection,
     get_summary_store, get_edge_repository,
     get_anonymization_mapping_repo, get_anonymization_audit_repo,
     get_anonymization_engine,
@@ -872,12 +872,14 @@ async def get_document_chunks(
     settings: Settings = Depends(get_settings),
     registry: DocumentRepository = Depends(get_registry),
     current_user: str = Depends(get_current_user),
+    scope_collection: str | None = Depends(get_scope_collection),
 ):
     """Get chunks for a document, optionally filtered by page.
 
     Scoped to the caller: unknown doc -> 404, someone else's -> 403.
     """
-    _doc, allowed = await resolve_doc_scope(doc_id, registry, settings, current_user)
+    _doc, allowed = await resolve_doc_scope(
+        doc_id, registry, settings, current_user, scope_collection)
     chunks = vector_store.get_chunks_by_doc(doc_id, allowed_doc_ids=allowed)
 
     result = []
@@ -979,24 +981,18 @@ async def get_document_mindmap_tree(
     vector_store: VectorStoreManager = Depends(get_vector_store),
     llm: BaseChatModel = Depends(get_llm),
     current_user: str = Depends(get_current_user),
+    scope_collection: str | None = Depends(get_scope_collection),
 ) -> MindmapTreeResponse:
     """Return the hierarchical mind map (tree) for one doc.
 
     LLM-derived concept hierarchy, cached per-doc to disk. For the
     force-graph view of the same doc, see /documents/{id}/graph.
+
+    Resolved through the shared helper so this route honours a declared
+    collection scope on the same terms as every other content route.
     """
-    doc = await registry.get(doc_id)
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-
-    if (
-        settings.user_isolation != "none"
-        and doc.get("user_id") != current_user
-    ):
-        raise HTTPException(
-            status_code=403, detail="Not authorized for this document",
-        )
-
+    doc, _allowed = await resolve_doc_scope(
+        doc_id, registry, settings, current_user, scope_collection)
     return await build_mindmap_tree(doc_id, doc, vector_store, llm)
 
 

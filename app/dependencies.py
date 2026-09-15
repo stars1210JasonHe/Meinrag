@@ -119,11 +119,36 @@ def get_anonymization_engine(request: Request):
     return getattr(request.app.state, "anonymization_engine", None)
 
 
+def get_scope_collection(
+    x_scope_collection: str | None = Header(default=None),
+) -> str | None:
+    """The collection a caller declares it is confined to, if it declares one.
+
+    A backend cannot derive this from identity: a deployment can route many
+    callers through a single account, and then identity distinguishes nothing.
+    So the caller supplies the fact and the backend supplies the decision —
+    which is not the same as letting the caller do the filtering. What a caller
+    can assert is only ever a NARROWING; it never widens what it may read.
+
+    For a proxy, the useful property is that this is set from its own
+    configuration rather than from anything its tool-calling side can reach.
+    """
+    return x_scope_collection or None
+
+
+def _collection_denies(doc: dict, scope_collection: str | None) -> bool:
+    """True when a declared scope excludes this document."""
+    if scope_collection is None:
+        return False
+    return scope_collection not in (doc.get("collections") or [])
+
+
 async def resolve_doc_scope(
     doc_id: str,
     registry,
     settings,
     current_user: str,
+    scope_collection: str | None = None,
 ) -> tuple[dict, set[str] | None]:
     """Resolve one doc_id to (document, allowed_doc_ids) for the calling user.
 
@@ -140,10 +165,26 @@ async def resolve_doc_scope(
     """
     from fastapi import HTTPException
 
+    # `is True`, not truthiness: a fail-closed switch must fire on an explicit
+    # True and on nothing else. Anything that merely evaluates truthy — a config
+    # object that answers every attribute, the string "false" from an env file
+    # that skipped coercion — would otherwise turn the strict posture on by
+    # accident, which is the one direction a safety switch must never drift in.
+    if scope_collection is None and getattr(
+            settings, "scope_collection_required", False) is True:
+        raise HTTPException(
+            status_code=403,
+            detail="This deployment requires a declared collection scope")
     doc = await registry.get(doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     if settings.user_isolation != "none" and doc.get("user_id") != current_user:
+        raise HTTPException(status_code=403, detail="Not authorized for this document")
+    if _collection_denies(doc, scope_collection):
+        # Same status as the ownership refusal on purpose: the two are one
+        # question from the caller's side — "may I read this document" — and
+        # answering them differently would tell a caller which of the two it
+        # failed, i.e. that the document exists outside its scope.
         raise HTTPException(status_code=403, detail="Not authorized for this document")
     allowed = None if settings.user_isolation == "none" else {doc_id}
     return doc, allowed
@@ -154,6 +195,7 @@ async def resolve_multi_doc_scope(
     registry,
     settings,
     current_user: str,
+    scope_collection: str | None = None,
 ) -> set[str] | None:
     """Allow-list for a request that may reach across several documents.
 
@@ -161,7 +203,9 @@ async def resolve_multi_doc_scope(
     others: the entry document being owned says nothing about the ones it points
     at, so the set — not a single id — is what the store must be given.
     """
-    if settings.user_isolation == "none":
+    if settings.user_isolation == "none" and scope_collection is None:
         return None
-    owned = await registry.get_many_by_ids(list(doc_ids), user_id=current_user)
-    return {d["doc_id"] for d in owned}
+    user_filter = current_user if settings.user_isolation != "none" else None
+    owned = await registry.get_many_by_ids(list(doc_ids), user_id=user_filter)
+    return {d["doc_id"] for d in owned
+            if not _collection_denies(d, scope_collection)}

@@ -126,6 +126,16 @@ class Settings(BaseSettings):
     # and off, compare recall against result concentration), not to switch the
     # guarantee off casually. True is today's behaviour, unchanged.
     per_doc_cap_enabled: bool = True
+    # A caller may declare, per request, the collection it is confined to
+    # (`X-Scope-Collection`); the backend then refuses documents outside it.
+    # This flag decides what to do with a caller that declares NOTHING:
+    #   False (default) — serve it as before. No behaviour change on upgrade.
+    #   True            — refuse it. The posture for a deployment where every
+    #                     legitimate caller is known to declare its scope, so an
+    #                     undeclared request means a mistake rather than a guest.
+    # Off by default so that turning it on is a decision rather than a side
+    # effect of deploying this version.
+    scope_collection_required: bool = False
 
     # Re-ranking
     rerank_enabled: bool = False
