@@ -117,7 +117,7 @@ class TestDocumentChunksRoute:
         resp = await get_document_chunks(
             doc_id="d1", page=None, vector_store=store,
             settings=_Settings(), registry=_Registry({"d1": "alice"}),
-            current_user="alice")
+            current_user="alice", scope_collection=None)
         assert [c.content for c in resp.chunks] == ["mine"]
 
     async def test_out_of_scope_doc_yields_no_content(self):
@@ -129,7 +129,7 @@ class TestDocumentChunksRoute:
             await get_document_chunks(
                 doc_id="d2", page=None, vector_store=store,
                 settings=_Settings(), registry=_Registry({"d2": "bob"}),
-                current_user="alice")
+                current_user="alice", scope_collection=None)
         assert e.value.status_code in (403, 404), e.value.status_code
 
     async def test_unknown_doc_is_404_not_500(self):
@@ -137,7 +137,7 @@ class TestDocumentChunksRoute:
         with pytest.raises(HTTPException) as e:
             await get_document_chunks(
                 doc_id="nope", page=None, vector_store=_Store({}),
-                settings=_Settings(), registry=_Registry({}), current_user="alice")
+                settings=_Settings(), registry=_Registry({}), current_user="alice", scope_collection=None)
         assert e.value.status_code == 404
 
     async def test_isolation_off_keeps_todays_behaviour(self):
@@ -147,7 +147,7 @@ class TestDocumentChunksRoute:
         resp = await get_document_chunks(
             doc_id="d2", page=None, vector_store=store,
             settings=_Settings(user_isolation="none"),
-            registry=_Registry({"d2": "bob"}), current_user="alice")
+            registry=_Registry({"d2": "bob"}), current_user="alice", scope_collection=None)
         assert [c.content for c in resp.chunks] == ["shared"]
 
 

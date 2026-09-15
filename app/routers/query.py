@@ -9,7 +9,7 @@ from sse_starlette.sse import EventSourceResponse
 from app.config import Settings
 from app.dependencies import (
     get_settings, get_vector_store, get_llm, get_embeddings, get_memory_manager,
-    get_registry, get_current_user, get_edge_repository, get_summary_store, resolve_doc_scope,
+    get_registry, get_current_user, get_edge_repository, get_summary_store, resolve_doc_scope, get_scope_collection,
     get_anonymization_mapping_repo, get_anonymization_audit_repo,
 )
 from app.db.repositories import DocumentRepository, ChatSessionRepository, EdgeRepository
@@ -622,6 +622,7 @@ async def query_chunk_context(
     memory_manager: ChatSessionRepository = Depends(get_memory_manager),
     registry: DocumentRepository = Depends(get_registry),
     current_user: str = Depends(get_current_user),
+    scope_collection: str | None = Depends(get_scope_collection),
 ):
     """Ask a question about a specific source chunk (document or web).
 
@@ -654,7 +655,7 @@ async def query_chunk_context(
         if not request.doc_id:
             raise HTTPException(status_code=400, detail="doc_id required for document source")
         _doc, _allowed = await resolve_doc_scope(
-            request.doc_id, registry, settings, current_user)
+            request.doc_id, registry, settings, current_user, scope_collection)
         center = request.chunk_index or 0
         neighbor_indices = list(range(max(0, center - 2), center + 3))
         chunks = vector_store.get_chunks_by_doc(

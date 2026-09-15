@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.config import Settings
 from app.dependencies import (
     get_settings, get_vector_store, get_current_user, get_llm,
-    get_registry, get_edge_repository, resolve_doc_scope, resolve_multi_doc_scope,
+    get_registry, get_edge_repository, resolve_doc_scope, resolve_multi_doc_scope, get_scope_collection,
 )
 from app.db.repositories import DocumentRepository, EdgeRepository
 from app.models.schemas import GraphResponse, GraphNode, GraphEdge, MultiMindmapResponse
@@ -87,12 +87,14 @@ async def get_chunk_graph(
     settings: Settings = Depends(get_settings),
     registry: DocumentRepository = Depends(get_registry),
     current_user: str = Depends(get_current_user),
+    scope_collection: str | None = Depends(get_scope_collection),
 ):
     """Get chunk-level graph for a document: all chunks as nodes, filtered edges.
 
     Scoped to the caller, mirroring the pattern in `get_mindmap_multi`.
     """
-    _doc, allowed = await resolve_doc_scope(doc_id, registry, settings, current_user)
+    _doc, allowed = await resolve_doc_scope(
+        doc_id, registry, settings, current_user, scope_collection)
     chunks = vector_store.get_chunks_by_doc(doc_id, allowed_doc_ids=allowed)
     if not chunks:
         return GraphResponse(nodes=[], edges=[])
@@ -149,6 +151,7 @@ async def get_chunk_graph_multi(
     vector_store: VectorStoreManager = Depends(get_vector_store),
     edge_repo: EdgeRepository = Depends(get_edge_repository),
     current_user: str = Depends(get_current_user),
+    scope_collection: str | None = Depends(get_scope_collection),
 ):
     """Multi-doc chunk-level graph: chunks from N docs + edges among them.
 
@@ -171,8 +174,10 @@ async def get_chunk_graph_multi(
             detail=f"Too many documents — max {MULTI_DOC_MAX} per request",
         )
 
-    user_filter = current_user if settings.user_isolation != "none" else None
-    owned_docs = await registry.get_many_by_ids(doc_id_list, user_id=user_filter)
+    allowed_set = await resolve_multi_doc_scope(
+        doc_id_list, registry, settings, current_user, scope_collection)
+    owned_docs = [d for d in await registry.get_many_by_ids(doc_id_list)
+                  if allowed_set is None or d["doc_id"] in allowed_set]
     allowed_doc_ids = [d["doc_id"] for d in owned_docs]
 
     if not allowed_doc_ids:
@@ -228,6 +233,7 @@ async def get_mindmap_multi(
     vector_store: VectorStoreManager = Depends(get_vector_store),
     llm: BaseChatModel = Depends(get_llm),
     current_user: str = Depends(get_current_user),
+    scope_collection: str | None = Depends(get_scope_collection),
 ):
     """Synthesised mindmap across N documents.
 
@@ -252,8 +258,10 @@ async def get_mindmap_multi(
             detail=f"Too many documents — max {MULTI_DOC_MAX} per request",
         )
 
-    user_filter = current_user if settings.user_isolation != "none" else None
-    owned_docs = await registry.get_many_by_ids(doc_id_list, user_id=user_filter)
+    allowed_set = await resolve_multi_doc_scope(
+        doc_id_list, registry, settings, current_user, scope_collection)
+    owned_docs = [d for d in await registry.get_many_by_ids(doc_id_list)
+                  if allowed_set is None or d["doc_id"] in allowed_set]
     if len(owned_docs) < 2:
         # 1 doc (or zero owned) → not a "multi" view. Steer the caller to
         # the right endpoint instead of silently degrading.
@@ -286,6 +294,7 @@ async def get_neighbors(
     settings: Settings = Depends(get_settings),
     registry: DocumentRepository = Depends(get_registry),
     current_user: str = Depends(get_current_user),
+    scope_collection: str | None = Depends(get_scope_collection),
 ):
     """Get neighborhood subgraph for a specific chunk.
 
@@ -295,7 +304,7 @@ async def get_neighbors(
     below. Owning the starting point says nothing about what it points at.
     """
     _doc, entry_allowed = await resolve_doc_scope(
-        doc_id, registry, settings, current_user)
+        doc_id, registry, settings, current_user, scope_collection)
     all_chunks = vector_store.get_chunks_by_doc(doc_id, allowed_doc_ids=entry_allowed)
     chunk_map = {c.metadata.get("chunk_index"): c for c in all_chunks}
 
@@ -346,7 +355,8 @@ async def get_neighbors(
     # visited chunk, and a per-node lookup would be both slower and easier to
     # forget on a later edit.
     reachable_allowed = await resolve_multi_doc_scope(
-        {d for d, _ in visited}, registry, settings, current_user)
+        {d for d, _ in visited}, registry, settings, current_user,
+        scope_collection)
 
     # Build nodes from visited set
     nodes = []
