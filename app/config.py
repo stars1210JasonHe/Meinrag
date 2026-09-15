@@ -118,6 +118,14 @@ class Settings(BaseSettings):
     # and on large collection scopes coverage enumerates every member doc per
     # query. /query is unaffected by this flag.
     search_coverage_enabled: bool = False
+    # Per-doc cap: when a query's scope spans several docs, keep at most
+    # `top_k // unique_docs` chunks from each so one document cannot dominate
+    # the answer. This is why a top_k of 50 over 24 docs returns ~24-30 chunks
+    # rather than 50 — a deliberate diversity guarantee, not a defect.
+    # The flag exists to MEASURE that trade-off (run the same queries with it on
+    # and off, compare recall against result concentration), not to switch the
+    # guarantee off casually. True is today's behaviour, unchanged.
+    per_doc_cap_enabled: bool = True
 
     # Re-ranking
     rerank_enabled: bool = False
