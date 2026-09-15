@@ -115,7 +115,7 @@ async def generate_all_summaries(doc_id: str, settings, vector_store=None, summa
         except Exception as e:
             logger.warning("Failed to create OpenAI LLM for summaries: %s", e)
 
-    chunks = vector_store.get_chunks_by_doc(doc_id)
+    chunks = vector_store.get_chunks_by_doc(doc_id, allowed_doc_ids=None)
     if not chunks:
         logger.warning("No chunks found for doc %s", doc_id)
         return

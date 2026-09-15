@@ -62,9 +62,41 @@ class VectorStoreManager(ABC):
         ...
 
     @abstractmethod
-    def get_chunks_by_doc(self, doc_id: str, chunk_indices: list[int] | None = None) -> list[Document]:
-        """Return chunks for a doc, optionally filtered by chunk indices. Sorted by chunk_index."""
+    def get_chunks_by_doc(
+        self,
+        doc_id: str,
+        chunk_indices: list[int] | None = None,
+        *,
+        allowed_doc_ids: set[str] | None,
+    ) -> list[Document]:
+        """Return chunks for a doc, optionally filtered by chunk indices. Sorted by chunk_index.
+
+        `allowed_doc_ids` is REQUIRED and keyword-only. This method is the common
+        throat of every path that returns document content, so it is where the
+        ownership decision is cheapest to make once and hardest to forget.
+
+        Pass a set to restrict: a doc_id outside it yields no chunks. Pass None
+        to mean "the caller has already established the scope" — legitimate for
+        service-layer callers that only ever receive ids an authorised route
+        resolved, and each such site says so at the call.
+
+        It has no default ON PURPOSE, and please do not add one. A default would
+        let any caller that nobody remembered to update silently keep the
+        unscoped behaviour, which is precisely what this parameter exists to
+        remove: a gate whose default is "open" is documentation, not a gate.
+        Required means a new caller cannot reach content without deciding, and
+        the decision shows up in review as an argument rather than as an absence.
+        """
         ...
+
+    @staticmethod
+    def _scope_denies(doc_id: str, allowed_doc_ids: set[str] | None) -> bool:
+        """Single definition of the scope check, shared by every concrete store.
+
+        Two stores each re-implementing this is how one of them ends up without
+        it; `tests/test_access_control_doc_scope.py` pins that they agree.
+        """
+        return allowed_doc_ids is not None and doc_id not in allowed_doc_ids
 
     @abstractmethod
     def persist(self) -> None:

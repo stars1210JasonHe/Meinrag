@@ -49,35 +49,35 @@ class TestFaissDocIdIndex:
     def test_add_then_get(self, faiss_store):
         faiss_store.add_documents(_docs("a", 3), doc_id="a")
         faiss_store.add_documents(_docs("b", 2), doc_id="b")
-        chunks = faiss_store.get_chunks_by_doc("a")
+        chunks = faiss_store.get_chunks_by_doc("a", allowed_doc_ids=None)
         assert [c.metadata["chunk_index"] for c in chunks] == [0, 1, 2]
         assert all(c.metadata["doc_id"] == "a" for c in chunks)
 
     def test_chunk_indices_filter(self, faiss_store):
         faiss_store.add_documents(_docs("a", 4), doc_id="a")
-        chunks = faiss_store.get_chunks_by_doc("a", chunk_indices=[1, 3])
+        chunks = faiss_store.get_chunks_by_doc("a", chunk_indices=[1, 3], allowed_doc_ids=None)
         assert [c.metadata["chunk_index"] for c in chunks] == [1, 3]
 
     def test_delete_invalidates(self, faiss_store):
         faiss_store.add_documents(_docs("a", 3), doc_id="a")
         faiss_store.add_documents(_docs("b", 2), doc_id="b")
-        faiss_store.get_chunks_by_doc("a")  # build the index
+        faiss_store.get_chunks_by_doc("a", allowed_doc_ids=None)  # build the index
         faiss_store.delete_document("a")
-        assert faiss_store.get_chunks_by_doc("a") == []
-        assert len(faiss_store.get_chunks_by_doc("b")) == 2
+        assert faiss_store.get_chunks_by_doc("a", allowed_doc_ids=None) == []
+        assert len(faiss_store.get_chunks_by_doc("b", allowed_doc_ids=None)) == 2
 
     def test_readd_after_delete(self, faiss_store):
         faiss_store.add_documents(_docs("a", 2), doc_id="a")
-        faiss_store.get_chunks_by_doc("a")
+        faiss_store.get_chunks_by_doc("a", allowed_doc_ids=None)
         faiss_store.delete_document("a")
         faiss_store.add_documents(_docs("a", 5), doc_id="a")
-        assert len(faiss_store.get_chunks_by_doc("a")) == 5
+        assert len(faiss_store.get_chunks_by_doc("a", allowed_doc_ids=None)) == 5
 
     def test_metadata_update_via_index(self, faiss_store):
         faiss_store.add_documents(_docs("a", 2), doc_id="a")
-        faiss_store.get_chunks_by_doc("a")  # index built before the update
+        faiss_store.get_chunks_by_doc("a", allowed_doc_ids=None)  # index built before the update
         faiss_store.update_document_metadata("a", {"primary_category": "legal"})
-        chunks = faiss_store.get_chunks_by_doc("a")
+        chunks = faiss_store.get_chunks_by_doc("a", allowed_doc_ids=None)
         assert all(c.metadata["primary_category"] == "legal" for c in chunks)
 
 
@@ -220,7 +220,7 @@ class TestSearchCoverageSkip:
             settings, vector_store, llm, edge_repo,
             doc_ids=["d1", "d2"], user_scoped=True, ensure_coverage=True,
         )
-        vector_store.get_chunks_by_doc.assert_called_with("d2")
+        vector_store.get_chunks_by_doc.assert_called_with("d2", allowed_doc_ids=None)
         assert {s.doc_id for s in result.sources} == {"d1", "d2"}
 
 

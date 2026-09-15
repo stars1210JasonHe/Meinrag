@@ -468,7 +468,7 @@ class TestVisualProximityLinking:
         class MockStore:
             def __init__(self, data):
                 self._data = data
-            def get_chunks_by_doc(self, doc_id):
+            def get_chunks_by_doc(self, doc_id, **_):
                 return self._data.get(doc_id, [])
         return MockStore(chunks_by_doc)
 
@@ -591,7 +591,7 @@ class TestVisualProximityLinking:
         from app.services.retrieval import _link_nearby_visuals
 
         class MockStore:
-            def get_chunks_by_doc(self, doc_id):
+            def get_chunks_by_doc(self, doc_id, **_):
                 return []
         result = _link_nearby_visuals([], MockStore(), ["doc1"], proximity_pages=1)
         assert result == []
@@ -677,7 +677,7 @@ class TestLabelLookup:
         class MockStore:
             def __init__(self, data):
                 self._data = data
-            def get_chunks_by_doc(self, doc_id):
+            def get_chunks_by_doc(self, doc_id, **_):
                 return self._data.get(doc_id, [])
         return MockStore(chunks_by_doc)
 
@@ -723,7 +723,7 @@ class TestLabelLookup:
         from app.services.retrieval import _lookup_by_label
 
         class MockStore:
-            def get_chunks_by_doc(self, doc_id):
+            def get_chunks_by_doc(self, doc_id, **_):
                 return []
 
         result = _lookup_by_label("Table 1", MockStore(), None)

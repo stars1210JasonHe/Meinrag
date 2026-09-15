@@ -356,7 +356,7 @@ class FakeVectorStore:
     def __init__(self, chunks_by_doc: dict):
         self._chunks = chunks_by_doc
 
-    def get_chunks_by_doc(self, doc_id):
+    def get_chunks_by_doc(self, doc_id, **_):
         return self._chunks.get(doc_id, [])
 
 

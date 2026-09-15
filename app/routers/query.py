@@ -8,7 +8,7 @@ from sse_starlette.sse import EventSourceResponse
 from app.config import Settings
 from app.dependencies import (
     get_settings, get_vector_store, get_llm, get_embeddings, get_memory_manager,
-    get_registry, get_current_user, get_edge_repository, get_summary_store,
+    get_registry, get_current_user, get_edge_repository, get_summary_store, resolve_doc_scope,
     get_anonymization_mapping_repo, get_anonymization_audit_repo,
 )
 from app.db.repositories import DocumentRepository, ChatSessionRepository, EdgeRepository
@@ -590,9 +590,14 @@ async def query_chunk_context(
     vector_store: VectorStoreManager = Depends(get_vector_store),
     llm: BaseChatModel = Depends(get_llm),
     memory_manager: ChatSessionRepository = Depends(get_memory_manager),
+    registry: DocumentRepository = Depends(get_registry),
     current_user: str = Depends(get_current_user),
 ):
-    """Ask a question about a specific source chunk (document or web)."""
+    """Ask a question about a specific source chunk (document or web).
+
+    The document branch is scoped to the caller, mirroring the pattern used by
+    the graph and document endpoints.
+    """
     if request.source_type == "web":
         # Fetch the full web page and use as context
         if not request.url:
@@ -618,9 +623,12 @@ async def query_chunk_context(
         # Fetch surrounding chunks from vector store
         if not request.doc_id:
             raise HTTPException(status_code=400, detail="doc_id required for document source")
+        _doc, _allowed = await resolve_doc_scope(
+            request.doc_id, registry, settings, current_user)
         center = request.chunk_index or 0
         neighbor_indices = list(range(max(0, center - 2), center + 3))
-        chunks = vector_store.get_chunks_by_doc(request.doc_id, chunk_indices=neighbor_indices)
+        chunks = vector_store.get_chunks_by_doc(
+            request.doc_id, chunk_indices=neighbor_indices, allowed_doc_ids=_allowed)
         if not chunks:
             raise HTTPException(status_code=404, detail="No chunks found for this document")
         context = "\n\n---\n\n".join(

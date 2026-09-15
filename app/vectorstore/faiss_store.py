@@ -206,7 +206,15 @@ class FAISSStoreManager(VectorStoreManager):
             self._doc_id_index = index
         return self._doc_id_index
 
-    def get_chunks_by_doc(self, doc_id: str, chunk_indices: list[int] | None = None) -> list[Document]:
+    def get_chunks_by_doc(
+        self,
+        doc_id: str,
+        chunk_indices: list[int] | None = None,
+        *,
+        allowed_doc_ids: set[str] | None,
+    ) -> list[Document]:
+        if self._scope_denies(doc_id, allowed_doc_ids):
+            return []
         if self._store is None:
             return []
         docstore = self._store.docstore._dict

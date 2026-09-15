@@ -117,3 +117,51 @@ async def get_anonymization_audit_repo(
 def get_anonymization_engine(request: Request):
     """Return the singleton AnonymizationEngine, or None when disabled."""
     return getattr(request.app.state, "anonymization_engine", None)
+
+
+async def resolve_doc_scope(
+    doc_id: str,
+    registry,
+    settings,
+    current_user: str,
+) -> tuple[dict, set[str] | None]:
+    """Resolve one doc_id to (document, allowed_doc_ids) for the calling user.
+
+    Returns the document record plus the set to hand to
+    ``VectorStoreManager.get_chunks_by_doc(..., allowed_doc_ids=...)``. None
+    means the deployment has isolation switched off, i.e. unrestricted by
+    configuration rather than by omission.
+
+    Raises 404 for an unknown doc and 403 for one that belongs to someone else.
+
+    This exists once rather than inline per route on purpose: the same six lines
+    copied into each handler is how one copy ends up missing, and a missing copy
+    looks exactly like a route that never needed one.
+    """
+    from fastapi import HTTPException
+
+    doc = await registry.get(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if settings.user_isolation != "none" and doc.get("user_id") != current_user:
+        raise HTTPException(status_code=403, detail="Not authorized for this document")
+    allowed = None if settings.user_isolation == "none" else {doc_id}
+    return doc, allowed
+
+
+async def resolve_multi_doc_scope(
+    doc_ids: list[str],
+    registry,
+    settings,
+    current_user: str,
+) -> set[str] | None:
+    """Allow-list for a request that may reach across several documents.
+
+    Used where a traversal can follow links out of the requested document into
+    others: the entry document being owned says nothing about the ones it points
+    at, so the set — not a single id — is what the store must be given.
+    """
+    if settings.user_isolation == "none":
+        return None
+    owned = await registry.get_many_by_ids(list(doc_ids), user_id=current_user)
+    return {d["doc_id"] for d in owned}
