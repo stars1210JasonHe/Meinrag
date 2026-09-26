@@ -43,6 +43,7 @@ dependencies = [
     # Re-ranking
     "flashrank>=0.2",
     "arq>=0.27.0",
+    "jieba>=0.42.1",
 ]
 
 [project.optional-dependencies]

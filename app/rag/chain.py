@@ -183,6 +183,10 @@ def invalidate_bm25_cache():
     _bm25_cache["doc_count"] = 0
     _bm25_cache["retriever"] = None
     _bm25_cache["doc_ids_key"] = None
+    # opt-in tokenizer indexes (app/rag/bm25_tokenizers.py) are built from the same chunks, so a document
+    # add/delete must drop them too, or an eval would search a stale index.
+    from app.rag.bm25_tokenizers import invalidate_opt_in_caches
+    invalidate_opt_in_caches()
 
 
 def _build_hybrid_retriever(
