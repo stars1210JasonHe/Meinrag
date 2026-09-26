@@ -92,6 +92,7 @@ def _settings(**overrides):
     s.router_max_scope = 300
     s.router_top_k = 8
     s.hybrid_search_enabled = False
+    s.hybrid_max_scope_docs = 1000   # mirrors Settings default; the mock predates the BM25 scope gate
     s.rrf_k = 60
     s.rerank_enabled = False
     s.query_expansion_enabled = False
@@ -253,3 +254,43 @@ class TestRouterMaxScope:
             doc_ids=scope, registry=AsyncMock(),
         )
         route_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+class TestBM25ScopeGate:
+    """Production hotfix 2026-09-16 (landed in git 2026-09-26): BM25 runs only when the scope is bounded.
+    A full-corpus bigram build took the backend down on 2026-09-16, hence the gate."""
+
+    async def test_scope_above_gate_skips_bm25(self):
+        from app.rag.chain import invalidate_bm25_cache
+        invalidate_bm25_cache()
+        settings = _settings(hybrid_search_enabled=True, hybrid_max_scope_docs=1)
+        vector_store, llm, edge_repo = _deps([(_chunk("d1", 0), 0.8)], all_docs=[_chunk("d1", 0), _chunk("d2", 0)])
+        await _run(settings, vector_store, llm, edge_repo, doc_ids=["d1", "d2"])
+        vector_store.get_all_documents.assert_not_called()   # the BM25 corpus was never materialised
+        invalidate_bm25_cache()
+
+    async def test_unscoped_search_skips_bm25(self):
+        from app.rag.chain import invalidate_bm25_cache
+        invalidate_bm25_cache()
+        settings = _settings(hybrid_search_enabled=True)
+        vector_store, llm, edge_repo = _deps([(_chunk("d1", 0), 0.8)], all_docs=[_chunk("d1", 0)])
+        await _run(settings, vector_store, llm, edge_repo, doc_ids=None)   # full corpus = unbounded
+        vector_store.get_all_documents.assert_not_called()
+        invalidate_bm25_cache()
+
+    async def test_scope_within_gate_runs_bm25(self):
+        from app.rag.chain import invalidate_bm25_cache
+        invalidate_bm25_cache()
+        settings = _settings(hybrid_search_enabled=True, hybrid_max_scope_docs=2)
+        vector_store, llm, edge_repo = _deps([(_chunk("d1", 0), 0.8)], all_docs=[_chunk("d1", 0), _chunk("d2", 0)])
+        await _run(settings, vector_store, llm, edge_repo, doc_ids=["d1", "d2"])
+        assert vector_store.get_all_documents.call_count == 1   # control: the arm does run inside the gate
+        invalidate_bm25_cache()
+
+
+def test_cjk_aware_preprocess_splits_chinese():
+    from app.rag.chain import cjk_aware_preprocess
+    assert len("被告提供的证据清单".split()) == 1                        # the defect the hotfix addresses
+    assert cjk_aware_preprocess("被告提供的证据清单") == ["被告", "告提", "提供", "供的", "的证", "证据", "据清", "清单"]
+    assert cjk_aware_preprocess("the defendant said") == ["the", "defendant", "said"]
