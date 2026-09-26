@@ -1502,6 +1502,7 @@ async def retrieve_and_rank(
     ensure_coverage: bool = True,
     reorder_for_attention: bool = True,
     enforce_token_budget: bool = True,
+    bm25_tokenizer: str | None = None,
 ) -> RetrievalResult:
     """Full retrieval pipeline — single source of truth.
 
@@ -1699,7 +1700,26 @@ async def retrieve_and_rank(
             logger.warning("HyDE expansion failed: %s", e)
 
     # 4c. BM25 hybrid search (if enabled — Settings flag)
-    if settings.hybrid_search_enabled:
+    from app.rag import bm25_tokenizers as _bt
+    _bt.evict_idle()  # an idle opt-in index (eval runs) hands its memory back
+    if settings.hybrid_search_enabled and not _bt.is_default(bm25_tokenizer):
+        # OPT-IN path (SearchRequest.bm25_tokenizer). Own cache; the default path below is untouched.
+        try:
+            def _scoped_docs():
+                docs = vector_store.get_all_documents()
+                if doc_ids:
+                    idset = set(doc_ids)
+                    docs = [d for d in docs if d.metadata.get("doc_id") in idset]
+                return docs
+            bm25 = _bt.get_retriever(bm25_tokenizer, _scoped_docs,
+                                     cache_key=tuple(sorted(doc_ids)) if doc_ids else None, k=fetch_k)
+            if bm25 is not None:
+                bm25_docs = bm25.invoke(question)
+                retrieved = _rrf_merge_bm25(retrieved, bm25_docs, k=settings.rrf_k)
+                _trace(settings, "bm25_merge_%s" % bm25_tokenizer, retrieved)
+        except Exception as e:
+            logger.warning("BM25 hybrid search (%s) failed: %s", bm25_tokenizer, e)
+    elif settings.hybrid_search_enabled:
         try:
             from langchain_community.retrievers import BM25Retriever
             from app.rag.chain import _bm25_cache

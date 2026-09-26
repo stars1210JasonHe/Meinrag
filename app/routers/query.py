@@ -594,6 +594,7 @@ async def search_documents(
             # This endpoint produces no answer, so it must not be trimmed to fit this
             # service's model window. Same reasoning as the two opt-outs above.
             enforce_token_budget=False,
+            bm25_tokenizer=request.bm25_tokenizer,
         )
         return SearchResponse(
             results=result.sources,

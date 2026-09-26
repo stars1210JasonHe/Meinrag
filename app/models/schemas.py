@@ -144,6 +144,11 @@ class SearchRequest(BaseModel):
     doc_ids: list[str] | None = Field(default=None, description="Restrict to these document IDs")
     collection: str | None = Field(default=None, description="Restrict to this collection")
     subtags: list[str] | None = Field(default=None, description="Restrict to docs matching these subtags (AND across values, case-insensitive substring match)")
+    bm25_tokenizer: Literal["whitespace", "jieba"] | None = Field(
+        default=None,
+        description="Opt-in tokenizer for the BM25 hybrid arm. None/whitespace = the default path, unchanged. "
+                    "'jieba' builds a separate CJK-aware index (~0.75 GB for `legal`), evicted after 15 min idle. "
+                    "Evaluation use; not a default.")
 
 
 class StageCounts(BaseModel):
