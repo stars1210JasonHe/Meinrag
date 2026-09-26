@@ -174,6 +174,31 @@ def _build_filtered_retriever(
     return RunnableLambda(_search)
 
 
+# CJK-aware BM25 tokenizer (Neo 2026-09-16, Yeqiu-approved).
+# langchain's default preprocess_func is text.split(). On Chinese that scores every
+# natural-language query at ZERO and returns the SAME documents as gibberish
+# (measured: 10/10 NL questions returned gibberish's top-5). Bigrams fix that:
+# doc_recall@5 4.5% -> 68.2% on LLM-generated lawyer questions, and gibberish still
+# scores 0, so it discriminates rather than matching everything.
+# Bigrams, not jieba: bigrams are what was measured, and they add no dependency.
+# COST, also measured: 467 tokens/chunk vs split's 52. A full-corpus index is ~6.9 GB
+# and is why this must only run on a BOUNDED scope -- see hybrid_max_scope_docs.
+import re as _re
+_CJK_RUN = _re.compile(r'[一-鿿]+')
+_LATIN = _re.compile(r'[A-Za-z0-9]+')
+BM25_TOKENIZER_VERSION = 'bigram-v1'
+
+
+def cjk_aware_preprocess(text):
+    'Latin words as words; CJK runs as overlapping character bigrams.'
+    out = [w.lower() for w in _LATIN.findall(text or '')]
+    for run in _CJK_RUN.findall(text or ''):
+        if len(run) == 1:
+            out.append(run)
+        else:
+            out.extend(run[i:i + 2] for i in range(len(run) - 1))
+    return out
+
 # BM25 index cache — invalidated on document add/delete
 _bm25_cache: dict = {"doc_count": 0, "retriever": None, "doc_ids_key": None}
 
@@ -210,7 +235,8 @@ def _build_hybrid_retriever(
         bm25_retriever = _bm25_cache["retriever"]
         bm25_retriever.k = top_k
     else:
-        bm25_retriever = BM25Retriever.from_documents(all_docs, k=top_k)
+        bm25_retriever = BM25Retriever.from_documents(
+            all_docs, k=top_k, preprocess_func=cjk_aware_preprocess)
         _bm25_cache["retriever"] = bm25_retriever
         _bm25_cache["doc_count"] = len(all_docs)
         _bm25_cache["doc_ids_key"] = cache_key

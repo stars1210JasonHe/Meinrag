@@ -199,6 +199,13 @@ class Settings(BaseSettings):
     # retriever. Research paper (2026-04-21 survey) notes all production RAG
     # systems (Perplexity, Glean) use hybrid retrieval.
     hybrid_search_enabled: bool = True
+    # BM25 runs only on a BOUNDED scope. Above this many documents the lexical
+    # arm is SKIPPED, because (a) a full-corpus bigram build took the backend down on
+    # 2026-09-16 -- its GB cost was NEVER measured at full scale, an earlier ~6.9GB figure
+    # came from a contaminated reading and is withdrawn -- and (b) the previous split()
+    # tokenizer at full scope was measured to return the same documents as
+    # gibberish -- so skipping removes noise rather than removing a capability.
+    hybrid_max_scope_docs: int = 1000
     hybrid_bm25_weight: float = 0.5  # used by legacy EnsembleRetriever in chain.py; retrieval.py uses RRF instead
     rrf_k: int = 60
 

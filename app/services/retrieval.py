@@ -16,7 +16,8 @@ from langchain_core.output_parsers import StrOutputParser
 
 from app.config import Settings
 from app.models.schemas import SourceChunk
-from app.rag.chain import is_reference_entry
+from app.rag.chain import (is_reference_entry, cjk_aware_preprocess,
+                           BM25_TOKENIZER_VERSION)
 from app.rag.prompts import (
     QUERY_ANALYZE_PROMPT,
     QUERY_EXPANSION_PROMPT,
@@ -1699,7 +1700,20 @@ async def retrieve_and_rank(
             logger.warning("HyDE expansion failed: %s", e)
 
     # 4c. BM25 hybrid search (if enabled — Settings flag)
-    if settings.hybrid_search_enabled:
+    _scope_n = len(doc_ids) if doc_ids else None
+    _bm25_ok = (settings.hybrid_search_enabled and _scope_n is not None
+                and _scope_n <= settings.hybrid_max_scope_docs)
+    if settings.hybrid_search_enabled and not _bm25_ok:
+        # Say so OUT LOUD. A silently skipped arm is indistinguishable from a broken
+        # one, and 'no log line' is compatible with 'not deployed' too.
+        logger.info('BM25 skipped: scope=%s exceeds hybrid_max_scope_docs=%s. '
+                    'Measured facts behind this gate: a full-corpus bigram build took '
+                    'the backend down once (2026-09-16); its GB cost was never measured '
+                    'at full scale. Skipping REMOVES CANDIDATES -- with BM25 off, mean '
+                    'returned dropped 8.42 -> 3.13 on a 60-query probe, so a large scope '
+                    'will return fewer results, not merely unranked ones.',
+                    _scope_n, settings.hybrid_max_scope_docs)
+    if _bm25_ok:
         try:
             from langchain_community.retrievers import BM25Retriever
             from app.rag.chain import _bm25_cache
@@ -1708,7 +1722,10 @@ async def retrieve_and_rank(
             # per query made large collection scopes 10s+ slower. Correctness
             # relies on invalidate_bm25_cache() running on every document
             # add/delete (documents.py), which resets the key below.
-            cache_key = tuple(sorted(doc_ids)) if doc_ids else None
+            # Tokenizer version is part of the key: a cached index built by a different
+            # tokenizer is a DIFFERENT index, and reusing it silently mixes two schemes.
+            cache_key = (BM25_TOKENIZER_VERSION,
+                         tuple(sorted(doc_ids)) if doc_ids else None)
             bm25 = None
             if (_bm25_cache["retriever"] is not None
                     and _bm25_cache["doc_ids_key"] == cache_key):
@@ -1720,11 +1737,14 @@ async def retrieve_and_rank(
                     idset = set(doc_ids)
                     all_docs = [d for d in all_docs if d.metadata.get("doc_id") in idset]
                 if all_docs:
-                    bm25 = BM25Retriever.from_documents(all_docs, k=fetch_k)
+                    bm25 = BM25Retriever.from_documents(
+                        all_docs, k=fetch_k, preprocess_func=cjk_aware_preprocess)
                     _bm25_cache["retriever"] = bm25
                     _bm25_cache["doc_count"] = len(all_docs)
                     _bm25_cache["doc_ids_key"] = cache_key
             if bm25 is not None:
+                logger.info('BM25 active: scope=%s docs, tokenizer=%s', _scope_n,
+                            BM25_TOKENIZER_VERSION)
                 bm25_docs = bm25.invoke(question)
                 retrieved = _rrf_merge_bm25(retrieved, bm25_docs, k=settings.rrf_k)
                 _trace(settings, "bm25_merge", retrieved)

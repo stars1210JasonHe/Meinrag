@@ -110,8 +110,14 @@ class DocumentRepository:
         # subtags is a JSON column whose ::text is unicode-escaped (ensure_ascii), so a raw
         # CJK LIKE never matches what was stored. Match BOTH the raw and the escaped JSON
         # form (ASCII is identical in both) so a CJK matter/case tag is filterable too.
-        raw = f"%{subtag.lower()}%"
-        esc = f"%{_json.dumps(subtag)[1:-1].replace(chr(92), chr(92) * 2).lower()}%"
+        # EXACT element match (Neo 2026-09-16, Yeqiu-approved). Was a bare substring:
+        # `matter:2` then matched `"matter:2024"` too and returned ANOTHER matter's
+        # documents -- measured worst case 10 hits of which 0 carried the requested
+        # tag, reading as a coherent on-topic set. Including the JSON quote delimiters
+        # makes the match exact: %"matter:2"% cannot match "matter:2024". This keeps the
+        # raw/escaped dual pattern below, which is what makes CJK tags matchable at all.
+        raw = f'%"{subtag.lower()}"%'
+        esc = f'%"{_json.dumps(subtag)[1:-1].replace(chr(92), chr(92) * 2).lower()}"%'
         col = func.lower(cast(DocumentModel.subtags, String))
         stmt = (
             select(DocumentModel)
