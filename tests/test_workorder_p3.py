@@ -93,6 +93,7 @@ def _settings(**overrides):
     s.router_top_k = 8
     s.hybrid_search_enabled = False
     s.hybrid_max_scope_docs = 1000   # mirrors Settings default; the mock predates the BM25 scope gate
+    s.rerank_pool_size = 0           # mirrors Settings default
     s.rrf_k = 60
     s.rerank_enabled = False
     s.query_expansion_enabled = False
@@ -294,3 +295,39 @@ def test_cjk_aware_preprocess_splits_chinese():
     assert len("被告提供的证据清单".split()) == 1                        # the defect the hotfix addresses
     assert cjk_aware_preprocess("被告提供的证据清单") == ["被告", "告提", "提供", "供的", "的证", "证据", "据清", "清单"]
     assert cjk_aware_preprocess("the defendant said") == ["the", "defendant", "said"]
+
+
+class TestRerankPoolSize:
+    """2026-09-27: the strategy step cut candidates to top_k BY LIST POSITION before the reranker; for fact queries the
+    augmented hits are prepended, so every original candidate (incl. all BM25 hits) was dropped whatever its score.
+    rerank_pool_size lets the reranker see more; 0 keeps today's behaviour."""
+
+    def test_default_keeps_top_k(self):
+        from app.services.retrieval import _pre_rerank_cut_k
+        assert _pre_rerank_cut_k(_settings(rerank_enabled=True, rerank_pool_size=0), 10) == 10
+
+    def test_pool_widens_cut_when_rerank_on(self):
+        from app.services.retrieval import _pre_rerank_cut_k
+        assert _pre_rerank_cut_k(_settings(rerank_enabled=True, rerank_pool_size=30), 10) == 30
+
+    def test_pool_never_narrows(self):
+        from app.services.retrieval import _pre_rerank_cut_k
+        assert _pre_rerank_cut_k(_settings(rerank_enabled=True, rerank_pool_size=5), 10) == 10
+
+    def test_pool_ignored_without_reranker(self):
+        from app.services.retrieval import _pre_rerank_cut_k
+        assert _pre_rerank_cut_k(_settings(rerank_enabled=False, rerank_pool_size=30), 10) == 10
+
+
+@pytest.mark.asyncio
+class TestRerankPoolReachesTheCut:
+    async def test_retrieve_and_rank_passes_pool_to_demote_step(self, monkeypatch):
+        from app.services import retrieval as r
+        seen = []
+        orig = r._demote_reference_results
+        monkeypatch.setattr(r, "_demote_reference_results", lambda res, k: seen.append(k) or orig(res, k))
+        monkeypatch.setattr(r, "_pre_rerank_cut_k", lambda settings, top_k: 30)
+        settings = _settings()
+        vector_store, llm, edge_repo = _deps([(_chunk("d1", i), 0.9 - i / 100) for i in range(40)])
+        await _run(settings, vector_store, llm, edge_repo, doc_ids=["d1"])
+        assert seen == [30]

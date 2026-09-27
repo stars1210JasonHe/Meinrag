@@ -318,6 +318,18 @@ def _trace(settings, stage: str, retrieved: list) -> None:
         )
 
 
+def _pre_rerank_cut_k(settings, top_k: int) -> int:
+    """How many candidates the strategy step keeps for the reranker. See Settings.rerank_pool_size."""
+    pool = getattr(settings, "rerank_pool_size", 0)
+    # Anything that is not a real int counts as unset (0): settings objects built as MagicMock in tests, or a
+    # malformed env value, must fall back to today's behaviour rather than crash retrieval.
+    if not isinstance(pool, int) or isinstance(pool, bool):
+        pool = 0
+    if pool <= 0 or getattr(settings, "rerank_enabled", False) is not True:
+        return top_k
+    return max(top_k, pool)
+
+
 def _demote_reference_results(
     results: list[tuple], top_k: int
 ) -> list[tuple]:
@@ -1776,7 +1788,7 @@ async def retrieve_and_rank(
         retrieved = _section_aware_sample(text_only, top_k=top_k)
         logger.debug("[TRACE] after text_only+section_aware_sample: %d chunks", len(retrieved))
     elif strategy.get("demote_references"):
-        retrieved = _demote_reference_results(retrieved, top_k)
+        retrieved = _demote_reference_results(retrieved, _pre_rerank_cut_k(settings, top_k))
         logger.debug("[TRACE] after demote_references: %d chunks", len(retrieved))
 
     # 6a. Multi-doc coverage guarantee — ONLY when the user EXPLICITLY scoped

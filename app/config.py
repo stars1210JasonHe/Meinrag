@@ -147,6 +147,11 @@ class Settings(BaseSettings):
     # collection). Input is truncated to the top-N by score before scoring; the
     # remainder is unaffected by reranking. Output still comes from the reranker.
     rerank_max_candidates: int = 80
+    # How many candidates survive the strategy step's cut and reach the reranker. 0 (default) = top_k, today's
+    # behaviour. Measured 2026-09-27: that cut is BY LIST POSITION, and for fact queries the keyword-augmented hits are
+    # prepended, so every original candidate -- including every BM25 hit -- was dropped whatever its score. >0 widens
+    # the cut to max(top_k, rerank_pool_size) when reranking is on; the reranker still returns top_k.
+    rerank_pool_size: int = 0
     # When True (default) the cross-encoder's order IS the final result order —
     # displayed values stay composite scores, so position and score can be
     # locally non-monotonic (two honest, different signals). False restores the
