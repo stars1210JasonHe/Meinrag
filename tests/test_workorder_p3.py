@@ -92,8 +92,8 @@ def _settings(**overrides):
     s.router_max_scope = 300
     s.router_top_k = 8
     s.hybrid_search_enabled = False
-    s.hybrid_max_scope_docs = 1000   # mirrors Settings default; the mock predates the BM25 scope gate
-    s.rerank_pool_size = 0           # mirrors Settings default
+    s.hybrid_max_scope_docs = 4000   # mirrors Settings default; the mock predates the BM25 scope gate
+    s.rerank_pool_size = 30          # mirrors Settings default
     s.rrf_k = 60
     s.rerank_enabled = False
     s.query_expansion_enabled = False
@@ -331,3 +331,12 @@ class TestRerankPoolReachesTheCut:
         vector_store, llm, edge_repo = _deps([(_chunk("d1", i), 0.9 - i / 100) for i in range(40)])
         await _run(settings, vector_store, llm, edge_repo, doc_ids=["d1"])
         assert seen == [30]
+
+
+def test_adopted_retrieval_defaults():
+    """gate 4000 + pool 30 were adopted TOGETHER on 2026-09-30 (the gain needs both). Pins the class defaults so
+    a revert of one without the other is a visible test change, not a silent drift."""
+    from app.config import Settings
+    f = Settings.model_fields
+    assert f["hybrid_max_scope_docs"].default == 4000
+    assert f["rerank_pool_size"].default == 30

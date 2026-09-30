@@ -147,11 +147,13 @@ class Settings(BaseSettings):
     # collection). Input is truncated to the top-N by score before scoring; the
     # remainder is unaffected by reranking. Output still comes from the reranker.
     rerank_max_candidates: int = 80
-    # How many candidates survive the strategy step's cut and reach the reranker. 0 (default) = top_k, today's
-    # behaviour. Measured 2026-09-27: that cut is BY LIST POSITION, and for fact queries the keyword-augmented hits are
+    # How many candidates survive the strategy step's cut and reach the reranker. 0 = top_k (the pre-2026-09-30
+    # behaviour). Measured 2026-09-27: that cut is BY LIST POSITION, and for fact queries the keyword-augmented hits are
     # prepended, so every original candidate -- including every BM25 hit -- was dropped whatever its score. >0 widens
     # the cut to max(top_k, rerank_pool_size) when reranking is on; the reranker still returns top_k.
-    rerank_pool_size: int = 0
+    # Default 30 since 2026-09-30, adopted together with hybrid_max_scope_docs=4000 (live A/B, 240 q: hit@10
+    # 69.2% -> 81.3%, McNemar p=4e-5; pool 30 alone 71.7%, n.s.; 48 h production trial: 0 restarts, NAS min 3243 MB).
+    rerank_pool_size: int = 30
     # When True (default) the cross-encoder's order IS the final result order —
     # displayed values stay composite scores, so position and score can be
     # locally non-monotonic (two honest, different signals). False restores the
@@ -210,7 +212,10 @@ class Settings(BaseSettings):
     # came from a contaminated reading and is withdrawn -- and (b) the previous split()
     # tokenizer at full scope was measured to return the same documents as
     # gibberish -- so skipping removes noise rather than removing a capability.
-    hybrid_max_scope_docs: int = 1000
+    # Default 4000 since 2026-09-30 (was 1000), adopted with rerank_pool_size=30 -- see the evidence there. The gain
+    # needs BOTH; raising this without the pool does not reach the reranker. 4000 is the MEASURED ceiling, not a
+    # safe-at-any-size claim: the full-corpus memory cost is still unmeasured, so do not raise it further blind.
+    hybrid_max_scope_docs: int = 4000
     hybrid_bm25_weight: float = 0.5  # used by legacy EnsembleRetriever in chain.py; retrieval.py uses RRF instead
     rrf_k: int = 60
 
