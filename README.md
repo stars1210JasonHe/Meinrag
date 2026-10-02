@@ -203,6 +203,7 @@ All settings live in [`app/config.py`](app/config.py) (the `Settings` Pydantic c
 | `HYBRID_SEARCH_ENABLED` | `true` | BM25 + dense via RRF |
 | `SUMMARY_ENABLED` | `true` | Per-chunk summaries → second FAISS index |
 | `QUERY_EXPANSION_ENABLED` | `true` | |
+| `HYDE_ENABLED` | `false` | LLM writes a hypothetical answer doc, embedded as an extra retrieval probe and RRF-fused with the direct results (a bad hypothesis can only add candidates, not evict direct hits). Closes the colloquial-query recall gap; costs one extra LLM call per query |
 | `WEB_SEARCH_ENABLED` | `true` | Auto-fallback when retrieval empty |
 | `RERANK_ENABLED` | `false` | Turn on for ambiguous queries |
 | `GRAPH_SIMILAR_MIN_SCORE` | `0.7` | Cosine floor per chunk pair for cross-doc edges |
@@ -354,7 +355,7 @@ store + embedding API logs) is covered.
 **Multi-user note**: requests with no `X-User-Id` header default to the configured `DEFAULT_USER` (`admin`). To scope documents and chat sessions per user, send `X-User-Id: <any-string>` — the backend auto-creates the user on first request. There is no built-in authentication; treat the user header as advisory, not a security boundary.
 
 ### Documents
-- `POST /documents/upload` — upload + index
+- `POST /documents/upload` — upload + index. A file that parses to **zero chunks** (e.g. a scanned PDF with no text layer) is rejected with `422` at parse time; it used to travel as far as the vector add and fail there as a `500`, which was much harder to diagnose
 - `GET /documents` — list. Optional `?search=` (smart: ILIKE on filename/category/subtags/summary for short queries, semantic FAISS for long), `?collection=`, `?limit=` (max 200), `?offset=`
 - `GET /documents/taxonomy` — taxonomy categories + user collection counts (replaces the legacy `/documents/collections`)
 - `GET /documents/{id}/download` — original file
