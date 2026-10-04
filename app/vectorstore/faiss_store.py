@@ -119,7 +119,7 @@ class FAISSStoreManager(VectorStoreManager):
             )
             self._gpu_enabled = _try_gpu_index(self._store)
 
-    def add_documents(self, documents: list[Document], doc_id: str) -> list[str]:
+    def add_documents(self, documents: list[Document], doc_id: str, persist: bool = True) -> list[str]:
         if not documents:
             # An empty batch reaches faiss as a 1-D array and crashes its
             # (n, d) shape unpack — refuse it here, callers get a no-op.
@@ -146,7 +146,7 @@ class FAISSStoreManager(VectorStoreManager):
         self.persist()
         return [f"{doc_id}_chunk_{i}" for i in range(len(documents))]
 
-    def delete_document(self, doc_id: str) -> None:
+    def delete_document(self, doc_id: str, persist: bool = True) -> None:
         if self._store is None:
             return
         # Find docstore IDs for this document's chunks
