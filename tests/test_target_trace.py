@@ -217,7 +217,7 @@ class TestThroughPipeline:
     async def test_rerank_stages_rank_by_list_order_and_reconcile(self, monkeypatch):
         from app.services import retrieval as retrieval_mod
 
-        async def _reverse(retrieved, question, settings, llm=None, top_n=None):
+        async def _reverse(retrieved, question, settings, llm=None, top_n=None, recorder=None):
             return list(reversed(retrieved))[:3], True
 
         monkeypatch.setattr(retrieval_mod, "_rerank_results", _reverse)
@@ -238,7 +238,7 @@ class TestThroughPipeline:
         """
         from app.services import retrieval as retrieval_mod
 
-        async def _keep(retrieved, question, settings, llm=None, top_n=None):
+        async def _keep(retrieved, question, settings, llm=None, top_n=None, recorder=None):
             return list(retrieved), True
 
         monkeypatch.setattr(retrieval_mod, "_rerank_results", _keep)
@@ -258,7 +258,7 @@ class TestThroughPipeline:
         """F again with the reranker running (a deterministic stub; the live one is an LLM)."""
         from app.services import retrieval as retrieval_mod
 
-        async def _reverse(retrieved, question, settings, llm=None, top_n=None):
+        async def _reverse(retrieved, question, settings, llm=None, top_n=None, recorder=None):
             return list(reversed(retrieved))[:3], True
 
         monkeypatch.setattr(retrieval_mod, "_rerank_results", _reverse)

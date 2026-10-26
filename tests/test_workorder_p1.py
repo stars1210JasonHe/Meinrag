@@ -262,7 +262,7 @@ class TestRerankFinalOrder:
     async def _run_with_fake_rerank(self, rerank_final_order, monkeypatch):
         from app.services import retrieval as retrieval_mod
 
-        async def fake_rerank(retrieved, question, settings, llm, top_n=4):
+        async def fake_rerank(retrieved, question, settings, llm, top_n=4, recorder=None):
             # (results, ran) - the second element tells the caller whether reranking
             # actually happened, so a failed reranker is not reported as a successful one.
             return list(reversed(retrieved)), True  # cross-encoder disagrees with composite
