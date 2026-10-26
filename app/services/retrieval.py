@@ -57,6 +57,9 @@ class RetrievalResult:
     # Opt-in (debug_target): one entry per stage for ONE known target -- where it ranked, or
     # why it was not there. See app/services/target_trace.py. None unless the caller asked.
     target_trace: list | None = None
+    # Opt-in with debug_target: the LLM reranker's own answer (ids, finish reason, tokens; no text).
+    # See app/services/rerank_recorder.py. None unless the caller asked.
+    rerank_debug: dict | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -715,6 +718,7 @@ async def _rerank_results(
     settings,
     llm=None,
     top_n: int | None = None,
+    recorder: dict | None = None,
 ) -> tuple[list[tuple], bool]:
     """Apply cross-encoder reranking to retrieved results.
 
@@ -742,7 +746,12 @@ async def _rerank_results(
         if len(rerank_input) < len(retrieved):
             logger.info("Rerank input capped: %d → %d candidates", len(retrieved), len(rerank_input))
         docs = [doc for doc, _ in rerank_input]
-        compressed = compressor.compress_documents(docs, question)
+        if recorder is None:
+            compressed = compressor.compress_documents(docs, question)
+        else:
+            from app.services.rerank_recorder import recorded_compress
+            compressed = recorded_compress(compressor, docs, question, provider=settings.rerank_provider,
+                                           llm=llm, top_n=effective_top_n, recorder=recorder)
 
         # Build score map from original results
         score_map = {}
@@ -1577,6 +1586,7 @@ async def retrieve_and_rank(
     if debug_target:
         from app.services.target_trace import TargetTracer
         tracer = TargetTracer(debug_target["doc_id"], debug_target.get("chunk_index"))
+    rerank_rec = {"want_variants": bool(debug_target.get("rerank_variants"))} if debug_target else None
     # An explicitly scoped query whose scope resolved to nothing must return nothing.
     #
     # Without this, ``doc_ids == []`` is falsy at every downstream test — ``if not
@@ -1618,6 +1628,7 @@ async def retrieve_and_rank(
             context_used_tokens=0,
             stage_counts=_zero_stage_counts(),
             target_trace=tracer.result() if tracer else None,
+            rerank_debug=rerank_rec,
         )
 
     # Load scoring profile (cached), resolve after query analysis
@@ -1929,6 +1940,7 @@ async def retrieve_and_rank(
             chat_history=chat_history,
             stage_counts=_unknown_stage_counts("web_search_path"),
             target_trace=tracer.result() if tracer else None,
+            rerank_debug=rerank_rec,
         )
     if tracer:
         tracer.record("web_search_gate", retrieved, note="corpus path")
@@ -2008,7 +2020,7 @@ async def retrieve_and_rank(
                           % (len(retrieved), len(_rr_in)))
 
         retrieved, _rerank_ran = await _rerank_results(
-            retrieved, question, settings, llm, top_n=effective_top_n,
+            retrieved, question, settings, llm, top_n=effective_top_n, recorder=rerank_rec,
         )
         # Captured HERE, before the mandatory-restore loop below mutates `retrieved`.
         # Recording it afterwards reports the post-restore length and hides the reduction the
@@ -2230,6 +2242,7 @@ async def retrieve_and_rank(
         chunks_available=chunks_available,
         stage_counts=dict(stage_counts, returned=len(sources)),
         target_trace=tracer.result() if tracer else None,
+        rerank_debug=rerank_rec,
     )
 
 

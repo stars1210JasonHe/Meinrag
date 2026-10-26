@@ -145,6 +145,9 @@ class DebugTarget(BaseModel):
     chunk_index: int | None = Field(
         default=None,
         description="None = document-level: the rank of that document's best-placed chunk")
+    rerank_variants: bool = Field(
+        default=False,
+        description="Diagnostics only: send the same rerank candidates three more times (repeat, all-ids prompt, shuffled order) and report the ids each answer chose. Never changes the results; costs three extra LLM calls.")
 
 
 class SearchRequest(BaseModel):

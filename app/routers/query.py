@@ -613,6 +613,8 @@ async def search_documents(
         # exactly the response it got before.
         body = jsonable_encoder(response)
         body["target_trace"] = result.target_trace
+        if result.rerank_debug is not None:
+            body["rerank_debug"] = result.rerank_debug
         return JSONResponse(content=body)
     except Exception as e:
         logger.exception("Search failed")
