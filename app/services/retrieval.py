@@ -330,6 +330,14 @@ def _pre_rerank_cut_k(settings, top_k: int) -> int:
     return max(top_k, pool)
 
 
+def _section_sample_k(settings, top_k: int) -> int:
+    """How many candidates the section_sampling strategy keeps. See Settings.rerank_pool_section_sampling."""
+    # `is True`, not truthiness: a MagicMock settings object or a malformed value must keep today's behaviour.
+    if getattr(settings, "rerank_pool_section_sampling", False) is not True:
+        return top_k
+    return _pre_rerank_cut_k(settings, top_k)
+
+
 def _demote_reference_results(
     results: list[tuple], top_k: int
 ) -> list[tuple]:
@@ -1785,7 +1793,7 @@ async def retrieve_and_rank(
     if strategy.get("text_only"):
         text_only = [(doc, score) for doc, score in retrieved
                      if doc.metadata.get("chunk_type") == "text"]
-        retrieved = _section_aware_sample(text_only, top_k=top_k)
+        retrieved = _section_aware_sample(text_only, top_k=_section_sample_k(settings, top_k))
         logger.debug("[TRACE] after text_only+section_aware_sample: %d chunks", len(retrieved))
     elif strategy.get("demote_references"):
         retrieved = _demote_reference_results(retrieved, _pre_rerank_cut_k(settings, top_k))
