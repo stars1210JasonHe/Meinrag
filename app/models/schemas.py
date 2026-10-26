@@ -132,6 +132,21 @@ class QueryResponse(BaseModel):
     fast_path: bool = False  # true when answered via pre-computed doc summary
 
 
+class DebugTarget(BaseModel):
+    """Opt-in diagnostic: report where ONE known chunk (or document) ranks at every stage.
+
+    For evaluation runs that already know the right answer. The response then carries a
+    `target_trace` list, one entry per stage; see app/services/target_trace.py.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    doc_id: str = Field(..., min_length=1)
+    chunk_index: int | None = Field(
+        default=None,
+        description="None = document-level: the rank of that document's best-placed chunk")
+
+
 class SearchRequest(BaseModel):
     """Retrieve-only search request (MCP / agent consumers).
 
@@ -144,6 +159,10 @@ class SearchRequest(BaseModel):
     doc_ids: list[str] | None = Field(default=None, description="Restrict to these document IDs")
     collection: str | None = Field(default=None, description="Restrict to this collection")
     subtags: list[str] | None = Field(default=None, description="Restrict to docs matching these subtags (AND across values, case-insensitive substring match)")
+    debug_target: DebugTarget | None = Field(
+        default=None,
+        description="Diagnostics only: trace one known target through every retrieval stage. "
+                    "Does not change the results. Adds `target_trace` to the response.")
 
 
 class StageCounts(BaseModel):

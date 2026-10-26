@@ -54,6 +54,9 @@ class RetrievalResult:
     # comment on the zero-scope guard below for why a None here is not acceptable:
     # a caller cannot tell 'nothing was dropped' from 'nobody counted'.
     stage_counts: dict | None = None
+    # Opt-in (debug_target): one entry per stage for ONE known target -- where it ranked, or
+    # why it was not there. See app/services/target_trace.py. None unless the caller asked.
+    target_trace: list | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -694,6 +697,18 @@ async def _expand_via_edges(
 # Reranking
 # ---------------------------------------------------------------------------
 
+def _rerank_input_cap(retrieved: list, settings) -> list:
+    """The candidates the reranker actually sees: top rerank_max_candidates by score.
+
+    Its own function because two readers need the SAME list -- _rerank_results, and the
+    target trace's rerank_input stage. A second copy of this rule in the tracer would be
+    free to drift from the one the reranker runs, and the trace would then report a cut
+    the reranker never made.
+    """
+    max_cand = getattr(settings, "rerank_max_candidates", 80)
+    return sorted(retrieved, key=lambda x: x[1], reverse=True)[:max_cand]
+
+
 async def _rerank_results(
     retrieved: list[tuple],
     question: str,
@@ -723,8 +738,7 @@ async def _rerank_results(
         # Cap input to top-N by score so the ONNX reranker never OOMs on huge
         # candidate sets (large-collection scope). Original scores are preserved
         # via score_map below; mandatory chunks are restored by the caller.
-        max_cand = getattr(settings, "rerank_max_candidates", 80)
-        rerank_input = sorted(retrieved, key=lambda x: x[1], reverse=True)[:max_cand]
+        rerank_input = _rerank_input_cap(retrieved, settings)
         if len(rerank_input) < len(retrieved):
             logger.info("Rerank input capped: %d → %d candidates", len(retrieved), len(rerank_input))
         docs = [doc for doc, _ in rerank_input]
@@ -1515,6 +1529,7 @@ async def retrieve_and_rank(
     ensure_coverage: bool = True,
     reorder_for_attention: bool = True,
     enforce_token_budget: bool = True,
+    debug_target: dict | None = None,
 ) -> RetrievalResult:
     """Full retrieval pipeline — single source of truth.
 
@@ -1549,10 +1564,19 @@ async def retrieve_and_rank(
     100 x clamp01(w_sim * query_cosine + w_graph * graph_authority). Final
     ORDER comes from the cross-encoder when rerank_enabled + rerank_final_order.
 
+    ``debug_target={"doc_id": str, "chunk_index": int | None}`` records, for every
+    stage, where that one target ranked or why it was absent (result.target_trace;
+    app/services/target_trace.py). Observation only: no list is reordered or edited
+    and nothing is written to doc.metadata. With it None, no tracing code runs.
+
     Returns a RetrievalResult with web_search_needed=True when the caller
     should fall back to web search (no retrieval results are populated in
     that case).
     """
+    tracer = None
+    if debug_target:
+        from app.services.target_trace import TargetTracer
+        tracer = TargetTracer(debug_target["doc_id"], debug_target.get("chunk_index"))
     # An explicitly scoped query whose scope resolved to nothing must return nothing.
     #
     # Without this, ``doc_ids == []`` is falsy at every downstream test — ``if not
@@ -1578,6 +1602,8 @@ async def retrieve_and_rank(
     # that MATCH something.
     if user_scoped and doc_ids is not None and not doc_ids:
         logger.info("Scope resolved to zero documents — returning empty result")
+        if tracer:
+            tracer.check_scope(doc_ids, note="scope resolved to zero documents")
         # Counts that are KNOWN to be zero are set to zero; the ones this path never
         # computed stay None. /search maps chunks_available to total_available, so
         # leaving it unset would answer "unknown" for the one case where the count is
@@ -1591,6 +1617,7 @@ async def retrieve_and_rank(
             chunks_available=0,
             context_used_tokens=0,
             stage_counts=_zero_stage_counts(),
+            target_trace=tracer.result() if tracer else None,
         )
 
     # Load scoring profile (cached), resolve after query analysis
@@ -1639,6 +1666,9 @@ async def retrieve_and_rank(
         )
         logger.info("Router prefix: %d -> %d docs", before, len(doc_ids))
 
+    if tracer:
+        tracer.check_scope(doc_ids)
+
     # 2. Label lookup
     label_chunks = []
     if query_label and doc_ids:
@@ -1670,6 +1700,8 @@ async def retrieve_and_rank(
         doc.metadata.pop("_mandatory", None)
     logger.debug("[TRACE] after vector_search: %d chunks", len(retrieved))
     _trace(settings, "vector_search", retrieved)
+    if tracer:
+        tracer.record("arm_vector", retrieved)
 
     # 4b. Summary index search (dual-index)
     if summary_store:
@@ -1677,6 +1709,8 @@ async def retrieve_and_rank(
             summary_results = summary_store.similarity_search_with_scores(
                 question, k=fetch_k, doc_ids=doc_ids,
             )
+            if tracer:
+                tracer.record("arm_summary", summary_results or [])
             if summary_results:
                 before = len(retrieved)
                 retrieved = _rrf_merge_dual(retrieved, summary_results,
@@ -1686,6 +1720,10 @@ async def retrieve_and_rank(
                 _trace(settings, "dual_merge", retrieved)
         except Exception as e:
             logger.warning("Summary search failed: %s", e)
+            if tracer:
+                tracer.skip("arm_summary", "failed", "summary search or its merge raised")
+    elif tracer:
+        tracer.skip("arm_summary", "disabled", "no summary store")
 
     # 4b2. HyDE probe (if enabled — Settings flag). The LLM writes a
     # hypothetical answer document; its embedding retrieves in the CORPUS's
@@ -1699,6 +1737,8 @@ async def retrieve_and_rank(
                 hyde_results = vector_store.similarity_search_with_scores(
                     hypo, k=fetch_k, doc_ids=doc_ids,
                 )
+                if tracer:
+                    tracer.record("arm_hyde", hyde_results or [])
                 if hyde_results:
                     before = len(retrieved)
                     retrieved = _rrf_merge_dual(
@@ -1708,8 +1748,14 @@ async def retrieve_and_rank(
                     logger.info("HyDE: merged %d + %d hypothetical-doc hits -> %d results",
                                 before, len(hyde_results), len(retrieved))
                     _trace(settings, "hyde_merge", retrieved)
+            elif tracer:
+                tracer.skip("arm_hyde", "no_hypothesis", "HyDE generation returned nothing usable")
         except Exception as e:
             logger.warning("HyDE expansion failed: %s", e)
+            if tracer:
+                tracer.skip("arm_hyde", "failed")
+    elif tracer:
+        tracer.skip("arm_hyde", "disabled")
 
     # 4c. BM25 hybrid search (if enabled — Settings flag)
     _scope_n = len(doc_ids) if doc_ids else None
@@ -1725,6 +1771,14 @@ async def retrieve_and_rank(
                     'returned dropped 8.42 -> 3.13 on a 60-query probe, so a large scope '
                     'will return fewer results, not merely unranked ones.',
                     _scope_n, settings.hybrid_max_scope_docs)
+    if tracer and not _bm25_ok:
+        if not settings.hybrid_search_enabled:
+            tracer.skip("arm_bm25", "disabled")
+        elif _scope_n is None:
+            tracer.skip("arm_bm25", "scope_unknown", "doc_ids is None or empty")
+        else:
+            tracer.skip("arm_bm25", "gate_skipped", "scope=%s > hybrid_max_scope_docs=%s"
+                        % (_scope_n, settings.hybrid_max_scope_docs))
     if _bm25_ok:
         try:
             from langchain_community.retrievers import BM25Retriever
@@ -1758,17 +1812,31 @@ async def retrieve_and_rank(
                 logger.info('BM25 active: scope=%s docs, tokenizer=%s', _scope_n,
                             BM25_TOKENIZER_VERSION)
                 bm25_docs = bm25.invoke(question)
+                if tracer:
+                    # BM25Retriever returns bare Documents, best first: list order IS its rank.
+                    tracer.record("arm_bm25", bm25_docs, by_score=False)
                 retrieved = _rrf_merge_bm25(retrieved, bm25_docs, k=settings.rrf_k)
                 _trace(settings, "bm25_merge", retrieved)
+            elif tracer:
+                tracer.skip("arm_bm25", "empty_corpus", "no documents in scope to index")
         except Exception as e:
             logger.warning("BM25 hybrid search failed: %s", e)
+            if tracer:
+                tracer.skip("arm_bm25", "failed")
+
+    if tracer:
+        tracer.record("after_merges", retrieved)
 
     # 5. Query expansion
-    _, retrieved = await _maybe_expand_query(
+    _expanded_q, retrieved = await _maybe_expand_query(
         question, retrieved, llm, vector_store, settings, doc_ids, top_k,
         fetch_k=fetch_k,
     )
     logger.debug("[TRACE] after query_expansion: %d chunks", len(retrieved))
+    if tracer:
+        # _maybe_expand_query hands back a different query string exactly when it threw the
+        # merged list away and substituted the expanded query's own results.
+        tracer.record("after_query_expansion", retrieved, replaced=_expanded_q != question)
 
     # 5b. Fact-query keyword expansion — bridges abstract query ↔ concrete
     # answer lexical gap (e.g., "parameter counts" → surface "7B"/"175B").
@@ -1777,6 +1845,10 @@ async def retrieve_and_rank(
             question, retrieved, llm, vector_store, doc_ids, fetch_k,
         )
         logger.debug("[TRACE] after fact_keyword_expand: %d chunks", len(retrieved))
+        if tracer:
+            tracer.record("after_fact_keyword_expand", retrieved)
+    elif tracer:
+        tracer.skip("after_fact_keyword_expand", "not_fact_query", "query type=%s" % primary_type)
 
     # Save pre-narrowing candidates for per-doc coverage backfill
     pre_narrow_candidates = list(retrieved)
@@ -1790,6 +1862,14 @@ async def retrieve_and_rank(
     elif strategy.get("demote_references"):
         retrieved = _demote_reference_results(retrieved, _pre_rerank_cut_k(settings, top_k))
         logger.debug("[TRACE] after demote_references: %d chunks", len(retrieved))
+    if tracer:
+        if strategy.get("text_only"):
+            _cut = "text_only + section_aware_sample(top_k=%d)" % top_k
+        elif strategy.get("demote_references"):
+            _cut = "demote_references, cut to %d" % _pre_rerank_cut_k(settings, top_k)
+        else:
+            _cut = "no cut at this step"
+        tracer.record("after_strategy_cut", retrieved, note="strategy=%s: %s" % (strategy_name, _cut))
 
     # 6a. Multi-doc coverage guarantee — ONLY when the user EXPLICITLY scoped
     # to specific docs (request.doc_ids or collection). When user_isolation
@@ -1804,6 +1884,11 @@ async def retrieve_and_rank(
         )
         logger.debug("[TRACE] after per_doc_coverage: %d chunks", len(retrieved))
         _trace(settings, "coverage", retrieved)
+        if tracer:
+            tracer.record("after_coverage", retrieved)
+    elif tracer:
+        tracer.skip("after_coverage", "disabled",
+                    "user_scoped=%s ensure_coverage=%s" % (user_scoped, ensure_coverage))
 
     # Scoring stage — constants from scoring profile, resolved for query type
     retrieved = _apply_reference_penalty(retrieved, scoring)
@@ -1811,6 +1896,8 @@ async def retrieve_and_rank(
     retrieved = _apply_boilerplate_penalty(retrieved, scoring)
     logger.debug("[TRACE] after scoring penalties: %d chunks", len(retrieved))
     _trace(settings, "penalties", retrieved)
+    if tracer:
+        tracer.record("after_penalties", retrieved)
 
     # (6b reranking moved AFTER graph expansion + composite scoring — the
     # cross-encoder must judge expanded chunks too, and its order must not be
@@ -1822,12 +1909,19 @@ async def retrieve_and_rank(
     # return — but only the gate is suppressed; user_scoped is still honest, so
     # per-doc coverage (step 6a) still applies when docs/a collection are named.
     if not force_corpus_only and (force_web_search or _needs_web_search(user_scoped, retrieved, settings)):
+        if tracer:
+            tracer.record("web_search_gate", retrieved,
+                          note="web-search path taken; corpus results discarded")
+            tracer.finish("web_search_path")
         return RetrievalResult(
             sources=[], retrieved=[], query_types=query_types,
             query_label=query_label, web_search_needed=True,
             chat_history=chat_history,
             stage_counts=_unknown_stage_counts("web_search_path"),
+            target_trace=tracer.result() if tracer else None,
         )
+    if tracer:
+        tracer.record("web_search_gate", retrieved, note="corpus path")
 
     # 8. Visual proximity linking
     if settings.visual_proximity_enabled:
@@ -1837,6 +1931,10 @@ async def retrieve_and_rank(
             proximity_pages=settings.visual_proximity_pages,
         )
         logger.debug("[TRACE] after visual_proximity: %d chunks", len(retrieved))
+        if tracer:
+            tracer.record("after_visual", retrieved)
+    elif tracer:
+        tracer.skip("after_visual", "disabled")
 
     # 9. Graph expansion (decay from scoring profile)
     retrieved = await _expand_via_edges(
@@ -1846,6 +1944,8 @@ async def retrieve_and_rank(
     )
     logger.debug("[TRACE] after graph_expansion: %d chunks", len(retrieved))
     _trace(settings, "graph_expansion", retrieved)
+    if tracer:
+        tracer.record("after_graph", retrieved)
 
     # 10. Composite scoring (weights from query_types.json, graph math from profile)
     retrieved = await _apply_composite_scoring(
@@ -1863,6 +1963,8 @@ async def retrieve_and_rank(
     stage_counts = {s: None for s in STAGE_ORDER}
     stage_counts["basis"] = "measured per stage in retrieve_and_rank"
     stage_counts["after_composite"] = len(retrieved)
+    if tracer:
+        tracer.record("after_composite", retrieved)
 
     # 12b. Reranking — runs LAST among ranking stages, on composite-sorted
     # candidates (so the rerank_max_candidates cap keeps the best by composite,
@@ -1889,6 +1991,12 @@ async def retrieve_and_rank(
             if doc.metadata.get("_mandatory")
         }
 
+        if tracer:
+            _rr_in = _rerank_input_cap(retrieved, settings)
+            tracer.record("rerank_input", _rr_in,
+                          note="candidates=%d capped_to=%d (rerank_max_candidates)"
+                          % (len(retrieved), len(_rr_in)))
+
         retrieved, _rerank_ran = await _rerank_results(
             retrieved, question, settings, llm, top_n=effective_top_n,
         )
@@ -1898,6 +2006,15 @@ async def retrieve_and_rank(
         # reinserted, the field would say 7 and conceal both numbers. Found by review; it is
         # this field's own purpose failing on itself for the third time.
         _n_after_rerank = len(retrieved)
+        if tracer:
+            if _rerank_ran:
+                # After reranking, list order IS the rank (rerank_final_order).
+                tracer.record("rerank_output", retrieved, by_score=False,
+                              note="input=%d output=%d top_n=%d"
+                              % (len(_rr_in), _n_after_rerank, effective_top_n))
+            else:
+                tracer.skip("rerank_output", "failed" if _rr_in else "empty_input",
+                            "reranker did not order anything; input order kept")
 
         # Re-insert any mandatory chunks the reranker dropped.
         post_keys = {
@@ -1917,6 +2034,9 @@ async def retrieve_and_rank(
             # Legacy behavior: discard the cross-encoder's order again.
             retrieved.sort(key=lambda x: x[1], reverse=True)
         _trace(settings, "rerank_final", retrieved)
+        if tracer:
+            tracer.record("after_mandatory_restore", retrieved, by_score=False,
+                          note="restored=%d" % restored)
 
     # A stage that did not RUN reports None, never a number. Recording len(retrieved)
     # here when reranking is disabled would be indistinguishable from a rerank pass that
@@ -1928,6 +2048,9 @@ async def retrieve_and_rank(
     # and returns the input list, so an enabled-but-broken reranker (missing model, provider
     # error, OOM) would otherwise be reported as "ran and kept every candidate" - the exact
     # confusion this field exists to remove, in its own failure mode. Found by review.
+    if tracer and not settings.rerank_enabled:
+        for _s in ("rerank_input", "rerank_output", "after_mandatory_restore"):
+            tracer.skip(_s, "disabled")
     stage_counts["after_rerank"] = _n_after_rerank if _rerank_ran else None
     if not settings.rerank_enabled:
         stage_counts["basis"] += "; rerank SKIPPED (rerank_enabled=false)"
@@ -1952,6 +2075,8 @@ async def retrieve_and_rank(
     # NB: this is after rerank AND after label prepending (step 13), which can ADD
     # chunks. It is not 'the count after reranking'.
     stage_counts["after_labels"] = chunks_available
+    if tracer:
+        tracer.record("after_labels", retrieved, by_score=False)
 
     # 14. Per-doc cap (multi-doc scope only)
     # Count unique docs in retrieved set
@@ -1961,6 +2086,8 @@ async def retrieve_and_rank(
         enabled=getattr(settings, "per_doc_cap_enabled", True),
     )
     stage_counts["after_per_doc_cap"] = len(retrieved)
+    if tracer:
+        tracer.record("after_per_doc_cap", retrieved, by_score=False)
 
     # 15. Token budget enforcement — greedy fill until budget reached
     chunk_budget, history_budget, total_input_budget = _compute_context_budget(
@@ -1984,15 +2111,24 @@ async def retrieve_and_rank(
         _before_cap = len(retrieved)
         retrieved = _apply_caller_size_limit(retrieved, top_k)
         stage_counts["after_top_k_cap"] = len(retrieved)
+        if tracer:
+            tracer.record("after_top_k_cap", retrieved, by_score=False)
     else:
         # A stage that did not run reports None, never a number equal to its predecessor.
         stage_counts["after_top_k_cap"] = None
+        if tracer:
+            tracer.skip("after_top_k_cap", "disabled", "token budget enforced instead")
 
     retrieved, tokens_used = _apply_token_budget(
         retrieved, chunk_budget, enforce=enforce_token_budget)
     # Same rule. With enforcement declined this stage removes nothing by construction, so
     # a number here would tell a caller the chunks fit a budget that was never applied.
     stage_counts["after_token_budget"] = len(retrieved) if enforce_token_budget else None
+    if tracer:
+        if enforce_token_budget:
+            tracer.record("after_token_budget", retrieved, by_score=False)
+        else:
+            tracer.skip("after_token_budget", "disabled", "enforce_token_budget=False")
     if not enforce_token_budget:
         stage_counts["basis"] += (
             "; token budget NOT ENFORCED (measured only); hard top_k=%d cap applied "
@@ -2061,6 +2197,8 @@ async def retrieve_and_rank(
                                     did, user_id, exc_info=True,
                                 )
 
+    if tracer:
+        tracer.record("returned", retrieved, by_score=False)
     sources = _build_source_chunks(retrieved, truncate_chars=source_truncate_chars)
 
     logger.info(
@@ -2081,6 +2219,7 @@ async def retrieve_and_rank(
         chunks_included=len(retrieved),
         chunks_available=chunks_available,
         stage_counts=dict(stage_counts, returned=len(sources)),
+        target_trace=tracer.result() if tracer else None,
     )
 
 
