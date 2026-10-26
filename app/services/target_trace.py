@@ -89,6 +89,12 @@ class TargetTracer:
             note or ("unscoped query (doc_ids is None)" if doc_ids is None else "target in scope"))
         return False
 
+    def annotate(self, stage: str, note: str) -> None:
+        """Append to an already-recorded stage's note (e.g. what the router did to the scope)."""
+        entry = self._entries.get(stage)
+        if entry is not None:
+            entry["note"] = "; ".join(n for n in (entry["note"], note) if n)
+
     @property
     def out_of_scope(self) -> bool:
         return self._out_of_scope

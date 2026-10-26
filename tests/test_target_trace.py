@@ -118,7 +118,7 @@ class TestTracerUnit:
 # ---------------------------------------------------------------------------
 
 async def _run(settings=None, doc_ids=None, user_scoped=False, debug_target=None, n_docs=6,
-               force_corpus_only=True, force_web_search=False):
+               force_corpus_only=True, force_web_search=False, registry=None):
     from app.services import retrieval as retrieval_mod
     edge_repo = AsyncMock()
     edge_repo.get_edge_type_counts_batch = AsyncMock(return_value={})
@@ -129,7 +129,7 @@ async def _run(settings=None, doc_ids=None, user_scoped=False, debug_target=None
         edge_repo=edge_repo, settings=settings or _settings(),
         force_corpus_only=force_corpus_only, force_web_search=force_web_search,
         reorder_for_attention=False, enforce_token_budget=False,
-        debug_target=debug_target,
+        debug_target=debug_target, registry=registry,
     )
 
 
@@ -229,6 +229,77 @@ class TestThroughPipeline:
         assert t["rerank_input"]["status"] == "present"
         assert t["rerank_output"]["list_len"] == r.stage_counts["after_rerank"] == 3
         assert "input=" in t["rerank_output"]["note"] and "output=3" in t["rerank_output"]["note"]
+
+    async def test_rerank_input_cap_that_cuts_the_target_reports_absent(self, monkeypatch):
+        """Stage 15 exists for exactly this: present after composite, gone after the input cap.
+
+        Added on review (Gauss): the other rerank test used rerank_max_candidates=80, so the
+        target was always inside the cap and nothing could make rerank_input say absent.
+        """
+        from app.services import retrieval as retrieval_mod
+
+        async def _keep(retrieved, question, settings, llm=None, top_n=None):
+            return list(retrieved), True
+
+        monkeypatch.setattr(retrieval_mod, "_rerank_results", _keep)
+        s = _settings()
+        s.rerank_enabled = True
+        s.rerank_max_candidates = 2
+        # doc-3, not the lowest-ranked doc-5: in this fixture the strategy step already cuts to
+        # top_k=4, so doc-5 is gone by stage 8 and could not isolate the rerank input cap.
+        r = await _run(settings=s, debug_target={"doc_id": "doc-3", "chunk_index": None})
+        t = _by_stage(r)
+        assert t["after_composite"]["status"] == "present"
+        assert t["after_composite"]["rank"] > 2, "precondition: target must rank below the cap"
+        assert t["rerank_input"]["status"] == "absent"
+        assert t["rerank_input"]["list_len"] == 2
+
+    async def test_cell_F_with_rerank_on(self, monkeypatch):
+        """F again with the reranker running (a deterministic stub; the live one is an LLM)."""
+        from app.services import retrieval as retrieval_mod
+
+        async def _reverse(retrieved, question, settings, llm=None, top_n=None):
+            return list(reversed(retrieved))[:3], True
+
+        monkeypatch.setattr(retrieval_mod, "_rerank_results", _reverse)
+        s = _settings()
+        s.rerank_enabled = True
+        s.rerank_max_candidates = 80
+        plain = await _run(settings=s)
+        traced = await _run(settings=s, debug_target={"doc_id": "doc-2", "chunk_index": None})
+        assert [x.model_dump() for x in traced.sources] == [x.model_dump() for x in plain.sources]
+        assert traced.stage_counts == plain.stage_counts
+
+    async def test_router_removal_is_not_out_of_scope(self, monkeypatch):
+        """Added on review (Gauss): stage 0 is the CALLER's scope. A target the router drops was
+        removed mid-pipeline; reporting it out_of_scope would merge the two cases cell C separates."""
+        import app.services.router as router_mod
+
+        async def _drop_target(question, doc_ids, top_k, llm, registry):
+            return [d for d in doc_ids if d != "doc-3"]
+
+        monkeypatch.setattr(router_mod, "route_docs", _drop_target)
+        s = _settings()
+        s.router_enabled = True
+        ids = ["doc-%d" % i for i in range(20)]
+        r = await _run(settings=s, doc_ids=ids, user_scoped=True, registry=object(),
+                       debug_target={"doc_id": "doc-3", "chunk_index": None})
+        t = _by_stage(r)
+        assert t["scope"]["status"] == "present"
+        assert "router kept 19 of 20" in t["scope"]["note"]
+        assert "REMOVED by the router" in t["scope"]["note"]
+        assert not any(e["status"] == "out_of_scope" for e in r.target_trace)
+
+    async def test_query_expansion_disabled_is_not_run(self):
+        r = await _run(debug_target={"doc_id": "doc-0", "chunk_index": None})
+        assert _by_stage(r)["after_query_expansion"]["status"] == "not_run:disabled"
+
+    async def test_query_expansion_enabled_not_triggered_is_recorded(self):
+        s = _settings()
+        s.query_expansion_enabled = True
+        s.query_expansion_score_threshold = 0.5  # stub scores are ~0.9: expansion not triggered
+        r = await _run(settings=s, debug_target={"doc_id": "doc-0", "chunk_index": None})
+        assert _by_stage(r)["after_query_expansion"]["status"] == "present"
 
 
 # ---------------------------------------------------------------------------

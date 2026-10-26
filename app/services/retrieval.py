@@ -1634,6 +1634,12 @@ async def retrieve_and_rank(
     scoring = profile.for_query_type(primary_type)
     logger.info("Scoring profile: %s (query_type=%s)", profile.name, primary_type)
 
+    # Stage 0 of the target trace is the CALLER's scope, so it is decided here, before the
+    # router narrows doc_ids. A target the router drops is removed mid-pipeline, not outside
+    # the scope -- the two are what the out_of_scope status exists to keep apart.
+    if tracer:
+        tracer.check_scope(doc_ids)
+
     # 1b. Router prefix — narrow broad scope before retrieval when enabled.
     # Fail-safe: router internally falls back to full scope on any error.
     # Upper bound: the router fetches every scoped doc's registry row and puts
@@ -1665,9 +1671,10 @@ async def retrieve_and_rank(
             registry=registry,
         )
         logger.info("Router prefix: %d -> %d docs", before, len(doc_ids))
-
-    if tracer:
-        tracer.check_scope(doc_ids)
+        if tracer and not tracer.out_of_scope:
+            tracer.annotate("scope", "router kept %d of %d docs; target %s" % (
+                len(doc_ids), before,
+                "kept" if tracer.doc_id in set(doc_ids) else "REMOVED by the router"))
 
     # 2. Label lookup
     label_chunks = []
@@ -1836,7 +1843,10 @@ async def retrieve_and_rank(
     if tracer:
         # _maybe_expand_query hands back a different query string exactly when it threw the
         # merged list away and substituted the expanded query's own results.
-        tracer.record("after_query_expansion", retrieved, replaced=_expanded_q != question)
+        if not settings.query_expansion_enabled:
+            tracer.skip("after_query_expansion", "disabled")
+        else:
+            tracer.record("after_query_expansion", retrieved, replaced=_expanded_q != question)
 
     # 5b. Fact-query keyword expansion — bridges abstract query ↔ concrete
     # answer lexical gap (e.g., "parameter counts" → surface "7B"/"175B").
