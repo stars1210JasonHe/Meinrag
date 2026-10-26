@@ -1893,7 +1893,7 @@ async def retrieve_and_rank(
         logger.debug("[TRACE] after demote_references: %d chunks", len(retrieved))
     if tracer:
         if strategy.get("text_only"):
-            _cut = "text_only + section_aware_sample(top_k=%d)" % top_k
+            _cut = "text_only + section_aware_sample(top_k=%d)" % _section_sample_k(settings, top_k)
         elif strategy.get("demote_references"):
             _cut = "demote_references, cut to %d" % _pre_rerank_cut_k(settings, top_k)
         else:
