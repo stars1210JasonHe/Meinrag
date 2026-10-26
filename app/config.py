@@ -154,6 +154,11 @@ class Settings(BaseSettings):
     # Default 30 since 2026-09-30, adopted together with hybrid_max_scope_docs=4000 (live A/B, 240 q: hit@10
     # 69.2% -> 81.3%, McNemar p=4e-5; pool 30 alone 71.7%, n.s.; 48 h production trial: 0 restarts, NAS min 3243 MB).
     rerank_pool_size: int = 30
+    # Also apply rerank_pool_size to the section_sampling strategy (text_only + section-aware sample), which still cuts
+    # to top_k. 2026-10-26 target-trace run (120 verbatim-snippet q): all 5 losses at the strategy cut were on this
+    # branch, 0 on the pooled demote_references branch. Off until a live A/B decides: the branch exists for section
+    # diversity on overview questions, and a verbatim-snippet set cannot measure that.
+    rerank_pool_section_sampling: bool = False
     # When True (default) the cross-encoder's order IS the final result order —
     # displayed values stay composite scores, so position and score can be
     # locally non-monotonic (two honest, different signals). False restores the
