@@ -347,6 +347,17 @@ class Settings(BaseSettings):
                 values.pop(legacy_key)
         return values
 
+    # EVAL BRANCH ONLY (eval/combined-24-27, not part of PR #27). The deployed container sets RERANK_PROVIDER in
+    # its process environment, which outranks /app/.env in pydantic-settings, so the provider cannot be switched
+    # per test arm through .env (measured 2026-10-27). Non-empty -> replaces rerank_provider after loading.
+    rerank_provider_eval: str = ""
+
+    @model_validator(mode="after")
+    def _apply_rerank_provider_eval(self):
+        if self.rerank_provider_eval:
+            self.rerank_provider = RerankProvider(self.rerank_provider_eval)
+        return self
+
     @model_validator(mode="after")
     def _validate_anonymization_key(self):
         """If anonymization is enabled, an encryption key MUST be set —
