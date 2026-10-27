@@ -16,7 +16,7 @@ def _docs(n=3, text=None):
 def _compressor(handler, **kw):
     from app.rag.openrouter_rerank import OpenRouterRerank
     args = {"model": "voyageai/rerank-3", "api_key": "test-key", "top_n": 10,
-            "transport": httpx.MockTransport(handler)}
+            "transport": httpx.MockTransport(handler), "sleep": lambda s: None}
     args.update(kw)
     return OpenRouterRerank(**args)
 
@@ -173,3 +173,102 @@ class TestPipelineFallbackIsVisible:
         out, ran = await retrieval._rerank_results(retrieved, "q", Settings(_env_file=None), top_n=10)
         assert ran is True
         assert [(d.metadata["chunk_index"], s) for d, s in out] == [(2, 0.8), (0, 1.0)]
+
+
+class TestRetry:
+    def _seq(self, *responses):
+        calls = []
+
+        def handler(request):
+            r = responses[min(len(calls), len(responses) - 1)]
+            calls.append(1)
+            if isinstance(r, Exception):
+                raise r
+            return r
+        return handler, calls
+
+    def test_429_then_ok_is_retried(self):
+        waits = []
+        h, calls = self._seq(httpx.Response(429), httpx.Response(200, json={"results": [{"index": 0}]}))
+        out = _compressor(h, sleep=waits.append).compress_documents(_docs(2), "q")
+        assert len(calls) == 2 and [d.metadata["doc_id"] for d in out] == ["d0"]
+        assert waits == [1.0]
+
+    def test_503_twice_then_ok_backoff_doubles(self):
+        waits = []
+        h, calls = self._seq(httpx.Response(503), httpx.Response(503),
+                             httpx.Response(200, json={"results": [{"index": 1}]}))
+        _compressor(h, sleep=waits.append).compress_documents(_docs(2), "q")
+        assert len(calls) == 3 and waits == [1.0, 2.0]
+
+    def test_still_failing_after_retries_raises(self):
+        h, calls = self._seq(httpx.Response(503))
+        with pytest.raises(httpx.HTTPStatusError):
+            _compressor(h, retries=2).compress_documents(_docs(2), "q")
+        assert len(calls) == 3
+
+    def test_retries_zero_means_one_attempt(self):
+        h, calls = self._seq(httpx.Response(429))
+        with pytest.raises(httpx.HTTPStatusError):
+            _compressor(h, retries=0).compress_documents(_docs(2), "q")
+        assert len(calls) == 1
+
+    def test_400_is_not_retried(self):
+        h, calls = self._seq(httpx.Response(400))
+        with pytest.raises(httpx.HTTPStatusError):
+            _compressor(h).compress_documents(_docs(2), "q")
+        assert len(calls) == 1
+
+    def test_retry_after_header_honoured_and_capped(self):
+        waits = []
+        h, _ = self._seq(httpx.Response(429, headers={"Retry-After": "4"}),
+                         httpx.Response(429, headers={"Retry-After": "999"}),
+                         httpx.Response(200, json={"results": [{"index": 0}]}))
+        _compressor(h, sleep=waits.append).compress_documents(_docs(1), "q")
+        assert waits == [4.0, 10.0]
+
+    def test_connection_error_retried_then_raised(self):
+        h, calls = self._seq(httpx.ConnectError("down"))
+        with pytest.raises(httpx.ConnectError):
+            _compressor(h, retries=1).compress_documents(_docs(1), "q")
+        assert len(calls) == 2
+
+    def test_timeout_is_not_retried(self):
+        h, calls = self._seq(httpx.ReadTimeout("slow"))
+        with pytest.raises(httpx.ReadTimeout):
+            _compressor(h).compress_documents(_docs(1), "q")
+        assert len(calls) == 1
+
+    def test_settings_reach_the_compressor(self, monkeypatch):
+        from app.rag.chain import _get_reranker
+        s = Settings(_env_file=None, rerank_provider="openrouter", rerank_model="cohere/rerank-4-pro",
+                     openrouter_api_key="k", rerank_request_retries=5, rerank_retry_backoff=0.5)
+        comp = _get_reranker(s, top_n_override=3)
+        assert comp.retries == 5 and comp.retry_backoff == 0.5
+
+
+class TestProviderOverride:
+    def test_env_var_outranks_dotenv_without_override(self, tmp_path, monkeypatch):
+        # the problem being worked around: a plain RERANK_PROVIDER in .env loses to the container's env var
+        from app.config import RerankProvider
+        monkeypatch.setenv("RERANK_PROVIDER", "llm")
+        env = tmp_path / ".env"
+        env.write_text("RERANK_PROVIDER=openrouter\n", encoding="utf-8")
+        assert Settings(_env_file=str(env)).rerank_provider == RerankProvider.LLM
+
+    def test_override_from_dotenv_wins(self, tmp_path, monkeypatch):
+        from app.config import RerankProvider
+        monkeypatch.setenv("RERANK_PROVIDER", "llm")
+        env = tmp_path / ".env"
+        env.write_text("RERANK_PROVIDER_OVERRIDE=openrouter\nRERANK_MODEL=cohere/rerank-4-pro\n", encoding="utf-8")
+        s = Settings(_env_file=str(env))
+        assert s.rerank_provider == RerankProvider.OPENROUTER and s.rerank_model == "cohere/rerank-4-pro"
+
+    def test_empty_override_changes_nothing(self, monkeypatch):
+        from app.config import RerankProvider
+        monkeypatch.setenv("RERANK_PROVIDER", "llm")
+        assert Settings(_env_file=None).rerank_provider == RerankProvider.LLM
+
+    def test_bad_override_fails_loudly(self):
+        with pytest.raises(Exception):
+            Settings(_env_file=None, rerank_provider_override="nonexistent")

@@ -10,6 +10,7 @@ Failure is loud on purpose: an HTTP error, an empty result or an out-of-range / 
 order instead would look exactly like a reranker that agreed with retrieval.
 """
 import logging
+import time
 from typing import Optional, Sequence
 
 import httpx
@@ -18,6 +19,9 @@ from langchain_core.documents import BaseDocumentCompressor, Document
 from pydantic import ConfigDict
 
 logger = logging.getLogger(__name__)
+
+RETRY_STATUS = {429, 500, 502, 503, 504}
+MAX_RETRY_AFTER = 10.0
 
 
 class OpenRouterRerank(BaseDocumentCompressor):
@@ -31,6 +35,9 @@ class OpenRouterRerank(BaseDocumentCompressor):
     max_chars: int = 8000
     allow_fallbacks: bool = False
     zdr: bool = False
+    retries: int = 2
+    retry_backoff: float = 1.0
+    sleep: Optional[object] = None  # injected by tests; defaults to time.sleep
     transport: Optional[httpx.BaseTransport] = None  # injected by tests
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -45,14 +52,51 @@ class OpenRouterRerank(BaseDocumentCompressor):
         return {"model": self.model, "query": query, "documents": texts,
                 "top_n": min(self.top_n, len(texts)), "provider": provider}
 
+    def _wait(self, attempt: int, resp: Optional[httpx.Response]) -> float:
+        wait = self.retry_backoff * (2 ** attempt)
+        ra = resp.headers.get("retry-after") if resp is not None else None
+        if ra:
+            try:
+                wait = max(wait, min(float(ra), MAX_RETRY_AFTER))
+            except ValueError:
+                pass
+        return wait
+
+    def _post(self, payload: dict) -> httpx.Response:
+        """POST with retries on 429 / 5xx / connection errors. Returns the last response; a final error status
+        is left for the caller's raise_for_status, a final connection error is raised."""
+        url = self.base_url.rstrip("/") + "/rerank"
+        headers = {"Authorization": "Bearer " + self.api_key}
+        sleep = self.sleep or time.sleep
+        with httpx.Client(timeout=self.timeout, transport=self.transport) as client:
+            for attempt in range(self.retries + 1):
+                last = attempt == self.retries
+                try:
+                    resp = client.post(url, json=payload, headers=headers)
+                except httpx.TimeoutException:
+                    raise  # a timeout already cost `timeout` seconds; do not multiply it
+                except httpx.TransportError as e:
+                    if last:
+                        raise
+                    wait = self._wait(attempt, None)
+                    logger.warning("openrouter rerank retry %d/%d after %s, waiting %.1fs", attempt + 1, self.retries,
+                                   type(e).__name__, wait)
+                    sleep(wait)
+                    continue
+                if resp.status_code not in RETRY_STATUS or last:
+                    return resp
+                wait = self._wait(attempt, resp)
+                logger.warning("openrouter rerank retry %d/%d after HTTP %d, waiting %.1fs", attempt + 1, self.retries,
+                               resp.status_code, wait)
+                sleep(wait)
+        raise AssertionError("unreachable")
+
     def compress_documents(self, documents: Sequence[Document], query: str,
                            callbacks: Optional[Callbacks] = None) -> Sequence[Document]:
         docs = list(documents)
         if not docs:
             return []
-        with httpx.Client(timeout=self.timeout, transport=self.transport) as client:
-            resp = client.post(self.base_url.rstrip("/") + "/rerank", json=self.payload(docs, query),
-                               headers={"Authorization": "Bearer " + self.api_key})
+        resp = self._post(self.payload(docs, query))
         resp.raise_for_status()
         body = resp.json()
         results = body.get("results")

@@ -169,6 +169,16 @@ class Settings(BaseSettings):
     rerank_doc_max_chars: int = 8000
     rerank_openrouter_allow_fallbacks: bool = False  # False = only the model's own provider may serve it
     rerank_openrouter_zdr: bool = False              # True = only zero-data-retention endpoints
+    # Extra attempts after a 429 / 5xx / connection error (not after a read timeout, which already cost
+    # rerank_request_timeout). Backoff starts at rerank_retry_backoff seconds and doubles; a Retry-After header is
+    # honoured up to 10 s. Measured 2026-10-27 through OpenRouter: Voyage 5x 429 / 363, Qwen 23x 503 + 4x 429 / 360,
+    # Cohere 0 / 360. A request that still fails falls back to the pre-rerank order (logged by _rerank_results).
+    rerank_request_retries: int = 2
+    rerank_retry_backoff: float = 1.0
+    # Non-empty -> replaces rerank_provider after loading. Exists because the deployed container pins
+    # RERANK_PROVIDER in its process environment, which outranks /app/.env in pydantic-settings (measured
+    # 2026-10-27), so the provider cannot otherwise be changed without recreating the container.
+    rerank_provider_override: str = ""
 
     # Query expansion for vague queries (re-query with LLM-expanded terms)
     query_expansion_enabled: bool = True
@@ -346,6 +356,12 @@ class Settings(BaseSettings):
             elif legacy_key in values:
                 values.pop(legacy_key)
         return values
+
+    @model_validator(mode="after")
+    def _apply_rerank_provider_override(self):
+        if self.rerank_provider_override:
+            self.rerank_provider = RerankProvider(self.rerank_provider_override)
+        return self
 
     @model_validator(mode="after")
     def _validate_anonymization_key(self):

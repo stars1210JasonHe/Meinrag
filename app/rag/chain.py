@@ -345,6 +345,8 @@ def _get_reranker(settings: Settings, llm: BaseChatModel | None = None, top_n_ov
                 max_chars=settings.rerank_doc_max_chars,
                 allow_fallbacks=settings.rerank_openrouter_allow_fallbacks,
                 zdr=settings.rerank_openrouter_zdr,
+                retries=settings.rerank_request_retries,
+                retry_backoff=settings.rerank_retry_backoff,
             )
 
         elif provider == "llm":
