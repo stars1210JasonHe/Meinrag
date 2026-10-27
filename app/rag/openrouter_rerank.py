@@ -21,7 +21,7 @@ from pydantic import ConfigDict
 logger = logging.getLogger(__name__)
 
 RETRY_STATUS = {429, 500, 502, 503, 504}
-MAX_RETRY_AFTER = 10.0
+MAX_RETRY_AFTER = 5.0
 
 
 class OpenRouterRerank(BaseDocumentCompressor):
@@ -37,7 +37,9 @@ class OpenRouterRerank(BaseDocumentCompressor):
     zdr: bool = False
     retries: int = 2
     retry_backoff: float = 1.0
+    retry_budget: float = 8.0   # seconds; no retry starts if elapsed + next wait would exceed it
     sleep: Optional[object] = None  # injected by tests; defaults to time.sleep
+    clock: Optional[object] = None  # injected by tests; defaults to time.monotonic
     transport: Optional[httpx.BaseTransport] = None  # injected by tests
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -62,12 +64,22 @@ class OpenRouterRerank(BaseDocumentCompressor):
                 pass
         return wait
 
+    def _over_budget(self, elapsed: float, wait: float) -> bool:
+        if elapsed + wait <= self.retry_budget:
+            return False
+        logger.warning("openrouter rerank retry budget %.1fs used up (elapsed %.1fs, next wait %.1fs); giving up",
+                       self.retry_budget, elapsed, wait)
+        return True
+
     def _post(self, payload: dict) -> httpx.Response:
-        """POST with retries on 429 / 5xx / connection errors. Returns the last response; a final error status
-        is left for the caller's raise_for_status, a final connection error is raised."""
+        """POST with retries on 429 / 5xx / connection errors, within retry_budget seconds in total. Returns the
+        last response; a final error status is left for the caller's raise_for_status, a final connection error
+        is raised. Timeouts (connect, read, write, pool) are never retried."""
         url = self.base_url.rstrip("/") + "/rerank"
         headers = {"Authorization": "Bearer " + self.api_key}
         sleep = self.sleep or time.sleep
+        clock = self.clock or time.monotonic
+        t0 = clock()
         with httpx.Client(timeout=self.timeout, transport=self.transport) as client:
             for attempt in range(self.retries + 1):
                 last = attempt == self.retries
@@ -76,9 +88,9 @@ class OpenRouterRerank(BaseDocumentCompressor):
                 except httpx.TimeoutException:
                     raise  # a timeout already cost `timeout` seconds; do not multiply it
                 except httpx.TransportError as e:
-                    if last:
-                        raise
                     wait = self._wait(attempt, None)
+                    if last or self._over_budget(clock() - t0, wait):
+                        raise
                     logger.warning("openrouter rerank retry %d/%d after %s, waiting %.1fs", attempt + 1, self.retries,
                                    type(e).__name__, wait)
                     sleep(wait)
@@ -86,6 +98,8 @@ class OpenRouterRerank(BaseDocumentCompressor):
                 if resp.status_code not in RETRY_STATUS or last:
                     return resp
                 wait = self._wait(attempt, resp)
+                if self._over_budget(clock() - t0, wait):
+                    return resp
                 logger.warning("openrouter rerank retry %d/%d after HTTP %d, waiting %.1fs", attempt + 1, self.retries,
                                resp.status_code, wait)
                 sleep(wait)

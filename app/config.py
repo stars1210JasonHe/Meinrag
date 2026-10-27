@@ -2,7 +2,7 @@ from enum import Enum
 from typing import Literal
 from pathlib import Path
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -169,12 +169,15 @@ class Settings(BaseSettings):
     rerank_doc_max_chars: int = 8000
     rerank_openrouter_allow_fallbacks: bool = False  # False = only the model's own provider may serve it
     rerank_openrouter_zdr: bool = False              # True = only zero-data-retention endpoints
-    # Extra attempts after a 429 / 5xx / connection error (not after a read timeout, which already cost
+    # Extra attempts after a 429 / 5xx / connection error (not after any timeout, which already cost
     # rerank_request_timeout). Backoff starts at rerank_retry_backoff seconds and doubles; a Retry-After header is
-    # honoured up to 10 s. Measured 2026-10-27 through OpenRouter: Voyage 5x 429 / 363, Qwen 23x 503 + 4x 429 / 360,
+    # honoured up to 5 s. No retry starts once elapsed time + the next wait would pass rerank_retry_budget seconds:
+    # the rerank call is synchronous inside the async request path (single uvicorn worker), so every second spent
+    # here blocks the whole backend. Measured 2026-10-27 through OpenRouter: Voyage 5x 429 / 363, Qwen 23x 503 + 4x 429 / 360,
     # Cohere 0 / 360. A request that still fails falls back to the pre-rerank order (logged by _rerank_results).
-    rerank_request_retries: int = 2
-    rerank_retry_backoff: float = 1.0
+    rerank_request_retries: int = Field(2, ge=0)
+    rerank_retry_backoff: float = Field(1.0, ge=0)
+    rerank_retry_budget: float = Field(8.0, ge=0)
     # Non-empty -> replaces rerank_provider after loading. Exists because the deployed container pins
     # RERANK_PROVIDER in its process environment, which outranks /app/.env in pydantic-settings (measured
     # 2026-10-27), so the provider cannot otherwise be changed without recreating the container.

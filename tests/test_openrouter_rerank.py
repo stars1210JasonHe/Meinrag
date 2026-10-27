@@ -225,7 +225,7 @@ class TestRetry:
                          httpx.Response(429, headers={"Retry-After": "999"}),
                          httpx.Response(200, json={"results": [{"index": 0}]}))
         _compressor(h, sleep=waits.append).compress_documents(_docs(1), "q")
-        assert waits == [4.0, 10.0]
+        assert waits == [4.0, 5.0]
 
     def test_connection_error_retried_then_raised(self):
         h, calls = self._seq(httpx.ConnectError("down"))
@@ -239,12 +239,40 @@ class TestRetry:
             _compressor(h).compress_documents(_docs(1), "q")
         assert len(calls) == 1
 
+    def test_budget_stops_retrying(self):
+        # each attempt 'takes' 3 s on a fake clock; budget 8 s: attempt 1 (t=3) + wait 1 = 4 ok; attempt 2 (t=7)
+        # + wait 2 = 9 > 8 -> stop, so 2 requests, not 3
+        t = [0.0]
+        calls = []
+
+        def handler(request):
+            calls.append(1)
+            t[0] += 3.0
+            return httpx.Response(503)
+        waits = []
+        with pytest.raises(httpx.HTTPStatusError):
+            _compressor(handler, retries=5, retry_budget=8.0, clock=lambda: t[0],
+                        sleep=lambda s: (waits.append(s), t.__setitem__(0, t[0] + s))).compress_documents(_docs(1), "q")
+        assert len(calls) == 2 and waits == [1.0]
+
+    def test_budget_zero_means_no_retry(self):
+        h, calls = self._seq(httpx.Response(429))
+        with pytest.raises(httpx.HTTPStatusError):
+            _compressor(h, retry_budget=0.0).compress_documents(_docs(1), "q")
+        assert len(calls) == 1
+
+    def test_negative_settings_rejected(self):
+        for kw in ({"rerank_request_retries": -1}, {"rerank_retry_backoff": -1.0}, {"rerank_retry_budget": -1.0}):
+            with pytest.raises(Exception):
+                Settings(_env_file=None, **kw)
+
     def test_settings_reach_the_compressor(self, monkeypatch):
         from app.rag.chain import _get_reranker
         s = Settings(_env_file=None, rerank_provider="openrouter", rerank_model="cohere/rerank-4-pro",
-                     openrouter_api_key="k", rerank_request_retries=5, rerank_retry_backoff=0.5)
+                     openrouter_api_key="k", rerank_request_retries=5, rerank_retry_backoff=0.5,
+                     rerank_retry_budget=3.0)
         comp = _get_reranker(s, top_n_override=3)
-        assert comp.retries == 5 and comp.retry_backoff == 0.5
+        assert comp.retries == 5 and comp.retry_backoff == 0.5 and comp.retry_budget == 3.0
 
 
 class TestProviderOverride:
