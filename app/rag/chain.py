@@ -275,7 +275,7 @@ def _get_reranker(settings: Settings, llm: BaseChatModel | None = None, top_n_ov
     """Create a document compressor based on the configured rerank provider.
 
     Supported providers: flashrank (default, local CPU), cross-encoder (local GPU),
-    jina (API), cohere (API), llm (uses chat model).
+    jina (API), cohere (API), openrouter (API, hosted rerank models), llm (uses chat model).
 
     The heavy model backends are cached process-wide (see
     _reranker_client_cache); only the thin compressor wrapper is per-call.
@@ -328,6 +328,23 @@ def _get_reranker(settings: Settings, llm: BaseChatModel | None = None, top_n_ov
             return CohereRerank(
                 model=model or "rerank-english-v3.0",
                 top_n=top_n,
+            )
+
+        elif provider == "openrouter":
+            from app.rag.openrouter_rerank import OpenRouterRerank
+            if not model:
+                raise ValueError("rerank_provider=openrouter needs rerank_model (e.g. voyageai/rerank-3)")
+            if not settings.openrouter_api_key:
+                raise ValueError("rerank_provider=openrouter needs OPENROUTER_API_KEY")
+            return OpenRouterRerank(
+                model=model,
+                api_key=settings.openrouter_api_key,
+                top_n=top_n,
+                base_url=settings.rerank_openrouter_base_url,
+                timeout=settings.rerank_request_timeout,
+                max_chars=settings.rerank_doc_max_chars,
+                allow_fallbacks=settings.rerank_openrouter_allow_fallbacks,
+                zdr=settings.rerank_openrouter_zdr,
             )
 
         elif provider == "llm":

@@ -29,6 +29,7 @@ class RerankProvider(str, Enum):
     JINA = "jina"
     COHERE = "cohere"
     LLM = "llm"
+    OPENROUTER = "openrouter"
 
 
 class Settings(BaseSettings):
@@ -160,6 +161,14 @@ class Settings(BaseSettings):
     # legacy behavior of re-sorting by composite after rerank, which discards
     # the cross-encoder's judgment.
     rerank_final_order: bool = True
+    # rerank_provider=openrouter: hosted rerank models through OpenRouter's /rerank (uses openrouter_api_key;
+    # rerank_model is REQUIRED, e.g. voyageai/rerank-3 -- there is no default, so a typo cannot silently pick
+    # an English-only model). Documents are cut to rerank_doc_max_chars characters before sending (0 = no cut).
+    rerank_openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    rerank_request_timeout: float = 30.0
+    rerank_doc_max_chars: int = 8000
+    rerank_openrouter_allow_fallbacks: bool = False  # False = only the model's own provider may serve it
+    rerank_openrouter_zdr: bool = False              # True = only zero-data-retention endpoints
 
     # Query expansion for vague queries (re-query with LLM-expanded terms)
     query_expansion_enabled: bool = True
