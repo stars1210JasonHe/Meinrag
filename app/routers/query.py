@@ -4,6 +4,8 @@ import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from app.config import Settings
@@ -594,14 +596,24 @@ async def search_documents(
             # This endpoint produces no answer, so it must not be trimmed to fit this
             # service's model window. Same reasoning as the two opt-outs above.
             enforce_token_budget=False,
+            debug_target=request.debug_target.model_dump() if request.debug_target else None,
         )
-        return SearchResponse(
+        response = SearchResponse(
             results=result.sources,
             confidence_tier=result.confidence_tier,
             total_available=result.chunks_available,
             stage_counts=result.stage_counts,
             query_types=result.query_types,
         )
+        if result.target_trace is None:
+            return response
+        # The debug key is added OUTSIDE the declared response model on purpose. Declaring it
+        # as an optional field would put `"target_trace": null` into every ordinary response,
+        # and the contract for this diagnostic is that a request without debug_target gets
+        # exactly the response it got before.
+        body = jsonable_encoder(response)
+        body["target_trace"] = result.target_trace
+        return JSONResponse(content=body)
     except Exception as e:
         logger.exception("Search failed")
         err_msg = str(e).lower()
