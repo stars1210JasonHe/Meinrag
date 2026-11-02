@@ -333,6 +333,50 @@ class TestRerankPoolReachesTheCut:
         assert seen == [30]
 
 
+class TestSectionSamplingPool:
+    """2026-10-26: the section_sampling branch still cut to top_k after the pool was adopted for demote_references;
+    all 5 strategy-cut losses in the 120-q target trace were on it. Opt-in, so the default must keep top_k."""
+
+    def test_default_off_keeps_top_k(self):
+        from app.services.retrieval import _section_sample_k
+        assert _section_sample_k(_settings(rerank_enabled=True), 10) == 10   # MagicMock attr is not True
+
+    def test_on_uses_pool(self):
+        from app.services.retrieval import _section_sample_k
+        assert _section_sample_k(_settings(rerank_enabled=True, rerank_pool_section_sampling=True), 10) == 30
+
+    def test_on_without_reranker_keeps_top_k(self):
+        from app.services.retrieval import _section_sample_k
+        s = _settings(rerank_enabled=False, rerank_pool_section_sampling=True)
+        assert _section_sample_k(s, 10) == 10
+
+    def test_default_is_off(self):
+        from app.config import Settings
+        assert Settings.model_fields["rerank_pool_section_sampling"].default is False
+
+
+@pytest.mark.asyncio
+class TestSectionSamplingPoolReachesTheCut:
+    async def _seen_k(self, monkeypatch, **overrides):
+        from app.services import retrieval as r
+        seen = []
+        orig = r._section_aware_sample
+        monkeypatch.setattr(r, "_section_aware_sample", lambda res, top_k: seen.append(top_k) or orig(res, top_k))
+        settings = _settings(rerank_enabled=True, **overrides)
+        vector_store, llm, edge_repo = _deps([(_chunk("d1", i), 0.9 - i / 100) for i in range(40)])
+        llm.ainvoke = AsyncMock(return_value=AIMessage(content='{"types": ["overview"], "label": null}'))
+        monkeypatch.setattr(r, "_rerank_results", AsyncMock(side_effect=lambda res, *a, **k: (res, False)))
+        await _run(settings, vector_store, llm, edge_repo, doc_ids=["d1"])
+        return seen
+
+    async def test_overview_query_gets_pool_when_on(self, monkeypatch):
+        assert await self._seen_k(monkeypatch, rerank_pool_section_sampling=True) == [30]
+
+    async def test_overview_query_keeps_top_k_when_off(self, monkeypatch):
+        # negative control: same query, flag off -> the branch still cuts to top_k (4 in _run)
+        assert await self._seen_k(monkeypatch) == [4]
+
+
 def test_adopted_retrieval_defaults():
     """gate 4000 + pool 30 were adopted TOGETHER on 2026-09-30 (the gain needs both). Pins the class defaults so
     a revert of one without the other is a visible test change, not a silent drift."""
