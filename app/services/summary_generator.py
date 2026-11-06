@@ -93,11 +93,15 @@ async def generate_doc_summary(section_summaries: dict, settings, llm=None) -> s
     return None
 
 
-async def generate_all_summaries(doc_id: str, settings, vector_store=None, summary_store=None) -> None:
+async def generate_all_summaries(doc_id: str, settings, vector_store=None, summary_store=None,
+                                 defer_persist: bool = False) -> None:
     """Orchestrator: generate chunk + doc summaries for a document.
 
     This is a standalone async function — can be called from BackgroundTasks
     or ARQ worker without changes.
+
+    defer_persist=True (bulk ingest): the summaries land in memory and both stores are marked dirty instead of
+    saved; the uploader flushes once via POST /documents/persist.
     """
     if not vector_store:
         logger.warning("No vector store provided for summary generation")
@@ -159,7 +163,10 @@ async def generate_all_summaries(doc_id: str, settings, vector_store=None, summa
                                     and chunk.metadata.get("summary")):
                                 doc.metadata["summary"] = chunk.metadata["summary"]
                                 break
-                vector_store.persist()
+                if defer_persist and hasattr(vector_store, "mark_dirty"):
+                    vector_store.mark_dirty()
+                else:
+                    vector_store.persist()
         except Exception as e:
             logger.warning("Failed to persist summaries to vector store: %s", e)
 
@@ -175,8 +182,12 @@ async def generate_all_summaries(doc_id: str, settings, vector_store=None, summa
                 ))
         if summary_docs:
             try:
-                summary_store.add_documents(summary_docs, doc_id=doc_id)
-                logger.info("Added %d summary embeddings for %s", len(summary_docs), doc_id)
+                if defer_persist:
+                    summary_store.add_documents(summary_docs, doc_id=doc_id, persist=False)
+                else:
+                    summary_store.add_documents(summary_docs, doc_id=doc_id)
+                logger.info("Added %d summary embeddings for %s%s", len(summary_docs), doc_id,
+                            " (persist deferred)" if defer_persist else "")
             except Exception as e:
                 logger.warning("Failed to add summary embeddings: %s", e)
 

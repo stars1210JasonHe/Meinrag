@@ -23,8 +23,12 @@ class VectorStoreManager(ABC):
         ...
 
     @abstractmethod
-    def add_documents(self, documents: list[Document], doc_id: str) -> list[str]:
-        """Add documents tagged with a logical document ID. Returns chunk IDs."""
+    def add_documents(self, documents: list[Document], doc_id: str, persist: bool = True) -> list[str]:
+        """Add documents tagged with a logical document ID. Returns chunk IDs.
+
+        persist=False: keep the new vectors in memory only and mark the store dirty; the caller owns a later
+        persist() (bulk ingest, see Settings.deferred_persist_enabled). Stores that persist on every write
+        ignore it."""
         ...
 
     @abstractmethod

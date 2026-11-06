@@ -20,7 +20,8 @@ class ChromaStoreManager(VectorStoreManager):
             persist_directory=self._persist_dir,
         )
 
-    def add_documents(self, documents: list[Document], doc_id: str) -> list[str]:
+    def add_documents(self, documents: list[Document], doc_id: str, persist: bool = True) -> list[str]:
+        # persist is ignored: Chroma writes are immediately durable
         if not documents:
             return []  # keep the empty-batch no-op contract in sync with FAISS
         for doc in documents:

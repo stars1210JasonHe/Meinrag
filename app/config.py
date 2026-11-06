@@ -204,6 +204,13 @@ class Settings(BaseSettings):
     # Query types config file (defines types, strategies, scoring weights)
     query_types_file: str = "data/query_types.json"
 
+    # Bulk ingest: an upload with ?defer_persist=true skips the per-document FULL-index saves (3 per document:
+    # main store on add, main store again after chunk summaries, summary store) and the caller flushes once with
+    # POST /documents/persist. Measured 2026-11-06 on the live NAS index (1.6 GB faiss + 0.56 GB pkl, summary
+    # store 1.5 GB): 10.0 + 12.6 + 7.7 = 30.3 s of a 40 s single-chunk upload. False -> the flag is ignored.
+    deferred_persist_enabled: bool = True
+    deferred_persist_admin_user: str = "admin"  # X-User-Id allowed to call POST /documents/persist
+
     # Background task backend
     task_backend: str = "background"  # "background" (FastAPI) or "arq" (Redis)
     redis_url: str = "redis://localhost:6379"
