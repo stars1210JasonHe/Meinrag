@@ -1444,6 +1444,7 @@ def _rrf_merge_dual(
     summary_results: list[tuple],
     k: int = 60,
     entrant_source: str = "summary",
+    raw_lookup=None,
 ) -> list[tuple]:
     """Merge raw-chunk and summary-chunk vector search results via Reciprocal Rank Fusion.
 
@@ -1465,6 +1466,17 @@ def _rrf_merge_dual(
     retriever is the hypothetical-document probe) — an honest query-dependent
     magnitude; the compression skew is an ORDERING fairness problem, which RRF
     (not magnitude) handles.
+
+    `raw_lookup` (summary index only): a callable taking a list of
+    (doc_id, chunk_index) keys and returning {key: raw Document}. A summary-store
+    Document's page_content IS the generated summary (summary_generator), so an
+    entrant found only by the summary retriever must be swapped for its raw chunk
+    before it leaves this function -- otherwise callers receive model-written text
+    as if it were the source (measured 2026-11-10 on the deployed MCP channels:
+    content == summary on 4/38, 2/40 and 10/37 top-10 hits). An entrant whose raw
+    chunk cannot be fetched is DROPPED and counted in a warning: returning the
+    summary in its place would be the defect itself. Leave it None when the second
+    retriever already returns raw chunks (HyDE probes the raw store).
     """
     rrf: dict[tuple, list] = {}  # (doc_id, chunk_index) -> [doc, rrf_score]
 
@@ -1472,14 +1484,34 @@ def _rrf_merge_dual(
         key = (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index"))
         rrf[key] = [doc, 1.0 / (k + rank)]
 
+    entrant_cosine: dict[tuple, float] = {}
     for rank, (doc, cosine) in enumerate(summary_results, 1):
         key = (doc.metadata.get("doc_id"), doc.metadata.get("chunk_index"))
         contribution = 1.0 / (k + rank)
         if key in rrf:
             rrf[key][1] += contribution  # consensus — keep raw doc object (+ its raw cosine)
         else:
-            _stamp_query_sim(doc, cosine, entrant_source)
+            entrant_cosine[key] = cosine
             rrf[key] = [doc, contribution]
+
+    if raw_lookup is not None and entrant_cosine:
+        found = raw_lookup(list(entrant_cosine))
+        missing = [key for key in entrant_cosine if key not in found]
+        for key in missing:
+            del rrf[key]
+            del entrant_cosine[key]
+        for key in entrant_cosine:
+            raw_doc = found[key]
+            # FAISS hands out shared Document objects: clear a flag a previous
+            # query may have left, exactly as the raw vector-search path does.
+            raw_doc.metadata.pop("_mandatory", None)
+            rrf[key][0] = raw_doc
+        if missing:
+            logger.warning("Dual-index: %d %s-only hit(s) dropped -- raw chunk not found "
+                           "(summary store out of sync with the raw store?)",
+                           len(missing), entrant_source)
+    for key, cosine in entrant_cosine.items():
+        _stamp_query_sim(rrf[key][0], cosine, entrant_source)
 
     merged = [(doc, score) for doc, score in rrf.values()]
 
@@ -1491,6 +1523,29 @@ def _rrf_merge_dual(
     # Sort desc — downstream pipeline assumes this invariant.
     merged.sort(key=lambda x: x[1], reverse=True)
     return merged
+
+
+def _raw_chunk_lookup(vector_store, doc_ids):
+    """Build the `raw_lookup` for `_rrf_merge_dual`: fetch raw chunks by
+    (doc_id, chunk_index), one get_chunks_by_doc call per document.
+
+    Scoped like the searches that produced the keys: `doc_ids` given -> only those
+    documents; None -> the request was unscoped, and the keys came from an equally
+    unscoped summary search, so there is nothing narrower to enforce.
+    """
+    allowed = set(doc_ids) if doc_ids else None
+
+    def lookup(keys):
+        wanted: dict = {}
+        for doc_id, idx in keys:
+            wanted.setdefault(doc_id, []).append(idx)
+        out = {}
+        for doc_id, idxs in wanted.items():
+            for d in vector_store.get_chunks_by_doc(doc_id, idxs, allowed_doc_ids=allowed):
+                out[(doc_id, d.metadata.get("chunk_index"))] = d
+        return out
+
+    return lookup
 
 
 async def retrieve_and_rank(
@@ -1679,8 +1734,10 @@ async def retrieve_and_rank(
             )
             if summary_results:
                 before = len(retrieved)
-                retrieved = _rrf_merge_dual(retrieved, summary_results,
-                                            k=settings.rrf_k)
+                retrieved = _rrf_merge_dual(
+                    retrieved, summary_results, k=settings.rrf_k,
+                    raw_lookup=_raw_chunk_lookup(vector_store, doc_ids),
+                )
                 logger.info("Dual-index: merged %d raw + %d summary -> %d results",
                            before, len(summary_results), len(retrieved))
                 _trace(settings, "dual_merge", retrieved)
