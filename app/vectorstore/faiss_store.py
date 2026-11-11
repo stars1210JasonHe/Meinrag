@@ -51,6 +51,16 @@ class FAISSStoreManager(VectorStoreManager):
         # linearly scans the whole docstore — corpus-linear cost paid several
         # times per query (coverage, visual proximity, graph expansion).
         self._doc_id_index: dict[str, list[str]] | None = None
+        # True while the in-memory store holds writes no persist() has saved yet (deferred bulk ingest).
+        self._dirty: bool = False
+
+    @property
+    def dirty(self) -> bool:
+        return self._dirty
+
+    def mark_dirty(self) -> None:
+        """A caller changed the in-memory store and deferred the save (it owns a later persist())."""
+        self._dirty = True
 
     def _recover_interrupted_publish(self) -> None:
         """If a publish was interrupted, put a COMPLETE index back at the live path.
@@ -119,7 +129,7 @@ class FAISSStoreManager(VectorStoreManager):
             )
             self._gpu_enabled = _try_gpu_index(self._store)
 
-    def add_documents(self, documents: list[Document], doc_id: str) -> list[str]:
+    def add_documents(self, documents: list[Document], doc_id: str, persist: bool = True) -> list[str]:
         if not documents:
             # An empty batch reaches faiss as a 1-D array and crashes its
             # (n, d) shape unpack — refuse it here, callers get a no-op.
@@ -143,7 +153,10 @@ class FAISSStoreManager(VectorStoreManager):
                 _try_gpu_index(self._store)
 
         self._doc_id_index = None
-        self.persist()
+        if persist:
+            self.persist()
+        else:
+            self._dirty = True
         return [f"{doc_id}_chunk_{i}" for i in range(len(documents))]
 
     def delete_document(self, doc_id: str) -> None:
@@ -404,12 +417,14 @@ class FAISSStoreManager(VectorStoreManager):
                     cpu_index = faiss_lib.index_gpu_to_cpu(self._store.index)
                     self._store.index = cpu_index
                     self._atomic_save()
+                    self._dirty = False
                     # Move back to GPU
                     _try_gpu_index(self._store)
                     return
                 except Exception as e:
                     logger.warning("GPU→CPU persist failed, saving as-is: %s", e)
             self._atomic_save()
+            self._dirty = False  # only after a save that did not raise
 
     def update_document_metadata(
         self, doc_id: str, metadata_updates: dict, persist: bool = True,
