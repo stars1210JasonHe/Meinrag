@@ -50,6 +50,42 @@ def is_boilerplate_chunk(text: str) -> bool:
         return False
     return bool(_BOILERPLATE_RE.search(text))
 
+
+# ── Navigation (header / table-of-contents) chunks ───────────────────────
+# A statute exported from a legal database starts with a block such as
+#   中华人民共和国行政诉讼法(2014修正)
+#   【发布部门】 全国人民代表大会
+#   【发文字号】 主席令第15号 ...
+#   目录 第一章 总则 第二章 受案范围 ...
+# That chunk carries the title and version, so a question that NAMES the
+# statute matches it strongly, but it holds no provision. Measured 2026-11-20
+# on the 2014 Administrative Litigation Law: it is the doc's #1 chunk by
+# embedding similarity for "2014年修正的《行政诉讼法》规定的起诉期限是多久",
+# while the provision that answers (Art. 46) is #4.
+
+_NAV_FIELD_RE = re.compile(r"【[^】\n]{1,8}】")
+_NAV_CHAPTER_RE = re.compile(r"第[一二三四五六七八九十百零〇\d]+章")
+_NAV_ARTICLE_RE = re.compile(r"第[一二三四五六七八九十百千零〇\d]+条")
+NAV_MIN_FIELDS = 3
+NAV_MIN_TOC_CHAPTERS = 3
+
+
+def is_navigation_chunk(text: str) -> bool:
+    """True for a header / table-of-contents chunk that contains no provision.
+
+    Either >= NAV_MIN_FIELDS bracketed metadata fields (【发布部门】...), or a
+    "目录" with >= NAV_MIN_TOC_CHAPTERS chapter headings, AND no article marker
+    (第…条). A chunk that already contains an article is real content, even if
+    a header sits on top of it.
+    """
+    if not text:
+        return False
+    if _NAV_ARTICLE_RE.search(text):
+        return False
+    if len(_NAV_FIELD_RE.findall(text)) >= NAV_MIN_FIELDS:
+        return True
+    return "目录" in text and len(_NAV_CHAPTER_RE.findall(text)) >= NAV_MIN_TOC_CHAPTERS
+
 _REF_HEADING_KEYWORDS = re.compile(
     r"\b(references|bibliography|works\s+cited)\b", re.IGNORECASE
 )

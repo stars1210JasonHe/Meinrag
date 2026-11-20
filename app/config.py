@@ -127,6 +127,16 @@ class Settings(BaseSettings):
     # and off, compare recall against result concentration), not to switch the
     # guarantee off casually. True is today's behaviour, unchanged.
     per_doc_cap_enabled: bool = True
+    # Header-only docs: when a document reached the candidates only through its header /
+    # table-of-contents chunk (【发布部门】…, 目录), embed its other chunks and add the
+    # `nav_expansion_per_doc` most similar so the reranker can pick the provision. Off by
+    # default: turning it on changes answers, so it is enabled per deployment after the
+    # acceptance run (neo outputs/meinrag-version-fix-20261120). Cost: one embedding call of at
+    # most max_docs * max_scan chunks, only on queries that hit a header.
+    nav_expansion_enabled: bool = False
+    nav_expansion_max_docs: int = 3
+    nav_expansion_per_doc: int = 3
+    nav_expansion_max_scan: int = 200
     # A caller may declare, per request, the collection it is confined to
     # (`X-Scope-Collection`); the backend then refuses documents outside it.
     # This flag decides what to do with a caller that declares NOTHING:
