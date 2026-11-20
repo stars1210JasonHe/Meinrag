@@ -848,6 +848,92 @@ def _link_nearby_visuals(
     return retrieved + extra_with_scores
 
 
+def _expand_navigation_hits(
+    retrieved: list,
+    vector_store: VectorStoreManager,
+    question: str,
+    embeddings,
+    max_docs: int = 3,
+    per_doc: int = 3,
+    max_scan: int = 200,
+) -> list:
+    """When a document reached the candidates ONLY through its header chunk, add its best provisions.
+
+    Why (measured 2026-11-20, question "2014年修正的《行政诉讼法》规定的起诉期限是多久"): a question that
+    names a statute matches the statute's header chunk (title, 【发布部门】, 目录) best of all its
+    chunks, so the header enters the candidate pool and the provision that answers (Art. 46,
+    六个月) does not. The production reranker ranks Art. 46 FIRST among that doc's 51 chunks when
+    it is offered, so the defect is pool admission, not ranking: offer the reranker the doc's
+    provisions and it picks the right one.
+
+    For up to `max_docs` docs (in retrieval order) whose ONLY retrieved chunks are navigation
+    chunks: read the doc's chunks (skipped if it has more than `max_scan`), drop navigation
+    chunks and ones already retrieved, embed the rest and append the `per_doc` most similar,
+    stamped with their true cosine (source "nav_expansion"). Embedding cost: at most
+    max_docs * max_scan chunks per query, and only on queries that hit a header.
+    """
+    from app.services.chunk_utils import is_navigation_chunk
+
+    if not retrieved or not question or embeddings is None or max_docs <= 0 or per_doc <= 0:
+        return retrieved
+
+    nav_docs: list[str] = []
+    has_content: set[str] = set()
+    retrieved_keys = set()
+    for doc, _ in retrieved:
+        meta = doc.metadata
+        did = meta.get("doc_id")
+        retrieved_keys.add((did, meta.get("chunk_index")))
+        if is_navigation_chunk(doc.page_content):
+            if did not in nav_docs:
+                nav_docs.append(did)
+        else:
+            has_content.add(did)
+    targets = [d for d in nav_docs if d and d not in has_content][:max_docs]
+    if not targets:
+        return retrieved
+
+    extra = []
+    for did in targets:
+        chunks = vector_store.get_chunks_by_doc(did, allowed_doc_ids=None)
+        if len(chunks) > max_scan:
+            logger.info("Nav expansion: doc %s has %d chunks > max_scan %d, skipped", did, len(chunks), max_scan)
+            continue
+        extra.extend(
+            c for c in chunks
+            if (did, c.metadata.get("chunk_index")) not in retrieved_keys
+            and not is_navigation_chunk(c.page_content)
+        )
+    if not extra:
+        return retrieved
+
+    try:
+        import numpy as np
+        q = np.array(embeddings.embed_query(question), dtype=np.float64)
+        m = np.array(embeddings.embed_documents([c.page_content for c in extra]), dtype=np.float64)
+        sims = (m @ q) / (np.linalg.norm(m, axis=1) * np.linalg.norm(q) + 1e-10)
+    except Exception as e:
+        # Fail open: the pipeline continues exactly as before this stage existed.
+        logger.warning("Nav expansion: embedding failed, skipped: %s", e)
+        return retrieved
+
+    by_doc: dict[str, list[tuple]] = {}
+    for c, s in zip(extra, sims):
+        by_doc.setdefault(c.metadata.get("doc_id"), []).append((c, max(0.0, float(s))))
+    added = []
+    for did in targets:
+        best = sorted(by_doc.get(did, []), key=lambda t: t[1], reverse=True)[:per_doc]
+        for c, s in best:
+            _stamp_query_sim(c, s, "nav_expansion")
+            c.metadata.pop("_mandatory", None)  # shared docstore object — never inherit
+            added.append((c, s))
+    if added:
+        logger.info("Nav expansion: %d header-only docs -> added %d chunks (%s)",
+                    len(targets), len(added),
+                    ", ".join("%s:%s" % (c.metadata.get("doc_id"), c.metadata.get("chunk_index")) for c, _ in added))
+    return retrieved + added
+
+
 # ---------------------------------------------------------------------------
 # Source chunk building
 # ---------------------------------------------------------------------------
@@ -1894,6 +1980,18 @@ async def retrieve_and_rank(
             proximity_pages=settings.visual_proximity_pages,
         )
         logger.debug("[TRACE] after visual_proximity: %d chunks", len(retrieved))
+
+    # 8b. Header-only docs -> offer their best provisions to the reranker (see _expand_navigation_hits)
+    # `is True`, not truthiness: an off-by-default stage must stay off under a mocked Settings
+    # (a MagicMock attribute is truthy, which switched it on in test_dual_index_raw_content).
+    if getattr(settings, "nav_expansion_enabled", False) is True:
+        retrieved = _expand_navigation_hits(
+            retrieved, vector_store, question, embeddings,
+            max_docs=settings.nav_expansion_max_docs,
+            per_doc=settings.nav_expansion_per_doc,
+            max_scan=settings.nav_expansion_max_scan,
+        )
+        _trace(settings, "nav_expansion", retrieved)
 
     # 9. Graph expansion (decay from scoring profile)
     retrieved = await _expand_via_edges(
