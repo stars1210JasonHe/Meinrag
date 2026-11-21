@@ -330,6 +330,16 @@ def _pre_rerank_cut_k(settings, top_k: int) -> int:
     return max(top_k, pool)
 
 
+def _coverage_max_scope(settings) -> int:
+    """settings.per_doc_coverage_max_scope, with anything that is not a real int read as 0 (no limit, today's
+    behaviour) - same rule as _pre_rerank_cut_k: MagicMock settings in tests, or a malformed env value, must
+    not crash retrieval."""
+    v = getattr(settings, "per_doc_coverage_max_scope", 0)
+    if not isinstance(v, int) or isinstance(v, bool):
+        return 0
+    return v
+
+
 def _demote_reference_results(
     results: list[tuple], top_k: int
 ) -> list[tuple]:
@@ -1239,8 +1249,13 @@ def _ensure_per_doc_coverage(
     question: str = "",
     vector_store=None,
     max_backfill: int = 30,
+    max_scope: int = 0,
 ) -> list[tuple]:
     """Guarantee at least 1 chunk from every doc the user explicitly selected.
+
+    `max_scope` > 0: a scope with more docs than that is returned untouched (no mandatory
+    marks, no backfill), because the guarantee cannot be kept there and a partial version
+    pins arbitrary docs into the context. See settings.per_doc_coverage_max_scope.
 
     For each scope_doc_id, mark the highest-scored existing chunk as _mandatory
     in metadata. If a scope doc is entirely missing from retrieved, backfill via
@@ -1252,6 +1267,12 @@ def _ensure_per_doc_coverage(
     chunk in the final LLM context, regardless of score or budget pressure.
     """
     if not scope_doc_ids or len(scope_doc_ids) <= 1:
+        return retrieved
+    if max_scope > 0 and len(scope_doc_ids) > max_scope:
+        logger.info(
+            "Per-doc coverage: skipped, scope %d docs > per_doc_coverage_max_scope %d",
+            len(scope_doc_ids), max_scope,
+        )
         return retrieved
 
     scope_set = set(scope_doc_ids)  # collection scopes reach thousands of ids
@@ -1944,6 +1965,7 @@ async def retrieve_and_rank(
             retrieved, pre_narrow_candidates, doc_ids,
             question=question, vector_store=vector_store,
             max_backfill=settings.per_doc_coverage_max_backfill,
+            max_scope=_coverage_max_scope(settings),
         )
         logger.debug("[TRACE] after per_doc_coverage: %d chunks", len(retrieved))
         _trace(settings, "coverage", retrieved)
