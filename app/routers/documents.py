@@ -73,6 +73,7 @@ async def upload_document(
     auto_suggest: bool = True,
     primary_category: str | None = Query(default=None, description="Override doc_type/category (deterministic ingest); when set, skips the classifier"),
     subtags: list[str] | None = Query(default=None, description="Override subtags (repeatable); preserved if provided, else the classifier fills them"),
+    defer_persist: bool = Query(default=False, description="Bulk ingest: skip the per-document full-index saves; the caller MUST flush with POST /documents/persist (vectors live in memory only until then)"),
     settings: Settings = Depends(get_settings),
     vector_store: VectorStoreManager = Depends(get_vector_store),
     llm: BaseChatModel = Depends(get_llm),
@@ -298,7 +299,11 @@ async def upload_document(
             if primary_category:
                 chunk.metadata["primary_category"] = primary_category
 
-        vector_store.add_documents(chunks, doc_id=doc_id)
+        defer = defer_persist and settings.deferred_persist_enabled
+        if defer:
+            vector_store.add_documents(chunks, doc_id=doc_id, persist=False)
+        else:
+            vector_store.add_documents(chunks, doc_id=doc_id)
         from app.rag.chain import invalidate_bm25_cache
         invalidate_bm25_cache()
 
@@ -334,12 +339,21 @@ async def upload_document(
         if settings.summary_enabled:
             from app.services.task_dispatcher import enqueue_summary_task
             await registry.update_status(doc_id, "summarizing")
-            await enqueue_summary_task(
-                doc_id, settings,
-                background_tasks=background_tasks,
-                vector_store=vector_store,
-                summary_store=summary_store,
-            )
+            if defer:
+                await enqueue_summary_task(
+                    doc_id, settings,
+                    background_tasks=background_tasks,
+                    vector_store=vector_store,
+                    summary_store=summary_store,
+                    defer_persist=True,
+                )
+            else:
+                await enqueue_summary_task(
+                    doc_id, settings,
+                    background_tasks=background_tasks,
+                    vector_store=vector_store,
+                    summary_store=summary_store,
+                )
 
         # Register metadata
         await registry.add(
@@ -561,6 +575,61 @@ async def get_corpus_stats(
         edges=edges,
         documents=len(docs),
     )
+
+
+# --- Bulk ingest: deferred persist -------------------------------------------------------------------------
+# Declared BEFORE every /{doc_id}/... route so "persist-status" is never captured as a doc_id.
+#
+# CRASH WINDOW (read before using ?defer_persist=true): a deferred document's registry row, edges and upload
+# file are durable at once, its vectors are not. If the process dies before the flush, those documents are in
+# Postgres with NO vectors: invisible to search, and the next normal persist does not bring them back.
+# Detect with app/services/reconcile.py (registry vs vector store); fix by deleting + re-uploading the listed
+# doc_ids. A graceful shutdown persists the main store (lifespan) but NOT the summary store.
+
+def _persist_status(vector_store, summary_store) -> dict:
+    from app.services.task_dispatcher import deferred_pending
+    return {
+        "main_dirty": bool(getattr(vector_store, "dirty", False)),
+        "summary_dirty": bool(getattr(summary_store, "dirty", False)) if summary_store else False,
+        "pending_summary_tasks": len(deferred_pending()),
+    }
+
+
+@router.get("/persist-status")
+async def persist_status(
+    vector_store: VectorStoreManager = Depends(get_vector_store),
+    summary_store=Depends(get_summary_store),
+):
+    """Whether deferred writes are waiting for POST /documents/persist."""
+    return _persist_status(vector_store, summary_store)
+
+
+@router.post("/persist")
+async def flush_persist(
+    force: bool = Query(default=False, description="Flush even while deferred summary tasks are still running"),
+    settings: Settings = Depends(get_settings),
+    vector_store: VectorStoreManager = Depends(get_vector_store),
+    summary_store=Depends(get_summary_store),
+    current_user: str = Depends(get_current_user),
+):
+    """Save the main and summary stores ONCE (the flush a ?defer_persist=true ingest owes).
+
+    409 while deferred summary tasks are still running, unless force=true: a flush now would miss the
+    summaries they add afterwards, and the caller would believe it was done."""
+    import time as _time
+    if current_user != settings.deferred_persist_admin_user:
+        raise HTTPException(status_code=403, detail="persist is admin-only")
+    before = _persist_status(vector_store, summary_store)
+    if before["pending_summary_tasks"] and not force:
+        raise HTTPException(status_code=409, detail=before)
+    t0 = _time.monotonic()
+    vector_store.persist()
+    if summary_store is not None:
+        summary_store.persist()
+    secs = round(_time.monotonic() - t0, 1)
+    after = _persist_status(vector_store, summary_store)
+    logger.info("Deferred persist flushed in %.1fs (before=%s after=%s)", secs, before, after)
+    return {"seconds": secs, "before": before, "after": after}
 
 
 @router.post("/collections/save", response_model=SaveCollectionResponse)
