@@ -114,6 +114,16 @@ class Settings(BaseSettings):
     # blow-up. Surfaced docs are always covered; only missing-doc backfill is
     # capped. Tuned to answer capacity, not collection size.
     per_doc_coverage_max_backfill: int = 30
+    # Largest scope (number of docs) for which per-doc coverage runs at all. Above it, no chunk
+    # is marked mandatory and nothing is backfilled: the scope is ranked like an unscoped query.
+    # Why: coverage promises every selected doc a voice. On a scope larger than the backfill cap
+    # that promise cannot be kept, and what remains is harmful - every surfaced doc becomes
+    # mandatory (so the token budget can no longer drop the weak ones) and the backfill takes
+    # the first `max_backfill` missing docs in SCOPE-LIST order, not by relevance. Measured on
+    # the 3388-doc legal collection, 2026-11-19: 30 of 31 context chunks mandatory, unrelated
+    # statutes (取保候审, 契税) filling the tail (neo outputs/meinrag-version-error-20261119).
+    # 0 = no limit, today's behaviour; set per deployment after the acceptance run.
+    per_doc_coverage_max_scope: int = 0
     # Per-doc coverage on /search (retrieve-only). Coverage exists for ask-AI
     # answer comprehensiveness; agent/MCP consumers rank raw chunks themselves,
     # and on large collection scopes coverage enumerates every member doc per
